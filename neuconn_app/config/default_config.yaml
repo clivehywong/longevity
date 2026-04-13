@@ -1,20 +1,38 @@
 # NeuConn Default Configuration
-# This is a template - copy to ~/neuconn_projects/<project_name>.yaml
+# The runtime config facade derives most project paths from project_root.
+
+project_root: "~/neuconn_project"
 
 project:
   name: "My BIDS Project"
   description: "Neuroimaging study"
 
 paths:
-  # Local paths - edit these for your project
-  bids_dir: "/path/to/bids"
-  derivatives_dir: "/path/to/derivatives"
-  fmriprep_dir: "${derivatives_dir}/fmriprep"
-  qsiprep_dir: "${derivatives_dir}/qsiprep"
-  excluded_dir: "/path/to/bids_excluded"
-  atlases_dir: "/path/to/atlases"
-
-  # Working directories
+  project_root: "${project_root}"
+  bids_dir: "${project_root}/bids"
+  neuconn_app_dir: "${project_root}/neuconn_app"
+  derivatives_dir: "${project_root}/derivatives"
+  preprocessing_dir: "${derivatives_dir}/preprocessing"
+  fmriprep_dir: "${preprocessing_dir}/fmriprep"
+  legacy_fmriprep_dir: "${project_root}/fmriprep"
+  xcpd_dir: "${preprocessing_dir}/xcpd"
+  xcpd_fc_dir: "${xcpd_dir}/fc"
+  xcpd_ec_dir: "${xcpd_dir}/ec"
+  subject_level_dir: "${derivatives_dir}/subject_level"
+  subject_level_fc_dir: "${subject_level_dir}/fc"
+  subject_level_ec_dir: "${subject_level_dir}/ec"
+  group_level_dir: "${derivatives_dir}/group_level"
+  group_level_fc_dir: "${group_level_dir}/fc"
+  group_level_ec_dir: "${group_level_dir}/ec"
+  qc_dir: "${derivatives_dir}/qc"
+  fd_inspection_dir: "${qc_dir}/fd_inspection"
+  xcpd_fc_qc_dir: "${qc_dir}/xcpd_fc"
+  xcpd_ec_qc_dir: "${qc_dir}/xcpd_ec"
+  excluded_dir: "${project_root}/bids_excluded"
+  atlases_dir: "${project_root}/atlases"
+  atlas_resources_dir: "${project_root}/neuconn_app/resources"
+  roi_config_path: "${project_root}/neuconn_app/roi_config.json"
+  atlas_label_file: "${atlas_resources_dir}/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_label.txt"
   temp_dir: "/tmp/neuconn"
   cache_dir: "~/.cache/neuconn"
 
@@ -22,23 +40,26 @@ hpc:
   enabled: false
   host: "your-hpc-cluster.edu"
   user: "username"
-  ssh_key: null  # Use ssh-agent if null
+  ssh_key: null
 
   remote_paths:
     base: "/home/username/project"
     bids: "${base}/bids"
-    fmriprep: "${base}/fmriprep"
+    fmriprep: "${base}/derivatives/preprocessing/fmriprep"
+    xcpd_fc: "${base}/derivatives/preprocessing/xcpd/fc"
+    xcpd_ec: "${base}/derivatives/preprocessing/xcpd/ec"
     work: "${base}/work"
 
   singularity_images:
-    fmriprep: "/path/to/fmriprep-25.2.5.simg"
+    fmriprep: "/path/to/fmriprep.sif"
+    xcp_d: "~/software/xcp_d.sif"
     fmripost_aroma: "/path/to/fmripost-aroma.sif"
-    qsiprep: "/path/to/qsiprep-1.1.1.sif"
-    qsirecon: "/path/to/qsirecon-1.2.0.sif"
+    qsiprep: "/path/to/qsiprep.sif"
+    qsirecon: "/path/to/qsirecon.sif"
     freesurfer_license: "/path/to/license.txt"
 
   transfer:
-    modalities: ["anat", "fmap", "func"]  # For fMRIPrep (exclude dwi)
+    modalities: ["anat", "fmap", "func"]
     cleanup_after_download: true
 
   slurm:
@@ -48,7 +69,7 @@ hpc:
     default_time: "24:00:00"
     max_concurrent_jobs: 4
     batch_size: 4
-    poll_interval: 300  # seconds
+    poll_interval: 300
 
 fmriprep:
   version: "25.2.5"
@@ -61,60 +82,90 @@ fmriprep:
     - "--subject-anatomical-reference unbiased"
     - "--skip-bids-validation"
     - "--ignore slicetiming"
+  legacy_symlink: true
 
-qsiprep:
-  version: "1.1.1"
-  output_resolution: 1.5
-  distortion_correction: "fieldmap"  # or "rpe" or "none"
-  denoising:
-    - "mppca"
-    - "gibbs"
+xcpd:
+  singularity_image_path: "~/software/xcp_d.sif"
+  singularity_bind_mounts:
+    - "${project_root}"
+    - "${bids_dir}"
+    - "${derivatives_dir}"
+    - "~/software"
+  fc:
+    mode: "none"
+    nuisance_regressors: "36P"
+    fd_thresh: 0.5
+    min_time: 100
+    motion_filter_type: "notch"
+    band_stop_min: 12
+    band_stop_max: 20
+    lower_bpf: 0.01
+    upper_bpf: 0.10
+    smoothing: 6.0
+    atlases: ["Schaefer200x17", "Tian"]
+    input_type: "fmriprep"
+    file_format: "nifti"
+    output_type: "censored"
+    output_layout: "bids"
+    report_output_level: "session"
+    output_run_wise_correlations: true
+  ec:
+    mode: "none"
+    nuisance_regressors: "36P"
+    fd_thresh: 0.0
+    min_time: 0
+    motion_filter_type: "notch"
+    band_stop_min: 12
+    band_stop_max: 20
+    lower_bpf: 0.01
+    upper_bpf: 0.10
+    smoothing: 6.0
+    atlases: ["Schaefer200x17", "Tian"]
+    input_type: "fmriprep"
+    file_format: "nifti"
+    output_type: "interpolated"
+    output_layout: "bids"
+    report_output_level: "session"
+    output_run_wise_correlations: true
 
-qsirecon:
-  version: "1.2.0"
-  recon_spec: "mrtrix_singleshell_ss3t_ACT-hsvs"
-  # Options: mrtrix_multishell_msmt, dsi_studio_gqi, dipy_mapmri
+subject_exclusion:
+  mean_fd_threshold: 0.5
+  min_scan_time: 100
 
-fsl_fix:
-  melodic:
-    dim: 25
-    tr: null  # Auto-detect from BIDS if null
-    highpass_filter: 2000
-  fix:
-    training_data: "HCP25_hp2000"
-    threshold: 20
+ec_methods:
+  pairwise_granger: true
+  joint_granger: true
+  rdcm: true
+  spectral_dcm: true
+  full_granger_matrix: false
+  granger_lag_order: 1
 
-fmripost_aroma:
-  strategy: "nonaggr"  # or "aggr"
+external_tools:
+  julia_executable: "julia"
+  matlab_executable: "matlab"
+  jgranger_toolbox_root: "/path/to/JGranger_ncvx"
+  rdcm_package: "RegressionDynamicCausalModeling"
+  sdcm_package: "SpectralDynamicCausalModeling"
+
+roi_config:
+  path: "${roi_config_path}"
+  label_file: "${atlas_label_file}"
+  atlas:
+    combined: "Schaefer2018_200Parcels_7Networks_Tian_S2"
+    n_cortical: 200
+    n_subcortical: 32
+    n_total: 232
 
 connectivity:
   local_measures:
-    tr: null  # Auto-detect from BIDS if null
-    bandpass: [0.01, 0.1]  # Hz
-    smoothing_fwhm: 6  # mm
-
+    tr: null
+    bandpass: [0.01, 0.1]
+    smoothing_fwhm: 6
   seed_based:
     atlases:
       - "${atlases_dir}/difumo256_4D.nii"
       - "${atlases_dir}/schaefer400_7net.nii"
-    correlation_method: "pearson"  # or "spearman"
-
-  effective:
-    regression_dcm:
-      julia_path: "/usr/bin/julia"  # Auto-install if not found
-      package: "RegressionDynamicCausalModeling"
-    mvar:
-      model_order: 1
-      criterion: "aic"  # or "bic"
-
-  graph_theory:
-    threshold_method: "proportional"  # or "absolute" or "statistical"
-    threshold_value: 0.1  # top 10% or r > 0.1
-    metrics:
-      - "degree"
-      - "clustering"
-      - "betweenness"
-      - "modularity"
+    correlation_method: "pearson"
 
 group_analysis:
   statistical_model: "value ~ Group * Time + Age + Sex + MeanFD + (1|Subject)"
@@ -122,10 +173,8 @@ group_analysis:
     - "FDR"
     - "FWE"
     - "uncorrected"
-  cluster_threshold: 50  # voxels
+  cluster_threshold: 50
   permutations: 5000
-
-  # QC profiles
   qc_profiles:
     strict:
       name: "Strict"
@@ -135,7 +184,6 @@ group_analysis:
       min_volumes: 400
       tsnr_threshold: 40
       exclude_if_missing: true
-
     moderate:
       name: "Moderate"
       description: "Most analyses"
@@ -144,7 +192,6 @@ group_analysis:
       min_volumes: 350
       tsnr_threshold: 30
       exclude_if_missing: false
-
     lenient:
       name: "Lenient"
       description: "Robust analyses"
@@ -154,7 +201,16 @@ group_analysis:
       tsnr_threshold: 20
       exclude_if_missing: false
 
+study_design:
+  group_variable: "Group"
+  time_variable: "Time"
+  session_pre: "ses-01"
+  session_post: "ses-02"
+  covariates: ["Age", "Sex"]
+  nuisance_regressors: ["MeanFD"]
+  primary_contrast: "Group × Time interaction"
+
 metadata:
-  group_file: null  # Path to participants.tsv with group assignments
-  sessions: null  # Auto-detect if null
-  modalities: null  # Auto-detect if null
+  group_file: null
+  sessions: null
+  modalities: null

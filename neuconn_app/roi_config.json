@@ -1,0 +1,81 @@
+{
+  "atlases": {
+    "combined": "Schaefer2018_200Parcels_7Networks_Tian_S2",
+    "label_file": "resources/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_label.txt",
+    "n_cortical": 200,
+    "n_subcortical": 32,
+    "n_total": 232
+  },
+  "rois": [
+    {
+      "id": "sensorimotor_L",
+      "label": "Left Sensorimotor (M1/S1)",
+      "type": "atlas_parcels",
+      "atlas": "Schaefer2018_200Parcels_7Networks_Tian_S2",
+      "network_filter": "SomMot",
+      "hemisphere": "LH",
+      "use_as_seed": true,
+      "priority": 1
+    },
+    {
+      "id": "sensorimotor_R",
+      "label": "Right Sensorimotor (M1/S1)",
+      "type": "atlas_parcels",
+      "atlas": "Schaefer2018_200Parcels_7Networks_Tian_S2",
+      "network_filter": "SomMot",
+      "hemisphere": "RH",
+      "use_as_seed": true,
+      "priority": 1
+    },
+    {
+      "id": "hippocampus_L",
+      "label": "Left Hippocampus (anterior + posterior)",
+      "type": "atlas_parcels",
+      "atlas": "Schaefer2018_200Parcels_7Networks_Tian_S2",
+      "parcel_labels": [
+        "aHIP-lh",
+        "pHIP-lh"
+      ],
+      "use_as_seed": true,
+      "priority": 1
+    },
+    {
+      "id": "hippocampus_R",
+      "label": "Right Hippocampus (anterior + posterior)",
+      "type": "atlas_parcels",
+      "atlas": "Schaefer2018_200Parcels_7Networks_Tian_S2",
+      "parcel_labels": [
+        "aHIP-rh",
+        "pHIP-rh"
+      ],
+      "use_as_seed": true,
+      "priority": 1
+    },
+    {
+      "id": "dlpfc_L",
+      "label": "Left DLPFC",
+      "type": "mni_sphere",
+      "mni_coords": [
+        -44,
+        36,
+        20
+      ],
+      "radius_mm": 6,
+      "use_as_seed": true,
+      "priority": 1
+    },
+    {
+      "id": "dlpfc_R",
+      "label": "Right DLPFC",
+      "type": "mni_sphere",
+      "mni_coords": [
+        44,
+        36,
+        20
+      ],
+      "radius_mm": 6,
+      "use_as_seed": true,
+      "priority": 1
+    }
+  ]
+}

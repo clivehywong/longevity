@@ -15,6 +15,8 @@ Implementation: Phase 1
 import streamlit as st
 from pathlib import Path
 from typing import Dict, Any, Tuple, List
+import json
+import matplotlib.pyplot as plt
 import yaml
 import copy
 import os
@@ -23,6 +25,7 @@ import os
 def render():
     """Main settings page render function."""
     from utils.config import load_config, save_config, merge_configs
+    from utils.roi_config import atlas_label_names, load_roi_config, save_roi_config
 
     st.title("Settings")
 
@@ -40,11 +43,12 @@ def render():
     config = st.session_state.settings_config
 
     # Create tabs for organization
-    tab_project, tab_paths, tab_hpc, tab_analysis, tab_qc, tab_actions = st.tabs([
+    tab_project, tab_paths, tab_hpc, tab_analysis, tab_roi, tab_qc, tab_actions = st.tabs([
         "Project",
         "Paths",
         "HPC Settings",
         "Analysis Parameters",
+        "ROI Config",
         "QC Profiles",
         "Import/Export"
     ])
@@ -63,6 +67,9 @@ def render():
 
     with tab_analysis:
         changes_made |= render_analysis_settings(config)
+
+    with tab_roi:
+        changes_made |= render_roi_configuration(config)
 
     with tab_qc:
         changes_made |= render_qc_profiles(config)
@@ -162,55 +169,40 @@ def render_path_settings(config: Dict) -> bool:
         config['paths'] = {}
 
     paths = config['paths']
-
-    # Define path fields with descriptions
-    path_fields = [
-        ('bids_dir', 'BIDS Directory', 'Root directory containing BIDS-formatted data'),
-        ('derivatives_dir', 'Derivatives Directory', 'Output directory for preprocessing results'),
-        ('fmriprep_dir', 'fMRIPrep Directory', 'fMRIPrep output location (can use ${derivatives_dir})'),
-        ('qsiprep_dir', 'QSIPrep Directory', 'QSIPrep output location (can use ${derivatives_dir})'),
-        ('excluded_dir', 'Excluded Scans Directory', 'Directory for excluded/problematic scans'),
-        ('atlases_dir', 'Atlases Directory', 'Brain atlas files (Schaefer, DiFuMo, etc.)'),
-        ('temp_dir', 'Temporary Directory', 'Working directory for intermediate files'),
-        ('cache_dir', 'Cache Directory', 'Cache for processed images and data'),
-    ]
+    current_project_root = config.get('project_root', paths.get('project_root', ''))
 
     with st.form("path_settings_form"):
-        new_values = {}
+        new_project_root = st.text_input(
+            "Project Root",
+            value=current_project_root,
+            help="Single source of truth for all NeuConn project paths"
+        )
+        st.caption("Derived directories are regenerated from Project Root by the config facade.")
 
-        for key, label, help_text in path_fields:
-            col1, col2 = st.columns([5, 1])
+        derived_keys = [
+            ('bids_dir', 'BIDS Directory'),
+            ('derivatives_dir', 'Derivatives Directory'),
+            ('fmriprep_dir', 'fMRIPrep Directory'),
+            ('xcpd_fc_dir', 'XCP-D FC Directory'),
+            ('xcpd_ec_dir', 'XCP-D EC Directory'),
+            ('subject_level_dir', 'Subject-Level Derivatives'),
+            ('group_level_dir', 'Group-Level Derivatives'),
+            ('qc_dir', 'QC Directory'),
+            ('excluded_dir', 'Excluded Scans Directory'),
+            ('atlases_dir', 'Atlases Directory'),
+            ('roi_config_path', 'ROI Config'),
+            ('atlas_label_file', 'Combined Atlas Label File'),
+        ]
 
-            current_value = paths.get(key, '')
-
-            with col1:
-                new_values[key] = st.text_input(
-                    label,
-                    value=current_value,
-                    help=help_text,
-                    key=f"path_{key}"
-                )
-
-            with col2:
-                # Validation indicator
-                is_valid, msg = validate_path(current_value)
-                if is_valid:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if "variable" in msg:
-                        st.markdown("**~**")
-                    else:
-                        st.markdown("**OK**")
-                else:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown("**X**")
+        for key, label in derived_keys:
+            st.text_input(label, value=paths.get(key, ''), disabled=True, key=f"derived_{key}")
 
         if st.form_submit_button("Apply Path Settings"):
-            for key, _, _ in path_fields:
-                if new_values[key] != paths.get(key, ''):
-                    paths[key] = new_values[key]
-                    changes = True
+            if new_project_root != current_project_root:
+                config['project_root'] = new_project_root
+                changes = True
             if changes:
-                st.success("Path settings updated (remember to save)")
+                st.success("Project root updated. Save configuration to persist the new derived layout.")
 
     # Validate BIDS directory
     st.markdown("---")
@@ -356,6 +348,7 @@ def render_hpc_settings(config: Dict) -> bool:
         with st.form("hpc_singularity_form"):
             simg_fields = [
                 ('fmriprep', 'fMRIPrep Image', 'Path to fMRIPrep .simg/.sif'),
+                ('xcp_d', 'XCP-D Image', 'Path to XCP-D .sif'),
                 ('fmripost_aroma', 'fMRIPost-AROMA Image', 'Path to fMRIPost-AROMA .sif'),
                 ('qsiprep', 'QSIPrep Image', 'Path to QSIPrep .sif'),
                 ('qsirecon', 'QSIRecon Image', 'Path to QSIRecon .sif'),
@@ -722,7 +715,353 @@ def render_analysis_settings(config: Dict) -> bool:
                 if changes:
                     st.success("Group analysis settings updated")
 
+    with st.expander("XCP-D Pipeline Settings"):
+        if 'xcpd' not in config:
+            config['xcpd'] = {}
+        xcpd = config['xcpd']
+
+        for pipeline_name in ('fc', 'ec'):
+            pipeline = xcpd.setdefault(pipeline_name, {})
+            with st.form(f"xcpd_{pipeline_name}_form"):
+                st.markdown(f"**{pipeline_name.upper()} pipeline**")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    new_fd = st.number_input(
+                        f"{pipeline_name.upper()} FD threshold",
+                        min_value=0.0,
+                        max_value=2.0,
+                        value=float(pipeline.get('fd_thresh', 0.5 if pipeline_name == 'fc' else 0.0)),
+                        step=0.05,
+                        key=f"xcpd_{pipeline_name}_fd",
+                    )
+                    new_min_time = st.number_input(
+                        f"{pipeline_name.upper()} minimum time (s)",
+                        min_value=0,
+                        max_value=2000,
+                        value=int(pipeline.get('min_time', 100 if pipeline_name == 'fc' else 0)),
+                        step=10,
+                        key=f"xcpd_{pipeline_name}_min_time",
+                    )
+                    new_output_type = st.selectbox(
+                        f"{pipeline_name.upper()} output type",
+                        options=["censored", "interpolated", "auto"],
+                        index=["censored", "interpolated", "auto"].index(pipeline.get('output_type', 'censored' if pipeline_name == 'fc' else 'interpolated')),
+                        key=f"xcpd_{pipeline_name}_output_type",
+                    )
+
+                with col2:
+                    new_smoothing = st.number_input(
+                        f"{pipeline_name.upper()} smoothing (mm)",
+                        min_value=0.0,
+                        max_value=20.0,
+                        value=float(pipeline.get('smoothing', 6.0)),
+                        step=0.5,
+                        key=f"xcpd_{pipeline_name}_smoothing",
+                    )
+                    new_low = st.number_input(
+                        f"{pipeline_name.upper()} lower BPF",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=float(pipeline.get('lower_bpf', 0.01)),
+                        step=0.01,
+                        format="%.2f",
+                        key=f"xcpd_{pipeline_name}_low",
+                    )
+                    new_high = st.number_input(
+                        f"{pipeline_name.upper()} upper BPF",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=float(pipeline.get('upper_bpf', 0.10)),
+                        step=0.01,
+                        format="%.2f",
+                        key=f"xcpd_{pipeline_name}_high",
+                    )
+
+                atlases_value = ", ".join(pipeline.get('atlases', ['Schaefer200x17', 'Tian']))
+                new_atlases = st.text_input(
+                    f"{pipeline_name.upper()} atlases (comma-separated)",
+                    value=atlases_value,
+                    key=f"xcpd_{pipeline_name}_atlases",
+                )
+
+                if st.form_submit_button(f"Apply {pipeline_name.upper()} XCP-D Settings"):
+                    updates = {
+                        'fd_thresh': new_fd,
+                        'min_time': new_min_time,
+                        'output_type': new_output_type,
+                        'smoothing': new_smoothing,
+                        'lower_bpf': new_low,
+                        'upper_bpf': new_high,
+                        'atlases': [value.strip() for value in new_atlases.split(',') if value.strip()],
+                    }
+                    for key, value in updates.items():
+                        if value != pipeline.get(key):
+                            pipeline[key] = value
+                            changes = True
+                    if changes:
+                        st.warning("Changing this parameter will require re-running XCP-D. Proceed?")
+                        st.success(f"{pipeline_name.upper()} XCP-D settings updated")
+
+    with st.expander("External Tools"):
+        tools = config.setdefault('external_tools', {})
+        with st.form("external_tools_form"):
+            julia_exec = st.text_input("Julia executable", value=tools.get('julia_executable', 'julia'))
+            matlab_exec = st.text_input("MATLAB executable", value=tools.get('matlab_executable', 'matlab'))
+            jgranger_root = st.text_input("JGranger_ncvx toolbox root", value=tools.get('jgranger_toolbox_root', ''))
+            rdcm_pkg = st.text_input("rDCM Julia package", value=tools.get('rdcm_package', 'RegressionDynamicCausalModeling'))
+            sdcm_pkg = st.text_input("Spectral DCM Julia package", value=tools.get('sdcm_package', 'SpectralDynamicCausalModeling'))
+
+            if st.form_submit_button("Apply External Tool Settings"):
+                updates = {
+                    'julia_executable': julia_exec,
+                    'matlab_executable': matlab_exec,
+                    'jgranger_toolbox_root': jgranger_root,
+                    'rdcm_package': rdcm_pkg,
+                    'sdcm_package': sdcm_pkg,
+                }
+                for key, value in updates.items():
+                    if value != tools.get(key):
+                        tools[key] = value
+                        changes = True
+                if changes:
+                    st.success("External tool settings updated")
+
+    with st.expander("Effective Connectivity Methods"):
+        ec_methods = config.setdefault('ec_methods', {})
+        with st.form("ec_methods_form"):
+            pairwise = st.checkbox("Enable pairwise Granger", value=ec_methods.get('pairwise_granger', True))
+            joint = st.checkbox("Enable joint Granger (MATLAB)", value=ec_methods.get('joint_granger', True))
+            rdcm = st.checkbox("Enable rDCM (Julia)", value=ec_methods.get('rdcm', True))
+            sdcm = st.checkbox("Enable spectral DCM (Julia)", value=ec_methods.get('spectral_dcm', True))
+            full_matrix = st.checkbox("Enable full parcel-wise Granger matrix", value=ec_methods.get('full_granger_matrix', False))
+            lag_order = st.number_input("Granger lag order", min_value=1, max_value=10, value=int(ec_methods.get('granger_lag_order', 1)))
+
+            if st.form_submit_button("Apply EC Method Settings"):
+                updates = {
+                    'pairwise_granger': pairwise,
+                    'joint_granger': joint,
+                    'rdcm': rdcm,
+                    'spectral_dcm': sdcm,
+                    'full_granger_matrix': full_matrix,
+                    'granger_lag_order': lag_order,
+                }
+                for key, value in updates.items():
+                    if value != ec_methods.get(key):
+                        ec_methods[key] = value
+                        changes = True
+                if changes:
+                    st.success("Effective connectivity method settings updated")
+
+    with st.expander("Study Design"):
+        study_design = config.setdefault('study_design', {})
+        with st.form("study_design_form"):
+            group_var = st.text_input("Group variable", value=study_design.get('group_variable', 'Group'))
+            time_var = st.text_input("Time variable", value=study_design.get('time_variable', 'Time'))
+            session_pre = st.text_input("Pre session label", value=study_design.get('session_pre', 'ses-01'))
+            session_post = st.text_input("Post session label", value=study_design.get('session_post', 'ses-02'))
+            covariates = st.text_input(
+                "Covariates (comma-separated)",
+                value=", ".join(study_design.get('covariates', ['Age', 'Sex']))
+            )
+
+            if st.form_submit_button("Apply Study Design Settings"):
+                updates = {
+                    'group_variable': group_var,
+                    'time_variable': time_var,
+                    'session_pre': session_pre,
+                    'session_post': session_post,
+                    'covariates': [value.strip() for value in covariates.split(',') if value.strip()],
+                }
+                for key, value in updates.items():
+                    if value != study_design.get(key):
+                        study_design[key] = value
+                        changes = True
+                if changes:
+                    st.success("Study design settings updated")
+
     return changes
+
+
+def render_roi_configuration(config: Dict) -> bool:
+    """Render ROI configuration CRUD UI."""
+    from utils.roi_config import atlas_label_names, load_roi_config, save_roi_config
+
+    st.subheader("ROI Configuration")
+    changes = False
+
+    roi_config_path = Path(config.get('roi_config', {}).get('path', config.get('paths', {}).get('roi_config_path', '')))
+    label_file = Path(config.get('roi_config', {}).get('label_file', config.get('paths', {}).get('atlas_label_file', '')))
+
+    if not roi_config_path.exists():
+        st.error(f"ROI config not found: {roi_config_path}")
+        return False
+
+    roi_config = load_roi_config(roi_config_path)
+    labels = atlas_label_names(label_file) if label_file.exists() else []
+    rois = roi_config.get('rois', [])
+
+    st.caption(f"Editing ROI file: `{roi_config_path}`")
+    st.caption(f"Atlas labels loaded: {len(labels)}")
+
+    if rois:
+        table = []
+        for roi in rois:
+            table.append({
+                "id": roi.get("id"),
+                "label": roi.get("label"),
+                "type": roi.get("type"),
+                "use_as_seed": roi.get("use_as_seed", False),
+                "priority": roi.get("priority", 3),
+            })
+        st.dataframe(table, use_container_width=True, hide_index=True)
+
+    for idx, roi in enumerate(rois):
+        with st.expander(f"{roi.get('label', roi.get('id'))} ({roi.get('type')})"):
+            with st.form(f"roi_edit_{idx}"):
+                roi["label"] = st.text_input("Label", value=roi.get("label", ""))
+                roi["type"] = st.selectbox(
+                    "ROI Type",
+                    options=["atlas_parcels", "mni_sphere", "nifti_mask"],
+                    index=["atlas_parcels", "mni_sphere", "nifti_mask"].index(roi.get("type", "atlas_parcels")),
+                )
+                roi["use_as_seed"] = st.checkbox("Use as seed", value=roi.get("use_as_seed", False))
+                roi["priority"] = st.selectbox("Priority", options=[1, 2, 3], index=[1, 2, 3].index(roi.get("priority", 3)))
+
+                if roi["type"] == "atlas_parcels":
+                    existing = roi.get("parcel_labels", [])
+                    roi["parcel_labels"] = st.multiselect(
+                        "Parcel labels",
+                        options=labels,
+                        default=[label for label in existing if label in labels],
+                        key=f"parcel_labels_{idx}",
+                    )
+                    roi["network_filter"] = st.text_input("Network filter", value=roi.get("network_filter", ""))
+                    roi["hemisphere"] = st.selectbox(
+                        "Hemisphere",
+                        options=["", "LH", "RH"],
+                        index=["", "LH", "RH"].index(roi.get("hemisphere", "")) if roi.get("hemisphere", "") in ("", "LH", "RH") else 0,
+                    )
+                elif roi["type"] == "mni_sphere":
+                    coords = roi.get("mni_coords", [-44, 36, 20])
+                    roi["mni_coords"] = [
+                        st.number_input("X", value=int(coords[0]), key=f"x_{idx}"),
+                        st.number_input("Y", value=int(coords[1]), key=f"y_{idx}"),
+                        st.number_input("Z", value=int(coords[2]), key=f"z_{idx}"),
+                    ]
+                    roi["radius_mm"] = st.number_input("Radius (mm)", min_value=1, max_value=20, value=int(roi.get("radius_mm", 6)))
+                else:
+                    roi["mask_path"] = st.text_input("Mask path", value=roi.get("mask_path", ""))
+
+                col_save, col_delete = st.columns(2)
+                with col_save:
+                    save_clicked = st.form_submit_button("Save ROI")
+                with col_delete:
+                    delete_clicked = st.form_submit_button("Delete ROI")
+
+                if save_clicked:
+                    save_roi_config(roi_config, roi_config_path)
+                    changes = True
+                    st.success("ROI saved")
+                if delete_clicked:
+                    del rois[idx]
+                    save_roi_config(roi_config, roi_config_path)
+                    changes = True
+                    st.rerun()
+
+    st.markdown("---")
+    with st.form("add_roi_form"):
+        st.markdown("**Add New ROI**")
+        new_id = st.text_input("ROI ID")
+        new_label = st.text_input("Display label")
+        new_type = st.selectbox("Definition type", options=["atlas_parcels", "mni_sphere", "nifti_mask"])
+        use_as_seed = st.checkbox("Use as seed", value=True)
+        priority = st.selectbox("Priority", options=[1, 2, 3], index=0)
+
+        new_roi = {
+            "id": new_id,
+            "label": new_label,
+            "type": new_type,
+            "use_as_seed": use_as_seed,
+            "priority": priority,
+        }
+        if new_type == "atlas_parcels":
+            new_roi["parcel_labels"] = st.multiselect("Parcel labels", options=labels, key="new_roi_labels")
+            new_roi["network_filter"] = st.text_input("Network filter", key="new_roi_network")
+            new_roi["hemisphere"] = st.selectbox("Hemisphere", options=["", "LH", "RH"], key="new_roi_hemi")
+        elif new_type == "mni_sphere":
+            new_roi["mni_coords"] = [
+                st.number_input("X", value=-44, key="new_roi_x"),
+                st.number_input("Y", value=36, key="new_roi_y"),
+                st.number_input("Z", value=20, key="new_roi_z"),
+            ]
+            new_roi["radius_mm"] = st.number_input("Radius", min_value=1, max_value=20, value=6, key="new_roi_radius")
+        else:
+            new_roi["mask_path"] = st.text_input("Mask path", key="new_roi_mask")
+
+        if st.form_submit_button("Add ROI"):
+            if not new_id:
+                st.error("ROI ID is required")
+            elif any(roi.get("id") == new_id for roi in rois):
+                st.error("ROI ID already exists")
+            else:
+                rois.append(new_roi)
+                save_roi_config(roi_config, roi_config_path)
+                changes = True
+                st.success("ROI added")
+                st.rerun()
+
+    export_json = json.dumps(roi_config, indent=2)
+    st.download_button(
+        "Export roi_config.json",
+        data=export_json,
+        file_name="roi_config.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+
+    imported = st.file_uploader("Import ROI config", type=["json"], accept_multiple_files=False)
+    if imported is not None:
+        imported_config = json.loads(imported.getvalue().decode("utf-8"))
+        save_roi_config(imported_config, roi_config_path)
+        st.success("ROI config imported. Reload the page to edit it.")
+
+    st.markdown("---")
+    st.markdown("**ROI Preview**")
+    render_roi_preview(rois)
+
+    return changes
+
+
+def render_roi_preview(rois: List[Dict[str, Any]]) -> None:
+    """Show a lightweight MNI preview for sphere ROIs."""
+    sphere_rois = [roi for roi in rois if roi.get("type") == "mni_sphere" and roi.get("mni_coords")]
+    atlas_rois = [roi for roi in rois if roi.get("type") == "atlas_parcels"]
+    mask_rois = [roi for roi in rois if roi.get("type") == "nifti_mask"]
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Sphere ROIs", len(sphere_rois))
+    with col2:
+        st.metric("Atlas parcel ROIs", len(atlas_rois))
+    with col3:
+        st.metric("Mask ROIs", len(mask_rois))
+
+    if sphere_rois:
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+        projections = [("Sagittal", 0, 1), ("Coronal", 1, 2), ("Axial", 0, 2)]
+        for ax, (title, x_idx, y_idx) in zip(axes, projections):
+            for roi in sphere_rois:
+                coords = roi["mni_coords"]
+                ax.scatter(coords[x_idx], coords[y_idx], label=roi["id"])
+                ax.text(coords[x_idx], coords[y_idx], roi["id"], fontsize=8)
+            ax.set_title(title)
+            ax.axhline(0, color="lightgray", linewidth=1)
+            ax.axvline(0, color="lightgray", linewidth=1)
+        fig.tight_layout()
+        st.pyplot(fig)
+    else:
+        st.caption("Add one or more MNI sphere ROIs to preview them in MNI coordinate space.")
 
 
 def render_qc_profiles(config: Dict) -> bool:

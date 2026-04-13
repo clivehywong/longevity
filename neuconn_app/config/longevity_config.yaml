@@ -1,17 +1,35 @@
-# NeuConn Configuration - Longevity Study
-# HKBU longitudinal walking intervention, fMRI + dMRI
+project_root: "/home/clivewong/proj/longevity"
 
 project:
-  name: "Longevity Walking Intervention"
-  description: "Longitudinal resting-state fMRI study, HKBU 3T Prisma"
+  name: "Longevity Study"
+  description: "Ageing cohort walking intervention with resting-state fMRI"
 
 paths:
-  bids_dir: "/home/clivewong/proj/longevity/bids"
-  derivatives_dir: "/home/clivewong/proj/longevity"
-  fmriprep_dir: "/home/clivewong/proj/longevity/fmriprep"
-  qsiprep_dir: "/home/clivewong/proj/longevity/qsiprep"
-  excluded_dir: "/home/clivewong/proj/longevity/bids_excluded"
-  atlases_dir: "/home/clivewong/proj/longevity/atlases"
+  project_root: "${project_root}"
+  bids_dir: "${project_root}/bids"
+  neuconn_app_dir: "${project_root}/neuconn_app"
+  derivatives_dir: "${project_root}/derivatives"
+  preprocessing_dir: "${derivatives_dir}/preprocessing"
+  fmriprep_dir: "${preprocessing_dir}/fmriprep"
+  legacy_fmriprep_dir: "${project_root}/fmriprep"
+  xcpd_dir: "${preprocessing_dir}/xcpd"
+  xcpd_fc_dir: "${xcpd_dir}/fc"
+  xcpd_ec_dir: "${xcpd_dir}/ec"
+  subject_level_dir: "${derivatives_dir}/subject_level"
+  subject_level_fc_dir: "${subject_level_dir}/fc"
+  subject_level_ec_dir: "${subject_level_dir}/ec"
+  group_level_dir: "${derivatives_dir}/group_level"
+  group_level_fc_dir: "${group_level_dir}/fc"
+  group_level_ec_dir: "${group_level_dir}/ec"
+  qc_dir: "${derivatives_dir}/qc"
+  fd_inspection_dir: "${qc_dir}/fd_inspection"
+  xcpd_fc_qc_dir: "${qc_dir}/xcpd_fc"
+  xcpd_ec_qc_dir: "${qc_dir}/xcpd_ec"
+  excluded_dir: "${project_root}/bids_excluded"
+  atlases_dir: "${project_root}/atlases"
+  atlas_resources_dir: "${project_root}/neuconn_app/resources"
+  roi_config_path: "${project_root}/neuconn_app/roi_config.json"
+  atlas_label_file: "${atlas_resources_dir}/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_label.txt"
   temp_dir: "/tmp/neuconn"
   cache_dir: "~/.cache/neuconn"
 
@@ -19,22 +37,21 @@ hpc:
   enabled: true
   host: "hpclogin1.eduhk.hk"
   user: "clivewong"
-  ssh_key: null  # Uses ssh-agent
-
+  ssh_key: null
   remote_paths:
     base: "/home/clivewong/proj/long"
     bids: "${base}/bids"
-    fmriprep: "${base}/fmriprep"
+    fmriprep: "${base}/derivatives/preprocessing/fmriprep"
+    xcpd_fc: "${base}/derivatives/preprocessing/xcpd/fc"
+    xcpd_ec: "${base}/derivatives/preprocessing/xcpd/ec"
     work: "${base}/work"
-
   singularity_images:
     fmriprep: "/home/clivewong/software/fmriprep-25.1.4.simg"
+    xcp_d: "/home/clivewong/software/xcp_d.sif"
     freesurfer_license: "/home/clivewong/freesurfer/license.txt"
-
   transfer:
     modalities: ["anat", "fmap", "func"]
     cleanup_after_download: true
-
   slurm:
     partition: "shared_cpu"
     default_cpus: 8
@@ -55,22 +72,85 @@ fmriprep:
     - "--subject-anatomical-reference unbiased"
     - "--skip-bids-validation"
     - "--ignore slicetiming"
+  legacy_symlink: true
 
-fsl_fix:
-  melodic:
-    dim: 25
-    tr: 0.8
-    highpass_filter: 2000
-  fix:
-    training_data: "HCP25_hp2000"
-    threshold: 20
+xcpd:
+  singularity_image_path: "/home/clivewong/software/xcp_d.sif"
+  singularity_bind_mounts:
+    - "/home/clivewong/proj/longevity"
+    - "/home/clivewong/proj/longevity/bids"
+    - "/home/clivewong/proj/longevity/derivatives"
+    - "/home/clivewong/software"
+  fc:
+    mode: "none"
+    nuisance_regressors: "36P"
+    fd_thresh: 0.5
+    min_time: 100
+    motion_filter_type: "notch"
+    band_stop_min: 12
+    band_stop_max: 20
+    lower_bpf: 0.01
+    upper_bpf: 0.10
+    smoothing: 6.0
+    atlases: ["Schaefer200x17", "Tian"]
+    input_type: "fmriprep"
+    file_format: "nifti"
+    output_type: "censored"
+    output_layout: "bids"
+    report_output_level: "session"
+    output_run_wise_correlations: true
+  ec:
+    mode: "none"
+    nuisance_regressors: "36P"
+    fd_thresh: 0.0
+    min_time: 0
+    motion_filter_type: "notch"
+    band_stop_min: 12
+    band_stop_max: 20
+    lower_bpf: 0.01
+    upper_bpf: 0.10
+    smoothing: 6.0
+    atlases: ["Schaefer200x17", "Tian"]
+    input_type: "fmriprep"
+    file_format: "nifti"
+    output_type: "interpolated"
+    output_layout: "bids"
+    report_output_level: "session"
+    output_run_wise_correlations: true
+
+subject_exclusion:
+  mean_fd_threshold: 0.5
+  min_scan_time: 100
+
+ec_methods:
+  pairwise_granger: true
+  joint_granger: true
+  rdcm: true
+  spectral_dcm: true
+  full_granger_matrix: false
+  granger_lag_order: 1
+
+external_tools:
+  julia_executable: "julia"
+  matlab_executable: "matlab"
+  jgranger_toolbox_root: ""
+  rdcm_package: "RegressionDynamicCausalModeling"
+  sdcm_package: "SpectralDynamicCausalModeling"
+
+roi_config:
+  path: "${roi_config_path}"
+  label_file: "${atlas_label_file}"
+  atlas:
+    combined: "Schaefer2018_200Parcels_7Networks_Tian_S2"
+    n_cortical: 200
+    n_subcortical: 32
+    n_total: 232
 
 connectivity:
   local_measures:
     tr: 0.8
     bandpass: [0.01, 0.1]
     smoothing_fwhm: 6
-
   seed_based:
     atlases:
       - "${atlases_dir}/difumo256_4D.nii"
@@ -82,6 +162,15 @@ group_analysis:
   correction_methods: ["FDR", "FWE", "uncorrected"]
   cluster_threshold: 50
   permutations: 5000
+
+study_design:
+  group_variable: "Group"
+  time_variable: "Time"
+  session_pre: "ses-01"
+  session_post: "ses-02"
+  covariates: ["Age", "Sex"]
+  nuisance_regressors: ["MeanFD"]
+  primary_contrast: "Group × Time interaction"
 
 metadata:
   sessions: ["ses-01", "ses-02"]
