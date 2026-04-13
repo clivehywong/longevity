@@ -1,0 +1,12 @@
+.claude
+.neuconn
+bids
+bids_excluded
+derivatives
+fmriprep
+qa_images_full
+results
+atlases
+docs/archive
+validation_reports
+tools

@@ -1,0 +1,160 @@
+# NeuConn Default Configuration
+# This is a template - copy to ~/neuconn_projects/<project_name>.yaml
+
+project:
+  name: "My BIDS Project"
+  description: "Neuroimaging study"
+
+paths:
+  # Local paths - edit these for your project
+  bids_dir: "/path/to/bids"
+  derivatives_dir: "/path/to/derivatives"
+  fmriprep_dir: "${derivatives_dir}/fmriprep"
+  qsiprep_dir: "${derivatives_dir}/qsiprep"
+  excluded_dir: "/path/to/bids_excluded"
+  atlases_dir: "/path/to/atlases"
+
+  # Working directories
+  temp_dir: "/tmp/neuconn"
+  cache_dir: "~/.cache/neuconn"
+
+hpc:
+  enabled: false
+  host: "your-hpc-cluster.edu"
+  user: "username"
+  ssh_key: null  # Use ssh-agent if null
+
+  remote_paths:
+    base: "/home/username/project"
+    bids: "${base}/bids"
+    fmriprep: "${base}/fmriprep"
+    work: "${base}/work"
+
+  singularity_images:
+    fmriprep: "/path/to/fmriprep-25.2.5.simg"
+    fmripost_aroma: "/path/to/fmripost-aroma.sif"
+    qsiprep: "/path/to/qsiprep-1.1.1.sif"
+    qsirecon: "/path/to/qsirecon-1.2.0.sif"
+    freesurfer_license: "/path/to/license.txt"
+
+  transfer:
+    modalities: ["anat", "fmap", "func"]  # For fMRIPrep (exclude dwi)
+    cleanup_after_download: true
+
+  slurm:
+    partition: "shared_cpu"
+    default_cpus: 8
+    default_memory: "32GB"
+    default_time: "24:00:00"
+    max_concurrent_jobs: 4
+    batch_size: 4
+    poll_interval: 300  # seconds
+
+fmriprep:
+  version: "25.2.5"
+  output_spaces:
+    - "MNI152NLin2009cAsym:res-2"
+    - "MNI152NLin6Asym:res-2"
+    - "T1w"
+    - "fsnative"
+  flags:
+    - "--subject-anatomical-reference unbiased"
+    - "--skip-bids-validation"
+    - "--ignore slicetiming"
+
+qsiprep:
+  version: "1.1.1"
+  output_resolution: 1.5
+  distortion_correction: "fieldmap"  # or "rpe" or "none"
+  denoising:
+    - "mppca"
+    - "gibbs"
+
+qsirecon:
+  version: "1.2.0"
+  recon_spec: "mrtrix_singleshell_ss3t_ACT-hsvs"
+  # Options: mrtrix_multishell_msmt, dsi_studio_gqi, dipy_mapmri
+
+fsl_fix:
+  melodic:
+    dim: 25
+    tr: null  # Auto-detect from BIDS if null
+    highpass_filter: 2000
+  fix:
+    training_data: "HCP25_hp2000"
+    threshold: 20
+
+fmripost_aroma:
+  strategy: "nonaggr"  # or "aggr"
+
+connectivity:
+  local_measures:
+    tr: null  # Auto-detect from BIDS if null
+    bandpass: [0.01, 0.1]  # Hz
+    smoothing_fwhm: 6  # mm
+
+  seed_based:
+    atlases:
+      - "${atlases_dir}/difumo256_4D.nii"
+      - "${atlases_dir}/schaefer400_7net.nii"
+    correlation_method: "pearson"  # or "spearman"
+
+  effective:
+    regression_dcm:
+      julia_path: "/usr/bin/julia"  # Auto-install if not found
+      package: "RegressionDynamicCausalModeling"
+    mvar:
+      model_order: 1
+      criterion: "aic"  # or "bic"
+
+  graph_theory:
+    threshold_method: "proportional"  # or "absolute" or "statistical"
+    threshold_value: 0.1  # top 10% or r > 0.1
+    metrics:
+      - "degree"
+      - "clustering"
+      - "betweenness"
+      - "modularity"
+
+group_analysis:
+  statistical_model: "value ~ Group * Time + Age + Sex + MeanFD + (1|Subject)"
+  correction_methods:
+    - "FDR"
+    - "FWE"
+    - "uncorrected"
+  cluster_threshold: 50  # voxels
+  permutations: 5000
+
+  # QC profiles
+  qc_profiles:
+    strict:
+      name: "Strict"
+      description: "Motion-sensitive analyses"
+      fd_threshold: 0.3
+      fd_metric: "mean"
+      min_volumes: 400
+      tsnr_threshold: 40
+      exclude_if_missing: true
+
+    moderate:
+      name: "Moderate"
+      description: "Most analyses"
+      fd_threshold: 0.5
+      fd_metric: "mean"
+      min_volumes: 350
+      tsnr_threshold: 30
+      exclude_if_missing: false
+
+    lenient:
+      name: "Lenient"
+      description: "Robust analyses"
+      fd_threshold: 0.8
+      fd_metric: "mean"
+      min_volumes: 300
+      tsnr_threshold: 20
+      exclude_if_missing: false
+
+metadata:
+  group_file: null  # Path to participants.tsv with group assignments
+  sessions: null  # Auto-detect if null
+  modalities: null  # Auto-detect if null

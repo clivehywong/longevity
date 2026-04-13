@@ -1,0 +1,32 @@
+{
+  "sub-057_ses-02_run-01_T1w": {
+    "notes": "A few bright strips running through a few saggital slices",
+    "reviewer": "user",
+    "status": "\u274c Fail",
+    "timestamp": "2026-04-07T12:15:52.122413"
+  },
+  "sub-066_ses-02_rest_bold": {
+    "notes": "Missing Volume",
+    "reviewer": "user",
+    "status": "\u274c Fail",
+    "timestamp": "2026-04-11T21:26:23.987589"
+  },
+  "sub-068_ses-02_rest_bold": {
+    "notes": "Missing Volume",
+    "reviewer": "user",
+    "status": "\u274c Fail",
+    "timestamp": "2026-04-11T21:27:20.365435"
+  },
+  "sub-072_ses-02_rest_bold": {
+    "notes": "Missing Volume",
+    "reviewer": "user",
+    "status": "\u274c Fail",
+    "timestamp": "2026-04-11T21:29:32.376043"
+  },
+  "sub-077_ses-02_rest_bold": {
+    "notes": "Missing Volume",
+    "reviewer": "user",
+    "status": "\u274c Fail",
+    "timestamp": "2026-04-11T21:28:33.626644"
+  }
+}

@@ -1,0 +1,87 @@
+# NeuConn Configuration - Longevity Study
+# HKBU longitudinal walking intervention, fMRI + dMRI
+
+project:
+  name: "Longevity Walking Intervention"
+  description: "Longitudinal resting-state fMRI study, HKBU 3T Prisma"
+
+paths:
+  bids_dir: "/home/clivewong/proj/longevity/bids"
+  derivatives_dir: "/home/clivewong/proj/longevity"
+  fmriprep_dir: "/home/clivewong/proj/longevity/fmriprep"
+  qsiprep_dir: "/home/clivewong/proj/longevity/qsiprep"
+  excluded_dir: "/home/clivewong/proj/longevity/bids_excluded"
+  atlases_dir: "/home/clivewong/proj/longevity/atlases"
+  temp_dir: "/tmp/neuconn"
+  cache_dir: "~/.cache/neuconn"
+
+hpc:
+  enabled: true
+  host: "hpclogin1.eduhk.hk"
+  user: "clivewong"
+  ssh_key: null  # Uses ssh-agent
+
+  remote_paths:
+    base: "/home/clivewong/proj/long"
+    bids: "${base}/bids"
+    fmriprep: "${base}/fmriprep"
+    work: "${base}/work"
+
+  singularity_images:
+    fmriprep: "/home/clivewong/software/fmriprep-25.1.4.simg"
+    freesurfer_license: "/home/clivewong/freesurfer/license.txt"
+
+  transfer:
+    modalities: ["anat", "fmap", "func"]
+    cleanup_after_download: true
+
+  slurm:
+    partition: "shared_cpu"
+    default_cpus: 8
+    default_memory: "32GB"
+    default_time: "24:00:00"
+    max_concurrent_jobs: 4
+    batch_size: 4
+    poll_interval: 300
+
+fmriprep:
+  version: "25.1.4"
+  output_spaces:
+    - "MNI152NLin2009cAsym:res-2"
+    - "MNI152NLin6Asym:res-2"
+    - "T1w"
+    - "fsnative"
+  flags:
+    - "--subject-anatomical-reference unbiased"
+    - "--skip-bids-validation"
+    - "--ignore slicetiming"
+
+fsl_fix:
+  melodic:
+    dim: 25
+    tr: 0.8
+    highpass_filter: 2000
+  fix:
+    training_data: "HCP25_hp2000"
+    threshold: 20
+
+connectivity:
+  local_measures:
+    tr: 0.8
+    bandpass: [0.01, 0.1]
+    smoothing_fwhm: 6
+
+  seed_based:
+    atlases:
+      - "${atlases_dir}/difumo256_4D.nii"
+      - "${atlases_dir}/schaefer400_7net.nii"
+    correlation_method: "pearson"
+
+group_analysis:
+  statistical_model: "value ~ Group * Time + Age + Sex + MeanFD + (1|Subject)"
+  correction_methods: ["FDR", "FWE", "uncorrected"]
+  cluster_threshold: 50
+  permutations: 5000
+
+metadata:
+  sessions: ["ses-01", "ses-02"]
