@@ -75,6 +75,31 @@ def _clear_state_from_disk(config: Dict):
         pass
 
 
+def _recover_original_script(state: WorkflowState, config: Dict) -> Optional[str]:
+    """Recover the original submission script from the remote project directory."""
+    if state.original_script or not state.job_id or state.job_id == "reconciled":
+        return state.original_script
+
+    manager = None
+    try:
+        hpc_config = HPCConfig.from_config(config)
+        manager = HPCWorkflowManager(
+            hpc_config=hpc_config,
+            local_bids=config.get('paths', {}).get('bids_dir', ''),
+            local_output=config.get('paths', {}).get('fmriprep_dir', ''),
+        )
+        recovered_script = manager.load_submission_script()
+        if recovered_script:
+            state.original_script = recovered_script
+        return recovered_script
+    except Exception as e:
+        print(f"Warning: could not recover original SLURM script: {e}")
+        return None
+    finally:
+        if manager is not None:
+            manager.close_connection()
+
+
 def get_available_subjects(bids_dir: str, require_sessions: Optional[List[str]] = None) -> List[str]:
     """
     Get list of available subjects from BIDS directory.
@@ -1321,7 +1346,11 @@ def render_monitor(config: Dict):
 
 # Statuses eligible for restart
 _RESTARTABLE_STATUSES = {
-    JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMEOUT, JobStatus.NODE_FAIL,
+    JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMEOUT, JobStatus.NODE_FAIL, JobStatus.UNKNOWN,
+}
+
+_KILLABLE_STATUSES = {
+    JobStatus.RUNNING, JobStatus.PENDING, JobStatus.COMPLETING, JobStatus.UNKNOWN,
 }
 
 
@@ -1329,10 +1358,10 @@ def _render_kill_restart(state: WorkflowState, config: Dict):
     """Render kill & restart controls inside the monitor tab."""
     is_real_job = bool(state.job_id) and state.job_id != "reconciled"
 
-    running = [s for s in state.job_statuses if s.status == JobStatus.RUNNING]
+    killable = [s for s in state.job_statuses if s.status in _KILLABLE_STATUSES]
     restartable = [s for s in state.job_statuses if s.status in _RESTARTABLE_STATUSES]
 
-    if not running and not restartable:
+    if not killable and not restartable:
         return  # Nothing actionable — don't clutter the UI
 
     with st.expander("⚡ Kill & Restart Individual Tasks", expanded=False):
@@ -1341,19 +1370,23 @@ def _render_kill_restart(state: WorkflowState, config: Dict):
         # ── LEFT: Kill stuck tasks ───────────────────────────────
         with kill_col:
             st.markdown("**Kill Stuck Tasks**")
-            st.caption("For tasks showing RUNNING but no longer making progress.")
+            st.caption("For tasks still active in SLURM or stuck in an indeterminate state.")
 
-            if not running:
-                st.info("No running tasks.")
+            if not killable:
+                st.info("No actionable tasks to kill.")
             elif not is_real_job:
                 st.info("Cannot kill tasks for reconciled state.")
             else:
+                kill_options = {
+                    f"sub-{s.subject_id} ({s.status.value})": s.subject_id
+                    for s in killable
+                }
                 to_kill = st.multiselect(
                     "Select subjects to kill",
-                    options=[f"sub-{s.subject_id}" for s in running],
+                    options=list(kill_options.keys()),
                     key="kill_subject_select",
                 )
-                kill_ids = [s.lstrip("sub-") for s in to_kill]
+                kill_ids = [kill_options[label] for label in to_kill]
 
                 if st.button("Kill Selected", disabled=not to_kill, type="secondary", key="kill_btn"):
                     try:
@@ -1363,7 +1396,7 @@ def _render_kill_restart(state: WorkflowState, config: Dict):
                             local_bids=config.get('paths', {}).get('bids_dir', ''),
                             local_output=config.get('paths', {}).get('fmriprep_dir', ''),
                         )
-                        targets = [s for s in running if s.subject_id in kill_ids]
+                        targets = [s for s in killable if s.subject_id in kill_ids]
                         with st.spinner("Sending scancel..."):
                             results = manager.cancel_tasks(state.job_id, targets)
 
@@ -1391,30 +1424,43 @@ def _render_kill_restart(state: WorkflowState, config: Dict):
             elif not is_real_job:
                 st.info("Cannot restart from reconciled state.")
             else:
+                restart_options = {
+                    f"sub-{s.subject_id} ({s.status.value})": s.subject_id
+                    for s in restartable
+                }
+                restart_defaults = list(restart_options.keys())
                 to_restart = st.multiselect(
                     "Select subjects to restart",
-                    options=[f"sub-{s.subject_id}" for s in restartable],
-                    default=[f"sub-{s.subject_id}" for s in restartable],
+                    options=restart_defaults,
+                    default=restart_defaults,
                     key="restart_subject_select",
                 )
-                restart_ids = [s.lstrip("sub-") for s in to_restart]
+                restart_ids = [restart_options[label] for label in to_restart]
 
                 if st.button(
                     "Restart Selected", disabled=not to_restart,
                     type="primary", key="restart_btn"
                 ):
-                    if not state.original_script:
+                    original_script = _recover_original_script(state, config)
+                    if original_script:
+                        st.session_state.hpc_workflow_state = state
+                        _save_state_to_disk(state, config)
+
+                    if not original_script:
                         st.error(
-                            "Original SLURM script not stored in state — "
-                            "cannot auto-restart. Please re-submit the job manually."
+                            "Could not recover the original SLURM script from state or HPC. "
+                            "Please re-submit the job manually."
                         )
                     else:
-                        # Warn if any selected subjects are still running
-                        running_ids = {s.subject_id for s in running}
-                        overlap = [sid for sid in restart_ids if sid in running_ids]
+                        # Warn if any selected subjects are still active
+                        active_ids = {
+                            s.subject_id for s in state.job_statuses
+                            if s.status in {JobStatus.RUNNING, JobStatus.PENDING, JobStatus.COMPLETING}
+                        }
+                        overlap = [sid for sid in restart_ids if sid in active_ids]
                         if overlap:
                             st.warning(
-                                f"Subjects still RUNNING: {', '.join(overlap)}. "
+                                f"Subjects still active in SLURM: {', '.join(overlap)}. "
                                 "Kill them first to avoid output conflicts."
                             )
                         else:
@@ -1429,7 +1475,7 @@ def _render_kill_restart(state: WorkflowState, config: Dict):
                                 with st.spinner(f"Submitting restart wave {restart_index + 1}..."):
                                     new_job_id = manager.submit_restart_job(
                                         subjects=restart_ids,
-                                        original_script_content=state.original_script,
+                                        original_script_content=original_script,
                                         restart_index=restart_index,
                                     )
 
@@ -1631,7 +1677,11 @@ def render():
     if 'hpc_workflow_state' not in st.session_state:
         disk_state = _load_state_from_disk(config)
         if disk_state and disk_state.job_id:
+            script_was_missing = not disk_state.original_script
+            recovered_script = _recover_original_script(disk_state, config)
             st.session_state.hpc_workflow_state = disk_state
+            if script_was_missing and recovered_script:
+                _save_state_to_disk(disk_state, config)
             st.info(f"ℹ️ Restored previous job state: Job **{disk_state.job_id}** ({disk_state.current_step})")
 
     # Check HPC configuration
