@@ -66,8 +66,11 @@ class HPCConfig:
     remote_base: str = ""
     remote_bids: str = ""
     remote_fmriprep: str = ""
+    remote_xcpd_fc: str = ""
+    remote_xcpd_ec: str = ""
     remote_work: str = ""
     singularity_fmriprep: str = ""
+    singularity_xcpd: str = ""
     freesurfer_license: str = ""
     partition: str = "shared_cpu"
     cpus: int = 8
@@ -89,6 +92,8 @@ class HPCConfig:
         base = remote.get('base', '')
         bids = remote.get('bids', '').replace('${base}', base)
         fmriprep = remote.get('fmriprep', '').replace('${base}', base)
+        xcpd_fc = remote.get('xcpd_fc', '').replace('${base}', base)
+        xcpd_ec = remote.get('xcpd_ec', '').replace('${base}', base)
         work = remote.get('work', '').replace('${base}', base)
 
         return cls(
@@ -98,8 +103,11 @@ class HPCConfig:
             remote_base=base,
             remote_bids=bids,
             remote_fmriprep=fmriprep,
+            remote_xcpd_fc=xcpd_fc,
+            remote_xcpd_ec=xcpd_ec,
             remote_work=work,
             singularity_fmriprep=singularity.get('fmriprep', ''),
+            singularity_xcpd=singularity.get('xcp_d', ''),
             freesurfer_license=singularity.get('freesurfer_license', ''),
             partition=slurm.get('partition', 'shared_cpu'),
             cpus=slurm.get('default_cpus', 8),

@@ -28,6 +28,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.config import load_config
+from utils.pipeline_state import load_pipeline_state
 
 
 # Page configuration
@@ -62,6 +63,7 @@ def main():
 
     # Debug: Show config status
     st.sidebar.caption(f"📁 Project: {st.session_state.config.get('project', {}).get('name', 'Unknown')}")
+    render_pipeline_gate_summary(st.session_state.config)
 
     # Level 1: Main category
     category = st.sidebar.radio(
@@ -219,6 +221,8 @@ def render_data_qc():
 
 def render_fmri_analysis():
     """Render fMRI analysis pages."""
+    config = st.session_state.get("config", {})
+    state = load_pipeline_state(config) if config else {}
 
     # Level 2: Pipeline stage
     stage = st.sidebar.radio(
@@ -231,7 +235,14 @@ def render_fmri_analysis():
         # Level 3: Preprocessing tool
         tool = st.sidebar.selectbox(
             "Preprocessing:",
-            ["HPC Submit", "QC Reports", "FSL FIX", "fMRIPost-AROMA", "Denoising Comparison"]
+            [
+                "HPC Submit",
+                "QC Reports",
+                "XCP-D Pipeline",
+                "FSL FIX",
+                "fMRIPost-AROMA",
+                "Denoising Comparison",
+            ]
         )
 
         if tool == "HPC Submit":
@@ -243,22 +254,57 @@ def render_fmri_analysis():
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             module.render()
+        elif tool == "XCP-D Pipeline":
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "xcpd_pipeline",
+                Path(__file__).parent / "pages_fmri" / "preprocessing" / "06_xcpd_pipeline.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.render()
         else:
             st.title(f"🔧 fMRI Preprocessing - {tool}")
             st.info("🚧 Implementation coming in future phases")
 
     elif stage == "👤 Subject-Level":
+        qc_approved = bool(state.get("approvals", {}).get("qc_gate", {}).get("approved"))
+        if not qc_approved:
+            st.warning("Subject-level analysis is locked until the Post-XCP-D QC gate is approved.")
+
         # Level 3: Analysis type
         analysis = st.sidebar.selectbox(
             "Analysis:",
             ["Local Measures", "Seed Connectivity", "Effective Connectivity"]
         )
 
-        # All subject-level pages are stubs
-        st.title(f"👤 fMRI Subject-Level - {analysis}")
-        st.info("🚧 Implementation coming in Phases 7-11")
+        import importlib.util
+
+        if analysis == "Local Measures":
+            page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "01_local_measures.py"
+            module_name = "fmri_subject_local_measures"
+        elif analysis == "Seed Connectivity":
+            page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "02_seed_connectivity.py"
+            module_name = "fmri_subject_seed_connectivity"
+        else:
+            page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "03_effective_connectivity.py"
+            module_name = "fmri_subject_effective_connectivity"
+
+        spec = importlib.util.spec_from_file_location(module_name, page_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.render()
 
     elif stage == "👥 Group-Level":
+        qc_approved = bool(state.get("approvals", {}).get("qc_gate", {}).get("approved"))
+        subject_ready = state.get("steps", {}).get("subject_level", {}).get("status") == "completed"
+        if not qc_approved:
+            st.warning("Group-level analysis is locked until the Post-XCP-D QC gate is approved.")
+            return
+        if not subject_ready:
+            st.warning("Group-level analysis is locked until subject-level outputs are generated.")
+            return
+
         # Level 3: Analysis type
         analysis = st.sidebar.selectbox(
             "Analysis:",
@@ -298,6 +344,23 @@ def render_settings():
         st.error(f"Error loading Settings page: {e}")
         import traceback
         st.code(traceback.format_exc())
+
+
+def render_pipeline_gate_summary(config):
+    """Show compact pipeline gate state in the sidebar."""
+    if not config:
+        return
+
+    state = load_pipeline_state(config)
+    fd_gate = state.get("approvals", {}).get("fd_gate", {}).get("approved")
+    qc_gate = state.get("approvals", {}).get("qc_gate", {}).get("approved")
+    subject_status = state.get("steps", {}).get("subject_level", {}).get("status", "not_started")
+
+    st.sidebar.markdown("**Pipeline gates**")
+    st.sidebar.caption(f"{'🟢' if fd_gate else '🟠'} FD approval")
+    st.sidebar.caption(f"{'🟢' if qc_gate else '🟠'} QC approval")
+    st.sidebar.caption(f"{'🟢' if subject_status == 'completed' else '⚪'} Subject-level outputs")
+    st.sidebar.markdown("---")
 
 
 if __name__ == "__main__":
