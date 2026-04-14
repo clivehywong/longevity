@@ -178,7 +178,7 @@ def _default_xcpd_section() -> Dict[str, Any]:
         "lower_bpf": 0.01,
         "upper_bpf": 0.10,
         "smoothing": 6.0,
-        "atlases": ["Schaefer200x17", "Tian"],
+        "atlases": ["LongevitySchaefer200", "Tian"],
         "input_type": "fmriprep",
         "file_format": "nifti",
         "report_output_level": "session",

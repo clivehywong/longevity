@@ -12,3 +12,4 @@ validation_reports
 tools
 __pycache__/
 *.py[cod]
+atlases/xcpd_project_atlases/

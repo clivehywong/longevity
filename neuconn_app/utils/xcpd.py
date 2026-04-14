@@ -15,6 +15,13 @@ import subprocess
 
 from utils.pipeline_state import set_run_info, set_step_status, append_pipeline_log
 from utils.hpc import HPCConfig, HPCConnection
+from utils.xcpd_atlases import (
+    atlas_cli_dataset_args,
+    custom_xcpd_atlas_ids,
+    ensure_xcpd_atlas_dataset,
+    normalize_xcpd_atlas_selection,
+    remote_xcpd_atlas_dataset_path,
+)
 
 
 def _safe_disconnect(conn: Optional[HPCConnection]) -> None:
@@ -98,13 +105,16 @@ def build_xcpd_command(
     xcpd_config = config["xcpd"][pipeline_name]
     image_path = os.path.expanduser(config["xcpd"]["singularity_image_path"])
     bind_mounts = config["xcpd"].get("singularity_bind_mounts", [])
+    selected_atlases = normalize_xcpd_atlas_selection(xcpd_config.get("atlases", []))
 
     output_dir = paths["xcpd_fc_dir"] if pipeline_name == "fc" else paths["xcpd_ec_dir"]
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     command = ["singularity", "run"]
     for bind_mount in bind_mounts:
         command.extend(["-B", _bind_arg(bind_mount)])
 
+    dataset_root = ensure_xcpd_atlas_dataset(config, selected_atlases)
     command.extend(
         [
             image_path,
@@ -144,9 +154,9 @@ def build_xcpd_command(
         ]
     )
 
-    atlases = xcpd_config.get("atlases", [])
-    if atlases:
-        command.extend(["--atlases", *[str(atlas) for atlas in atlases]])
+    command.extend(atlas_cli_dataset_args(config, selected_atlases, str(dataset_root) if dataset_root else None))
+    if selected_atlases:
+        command.extend(["--atlases", *[str(atlas) for atlas in selected_atlases]])
 
     participant_labels = _strip_bids_prefix(participant_labels, "sub-")
     if participant_labels:
@@ -164,12 +174,14 @@ def build_remote_xcpd_command(
     pipeline_name: str,
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
+    remote_dataset_root: Optional[str] = None,
 ) -> List[str]:
     """Build the remote Singularity command for an XCP-D run."""
     hpc_cfg = HPCConfig.from_config(config)
     xcpd_config = config["xcpd"][pipeline_name]
     image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
     remote_output = hpc_cfg.remote_xcpd_fc if pipeline_name == "fc" else hpc_cfg.remote_xcpd_ec
+    selected_atlases = normalize_xcpd_atlas_selection(xcpd_config.get("atlases", []))
 
     bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
     command = ["singularity", "run"]
@@ -215,9 +227,9 @@ def build_remote_xcpd_command(
         ]
     )
 
-    atlases = xcpd_config.get("atlases", [])
-    if atlases:
-        command.extend(["--atlases", *[str(atlas) for atlas in atlases]])
+    command.extend(atlas_cli_dataset_args(config, selected_atlases, remote_dataset_root))
+    if selected_atlases:
+        command.extend(["--atlases", *[str(atlas) for atlas in selected_atlases]])
 
     participant_labels = _strip_bids_prefix(participant_labels, "sub-")
     if participant_labels:
@@ -304,11 +316,14 @@ def start_remote_xcpd_run(
     """Start an XCP-D run on the configured HPC host via SSH."""
     artifacts = _run_artifact_paths(config, pipeline_name)
     hpc_cfg = HPCConfig.from_config(config)
+    selected_atlases = normalize_xcpd_atlas_selection(config["xcpd"][pipeline_name].get("atlases", []))
+    remote_dataset_root = _sync_remote_xcpd_atlas_dataset(config, selected_atlases, hpc_cfg)
     command = build_remote_xcpd_command(
         config,
         pipeline_name,
         participant_labels=participant_labels,
         session_ids=session_ids,
+        remote_dataset_root=remote_dataset_root,
     )
     remote_output = hpc_cfg.remote_xcpd_fc if pipeline_name == "fc" else hpc_cfg.remote_xcpd_ec
     remote_log = f"{hpc_cfg.remote_base}/{pipeline_name}_xcpd.log"
@@ -460,3 +475,48 @@ def collect_qc_reports(output_dir: Path) -> Dict[str, List[Path]]:
         "alff": sorted(output_dir.glob("**/*_alff.nii.gz")),
         "falff": sorted(output_dir.glob("**/*_falff.nii.gz")),
     }
+
+
+def _sync_remote_xcpd_atlas_dataset(
+    config: Dict[str, Any],
+    atlas_ids: Optional[Iterable[str]],
+    hpc_cfg: HPCConfig,
+) -> Optional[str]:
+    """Sync the generated custom atlas dataset to the configured HPC host."""
+    if not custom_xcpd_atlas_ids(config, atlas_ids):
+        return None
+
+    local_dataset = ensure_xcpd_atlas_dataset(config, atlas_ids)
+    if local_dataset is None:
+        return None
+
+    remote_dataset_root = remote_xcpd_atlas_dataset_path(hpc_cfg.remote_base)
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        conn.execute(f"mkdir -p {shlex.quote(remote_dataset_root)}", timeout=60)
+    finally:
+        _safe_disconnect(conn)
+
+    rsync_cmd = [
+        "rsync",
+        "-avz",
+    ]
+    if hpc_cfg.ssh_key:
+        ssh_key = str(Path(hpc_cfg.ssh_key).expanduser())
+        rsync_cmd.extend(["-e", f"ssh -i {ssh_key}"])
+    rsync_cmd.extend([
+        f"{str(local_dataset)}/",
+        f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_dataset_root}/",
+    ])
+    result = subprocess.run(
+        rsync_cmd,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or "Failed to sync XCP-D atlas dataset to HPC")
+
+    return remote_dataset_root
