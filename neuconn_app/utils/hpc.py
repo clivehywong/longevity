@@ -336,6 +336,18 @@ class HPCConnection:
         with self.sftp.file(remote_path, 'w') as f:
             f.write(content)
 
+    def read_file(self, remote_path: str) -> str:
+        """Read a remote text file."""
+        if not self.is_connected:
+            raise ConnectionError("Not connected to HPC")
+
+        with self.sftp.file(remote_path, 'r') as f:
+            content = f.read()
+
+        if isinstance(content, bytes):
+            return content.decode('utf-8')
+        return content
+
     def __enter__(self) -> 'HPCConnection':
         self.connect()
         return self
@@ -724,6 +736,16 @@ class HPCWorkflowManager:
 
         return match.group(1)
 
+    def load_submission_script(self, script_name: str = "fmriprep_job.sh") -> Optional[str]:
+        """Load a previously submitted SLURM script from the remote project directory."""
+        conn = self.get_connection()
+        script_path = f"{self.config.remote_base}/{script_name}"
+        if not conn.file_exists(script_path):
+            return None
+
+        content = conn.read_file(script_path)
+        return content if content.strip() else None
+
     def check_job_status(
         self,
         job_id: str,
@@ -885,10 +907,14 @@ class HPCWorkflowManager:
 
     def _parse_slurm_state(self, state: str) -> JobStatus:
         """Convert SLURM state string to JobStatus enum."""
-        state = state.upper()
+        state = self._normalize_slurm_state(state)
         state_map = {
             'PENDING': JobStatus.PENDING,
             'PD': JobStatus.PENDING,
+            'CONFIGURING': JobStatus.PENDING,
+            'CF': JobStatus.PENDING,
+            'SUSPENDED': JobStatus.PENDING,
+            'S': JobStatus.PENDING,
             'RUNNING': JobStatus.RUNNING,
             'R': JobStatus.RUNNING,
             'COMPLETING': JobStatus.COMPLETING,
@@ -897,14 +923,32 @@ class HPCWorkflowManager:
             'CD': JobStatus.COMPLETED,
             'FAILED': JobStatus.FAILED,
             'F': JobStatus.FAILED,
+            'OUT_OF_MEMORY': JobStatus.FAILED,
+            'OOM': JobStatus.FAILED,
             'CANCELLED': JobStatus.CANCELLED,
             'CA': JobStatus.CANCELLED,
+            'PREEMPTED': JobStatus.CANCELLED,
+            'PR': JobStatus.CANCELLED,
             'TIMEOUT': JobStatus.TIMEOUT,
             'TO': JobStatus.TIMEOUT,
+            'DEADLINE': JobStatus.TIMEOUT,
+            'DL': JobStatus.TIMEOUT,
             'NODE_FAIL': JobStatus.NODE_FAIL,
             'NF': JobStatus.NODE_FAIL,
+            'BOOT_FAIL': JobStatus.NODE_FAIL,
+            'BF': JobStatus.NODE_FAIL,
         }
         return state_map.get(state, JobStatus.UNKNOWN)
+
+    def _normalize_slurm_state(self, state: str) -> str:
+        """Strip sacct decorations like 'CANCELLED by 1234' down to the base state."""
+        normalized = (state or "").upper().strip()
+        if not normalized:
+            return normalized
+
+        normalized = normalized.split()[0].rstrip('+')
+        match = re.match(r'[A-Z_]+', normalized)
+        return match.group(0) if match else normalized
 
     def is_job_complete(self, statuses: List[SubjectJobStatus]) -> bool:
         """Check if all jobs have finished (completed, failed, or cancelled)."""
@@ -932,7 +976,7 @@ class HPCWorkflowManager:
         conn = self.get_connection()
         results: Dict[str, bool] = {}
         for s in subject_statuses:
-            task_spec = f"{job_id}_{s.array_index}"
+            task_spec = s.job_id if s.job_id and "_" in s.job_id else f"{job_id}_{s.array_index}"
             _, stderr, rc = conn.execute(f"scancel {task_spec}")
             results[s.subject_id] = (rc == 0)
             if rc != 0:
@@ -1218,13 +1262,15 @@ class HPCWorkflowManager:
                     rm_paths.append(f"{self.config.remote_fmriprep}/sub-{sub_id}.html")
 
                 if cleanup_work:
-                    # Remove per-subject subfolder inside fmriprep_*_wf (fMRIPrep 25.x structure)
-                    # e.g. work/fmriprep_25_2_wf/single_subject_033_wf/
-                    rm_paths.append(
-                        f"{self.config.remote_work}/fmriprep*/single_subject_{sub_id}_wf"
-                    )
-                    # Legacy pattern for older fMRIPrep versions
-                    rm_paths.append(f"{self.config.remote_work}/fmriprep*sub-{sub_id}*")
+                    # Remove per-subject work trees across older and newer fMRIPrep layouts.
+                    rm_paths.extend([
+                        f"{self.config.remote_work}/fmriprep*/single_subject_{sub_id}_wf",
+                        f"{self.config.remote_work}/fmriprep*_wf/single_subject_{sub_id}_wf",
+                        f"{self.config.remote_work}/fmriprep*_wf/sub_{sub_id}_*",
+                        f"{self.config.remote_work}/fmriprep*_wf/sub-{sub_id}*",
+                        f"{self.config.remote_work}/fmriprep*sub-{sub_id}*",
+                        f"{self.config.remote_work}/fmriprep*sub_{sub_id}*",
+                    ])
 
                 if rm_paths:
                     rm_cmd = f"rm -rf {' '.join(rm_paths)}"
