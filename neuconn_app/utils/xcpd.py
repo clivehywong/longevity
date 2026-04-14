@@ -502,9 +502,14 @@ def _sync_remote_xcpd_atlas_dataset(
     rsync_cmd = [
         "rsync",
         "-avz",
+    ]
+    if hpc_cfg.ssh_key:
+        ssh_key = str(Path(hpc_cfg.ssh_key).expanduser())
+        rsync_cmd.extend(["-e", f"ssh -i {ssh_key}"])
+    rsync_cmd.extend([
         f"{str(local_dataset)}/",
         f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_dataset_root}/",
-    ]
+    ])
     result = subprocess.run(
         rsync_cmd,
         capture_output=True,
