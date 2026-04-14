@@ -726,6 +726,13 @@ def render_analysis_settings(config: Dict) -> bool:
                     st.success("Group analysis settings updated")
 
     with st.expander("XCP-D Pipeline Settings"):
+        from utils.xcpd_atlases import (
+            atlas_option_ids,
+            format_xcpd_atlas_label,
+            normalize_xcpd_atlas_selection,
+            recommended_xcpd_atlases,
+        )
+
         if 'xcpd' not in config:
             config['xcpd'] = {}
         xcpd = config['xcpd']
@@ -788,10 +795,13 @@ def render_analysis_settings(config: Dict) -> bool:
                         key=f"xcpd_{pipeline_name}_high",
                     )
 
-                atlases_value = ", ".join(pipeline.get('atlases', ['Schaefer200x17', 'Tian']))
-                new_atlases = st.text_input(
-                    f"{pipeline_name.upper()} atlases (comma-separated)",
-                    value=atlases_value,
+                current_atlases = normalize_xcpd_atlas_selection(pipeline.get('atlases', [])) or recommended_xcpd_atlases()
+                atlas_options = atlas_option_ids(config, current_atlases)
+                new_atlases = st.multiselect(
+                    f"{pipeline_name.upper()} atlases",
+                    options=atlas_options,
+                    default=[atlas for atlas in current_atlases if atlas in atlas_options],
+                    format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
                     key=f"xcpd_{pipeline_name}_atlases",
                 )
 
@@ -803,7 +813,7 @@ def render_analysis_settings(config: Dict) -> bool:
                         'smoothing': new_smoothing,
                         'lower_bpf': new_low,
                         'upper_bpf': new_high,
-                        'atlases': [value.strip() for value in new_atlases.split(',') if value.strip()],
+                        'atlases': normalize_xcpd_atlas_selection(new_atlases),
                     }
                     for key, value in updates.items():
                         if value != pipeline.get(key):

@@ -26,13 +26,20 @@ from utils.pipeline_state import (
     set_step_status,
 )
 from utils.xcpd import (
-    collect_qc_reports,
     refresh_xcpd_run,
     start_remote_xcpd_run,
     start_xcpd_run,
     stop_xcpd_run,
 )
-from utils.subject_level_fc import load_connectome_table
+from utils.xcpd_atlases import (
+    atlas_option_ids,
+    build_xcpd_atlas_status_rows,
+    format_xcpd_atlas_label,
+    missing_xcpd_atlas_resources,
+    normalize_xcpd_atlas_selection,
+    recommended_xcpd_atlases,
+)
+from utils.xcpd_qc import render_xcpd_qc_reports
 
 
 def render() -> None:
@@ -61,7 +68,7 @@ def render() -> None:
         render_xcpd_runs(config, state)
 
     with tab_qc:
-        render_post_xcpd_qc(config, state)
+        render_xcpd_qc_reports(config, state)
 
     with tab_logs:
         render_logs(config, state)
@@ -300,21 +307,63 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         help="Use the configured HPC SSH connection for long-running XCP-D jobs.",
     )
 
+    fc_defaults = normalize_xcpd_atlas_selection(config["xcpd"]["fc"].get("atlases", [])) or recommended_xcpd_atlases()
+    ec_defaults = normalize_xcpd_atlas_selection(config["xcpd"]["ec"].get("atlases", [])) or recommended_xcpd_atlases()
+    atlas_options = atlas_option_ids(config, list(fc_defaults) + list(ec_defaults))
+
+    st.markdown("### Atlas Selection")
+    atlas_col1, atlas_col2 = st.columns(2)
+    with atlas_col1:
+        selected_fc_atlases = st.multiselect(
+            "FC atlases",
+            options=atlas_options,
+            default=[atlas_id for atlas_id in fc_defaults if atlas_id in atlas_options],
+            format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
+            key="xcpd_fc_run_atlases",
+            help="Choose one or more atlases to apply during the FC XCP-D run.",
+        )
+    with atlas_col2:
+        selected_ec_atlases = st.multiselect(
+            "EC atlases",
+            options=atlas_options,
+            default=[atlas_id for atlas_id in ec_defaults if atlas_id in atlas_options],
+            format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
+            key="xcpd_ec_run_atlases",
+            help="Choose one or more atlases to apply during the EC XCP-D run.",
+        )
+
+    atlas_rows = build_xcpd_atlas_status_rows(
+        config,
+        list(selected_fc_atlases) + list(selected_ec_atlases),
+    )
+    if atlas_rows:
+        with st.expander("Atlas availability", expanded=False):
+            st.dataframe(atlas_rows, use_container_width=True, hide_index=True)
+
     fc_info = state.get("runs", {}).get("xcpd_fc", {})
     ec_info = state.get("runs", {}).get("xcpd_ec", {})
 
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("FC Pipeline")
-        st.code(" ".join(config["xcpd"]["fc"].get("atlases", [])), language="text")
+        st.code(" ".join(selected_fc_atlases), language="text")
         st.caption(f"Status: {fc_info.get('status', state['steps']['xcpd_fc']['status'])}")
         if st.button("Start FC XCP-D", use_container_width=True):
-            if run_on_hpc:
-                run_info = start_remote_xcpd_run(config, "fc", selected_subjects or None, sessions or None)
+            missing = missing_xcpd_atlas_resources(config, selected_fc_atlases)
+            if missing:
+                st.error("Missing atlas resources: " + ", ".join(str(path) for path in missing))
             else:
-                run_info = start_xcpd_run(config, "fc", selected_subjects or None, sessions or None)
-            st.success(f"Started FC XCP-D (pid={run_info['pid']})")
-            st.rerun()
+                try:
+                    config["xcpd"]["fc"]["atlases"] = normalize_xcpd_atlas_selection(selected_fc_atlases)
+                    save_runtime_config(config)
+                    if run_on_hpc:
+                        run_info = start_remote_xcpd_run(config, "fc", selected_subjects or None, sessions or None)
+                    else:
+                        run_info = start_xcpd_run(config, "fc", selected_subjects or None, sessions or None)
+                    st.success(f"Started FC XCP-D (pid={run_info['pid']})")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to start FC XCP-D: {e}")
         if fc_info.get("status") == "running":
             if st.button("Stop FC XCP-D", use_container_width=True):
                 stop_xcpd_run(config, "fc", state)
@@ -324,116 +373,31 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
 
     with col2:
         st.subheader("EC Pipeline")
-        st.code(" ".join(config["xcpd"]["ec"].get("atlases", [])), language="text")
+        st.code(" ".join(selected_ec_atlases), language="text")
         st.caption(f"Status: {ec_info.get('status', state['steps']['xcpd_ec']['status'])}")
         st.info("EC pipeline runs without scrubbing and uses interpolated output.")
         if st.button("Start EC XCP-D", use_container_width=True):
-            if run_on_hpc:
-                run_info = start_remote_xcpd_run(config, "ec", selected_subjects or None, sessions or None)
+            missing = missing_xcpd_atlas_resources(config, selected_ec_atlases)
+            if missing:
+                st.error("Missing atlas resources: " + ", ".join(str(path) for path in missing))
             else:
-                run_info = start_xcpd_run(config, "ec", selected_subjects or None, sessions or None)
-            st.success(f"Started EC XCP-D (pid={run_info['pid']})")
-            st.rerun()
+                try:
+                    config["xcpd"]["ec"]["atlases"] = normalize_xcpd_atlas_selection(selected_ec_atlases)
+                    save_runtime_config(config)
+                    if run_on_hpc:
+                        run_info = start_remote_xcpd_run(config, "ec", selected_subjects or None, sessions or None)
+                    else:
+                        run_info = start_xcpd_run(config, "ec", selected_subjects or None, sessions or None)
+                    st.success(f"Started EC XCP-D (pid={run_info['pid']})")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to start EC XCP-D: {e}")
         if ec_info.get("status") == "running":
             if st.button("Stop EC XCP-D", use_container_width=True):
                 stop_xcpd_run(config, "ec", state)
                 st.rerun()
         if ec_info.get("log_file"):
             st.caption(ec_info["log_file"])
-
-
-def render_post_xcpd_qc(config: Dict, state: Dict) -> None:
-    paths = config["paths"]
-    fc_qc = collect_qc_reports(Path(paths["xcpd_fc_dir"]))
-    ec_qc = collect_qc_reports(Path(paths["xcpd_ec_dir"]))
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("FC Pipeline QC")
-        st.write(qc_report_summary(fc_qc))
-        render_exec_reports(fc_qc["exec_reports"])
-    with col2:
-        st.subheader("EC Pipeline QC")
-        st.write(qc_report_summary(ec_qc))
-        exclusions = build_ec_exclusion_table(config)
-        if exclusions is not None:
-            st.dataframe(exclusions, use_container_width=True, hide_index=True)
-            exclusions.to_csv(Path(paths["xcpd_ec_qc_dir"]) / "ec_exclusions.csv", index=False)
-
-    qcfc_value = compute_qc_fc_summary(config)
-    if qcfc_value is not None:
-        st.metric("Mean |QC-FC|", f"{qcfc_value:.4f}")
-        if qcfc_value > 0.2:
-            st.warning("QC-FC exceeds 0.2 and should be reviewed carefully.")
-
-    ready_for_qc_gate = bool(fc_qc["qc_csv"] or fc_qc["exec_reports"]) and bool(
-        ec_qc["qc_csv"] or ec_qc["timeseries"]
-    )
-    if ready_for_qc_gate:
-        if st.button("Approve and Proceed", type="primary"):
-            state = set_step_status(config, "post_xcpd_qc", "completed", "QC reviewed", state=state)
-            state = set_approval(config, "qc_gate", True, state=state)
-            append_pipeline_log(config, "Approved post-XCP-D QC", state=state)
-            st.success("QC approved. Subject/group analysis stages are now unlocked.")
-            st.rerun()
-    else:
-        st.info("Run FC and EC XCP-D first to populate QC artifacts.")
-
-
-def qc_report_summary(qc_reports: Dict[str, List[Path]]) -> Dict[str, int]:
-    return {key: len(value) for key, value in qc_reports.items()}
-
-
-def render_exec_reports(exec_reports: List[Path]) -> None:
-    if not exec_reports:
-        st.caption("No HTML reports found yet.")
-        return
-    for report in exec_reports[:10]:
-        st.markdown(f"- [{report.name}]({report.as_uri()})")
-
-
-def build_ec_exclusion_table(config: Dict) -> pd.DataFrame | None:
-    summary_path = Path(config["paths"]["fd_inspection_dir"]) / "fd_summary.csv"
-    if not summary_path.exists():
-        return None
-    summary = pd.read_csv(summary_path)
-    threshold = float(config["subject_exclusion"]["mean_fd_threshold"])
-    table = summary[["subject_id", "session", "mean_fd", "peak_fd"]].copy()
-    table["included"] = table["mean_fd"] <= threshold
-    table["exclusion_reason"] = table["included"].map(
-        lambda included: "" if included else f"mean FD > {threshold:.2f}"
-    )
-    return table
-
-
-def compute_qc_fc_summary(config: Dict) -> float | None:
-    summary_path = Path(config["paths"]["fd_inspection_dir"]) / "fd_summary.csv"
-    connectome_paths = sorted(Path(config["paths"]["xcpd_fc_dir"]).glob("**/*connectome*.tsv"))
-    if not summary_path.exists() or not connectome_paths:
-        return None
-
-    summary = pd.read_csv(summary_path).set_index(["subject_id", "session"])
-    fd_values = []
-    edge_means = []
-    for connectome_path in connectome_paths:
-        try:
-            parts = connectome_path.parts
-            subject = next(part for part in parts if part.startswith("sub-"))
-            session = next(part for part in parts if part.startswith("ses-"))
-            if (subject, session) not in summary.index:
-                continue
-            matrix = load_connectome_table(connectome_path)
-            values = matrix.to_numpy(dtype=float)
-            if values.shape[0] == values.shape[1] and values.shape[0] > 1:
-                values = values[~np.eye(values.shape[0], dtype=bool)]
-            fd_values.append(float(summary.loc[(subject, session), "mean_fd"]))
-            edge_means.append(float(np.nanmean(np.abs(values))))
-        except Exception:
-            continue
-
-    if len(fd_values) < 3:
-        return None
-    return float(abs(pd.Series(fd_values).corr(pd.Series(edge_means))))
 
 
 def render_logs(config: Dict, state: Dict) -> None:

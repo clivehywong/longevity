@@ -236,20 +236,30 @@ def render_fmri_analysis():
         tool = st.sidebar.selectbox(
             "Preprocessing:",
             [
-                "HPC Submit",
-                "QC Reports",
+                "fMRIPrep Submit",
+                "fMRIPrep QC Reports",
                 "XCP-D Pipeline",
+                "XCP-D QC Reports",
                 "FSL FIX",
                 "fMRIPost-AROMA",
                 "Denoising Comparison",
             ]
         )
 
-        if tool == "HPC Submit":
+        if tool == "fMRIPrep Submit":
             import importlib.util
             spec = importlib.util.spec_from_file_location(
                 "hpc_submit",
                 Path(__file__).parent / "pages_fmri" / "preprocessing" / "01_hpc_submit.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.render()
+        elif tool == "fMRIPrep QC Reports":
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "fmriprep_qc_reports",
+                Path(__file__).parent / "pages_fmri" / "preprocessing" / "02_qc_reports.py"
             )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -259,6 +269,15 @@ def render_fmri_analysis():
             spec = importlib.util.spec_from_file_location(
                 "xcpd_pipeline",
                 Path(__file__).parent / "pages_fmri" / "preprocessing" / "06_xcpd_pipeline.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.render()
+        elif tool == "XCP-D QC Reports":
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "xcpd_qc_reports",
+                Path(__file__).parent / "pages_fmri" / "preprocessing" / "07_xcpd_qc_reports.py"
             )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
