@@ -71,7 +71,7 @@ def render() -> None:
     display = local_measures[
         ["measure", "subject_id", "session", "atlas", "space", "source_file"]
     ].copy()
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.dataframe(display, width="stretch", hide_index=True)
 
     subjects = sorted(display["subject_id"].dropna().unique().tolist())
     measures = sorted(display["measure"].dropna().unique().tolist())
@@ -89,7 +89,7 @@ def render() -> None:
         .reset_index()
     )
     if subjects and measures:
-        st.dataframe(coverage, use_container_width=True, hide_index=True)
+        st.dataframe(coverage, width="stretch", hide_index=True)
 
 
 if __name__ == "__main__":

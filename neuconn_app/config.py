@@ -17,7 +17,7 @@ import os
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_PROJECT_ROOT = APP_DIR.parent
 ATLAS_LABEL_FILENAME = "Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_label.txt"
-DEFAULT_XCPD_IMAGE = "~/software/xcp_d.sif"
+DEFAULT_XCPD_IMAGE = "~/software/xcp-d-26.0.2.sif"
 
 RERUN_REQUIRED_KEYS = {
     "xcpd.fc.fd_thresh",

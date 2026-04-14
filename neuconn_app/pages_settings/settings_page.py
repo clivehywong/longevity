@@ -82,7 +82,7 @@ def render():
     col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
-        if st.button("Save Configuration", type="primary", use_container_width=True):
+        if st.button("Save Configuration", type="primary", width="stretch"):
             try:
                 save_config(config, str(config_path))
                 # Update main session state config
@@ -92,7 +92,7 @@ def render():
                 st.error(f"Error saving configuration: {e}")
 
     with col2:
-        if st.button("Reset to Defaults", use_container_width=True):
+        if st.button("Reset to Defaults", width="stretch"):
             try:
                 with open(default_config_path, 'r') as f:
                     default_config = yaml.safe_load(f)
@@ -934,7 +934,7 @@ def render_roi_configuration(config: Dict) -> bool:
                 "use_as_seed": roi.get("use_as_seed", False),
                 "priority": roi.get("priority", 3),
             })
-        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.dataframe(table, width="stretch", hide_index=True)
 
     for idx, roi in enumerate(rois):
         with st.expander(f"{roi.get('label', roi.get('id'))} ({roi.get('type')})"):
@@ -1037,7 +1037,7 @@ def render_roi_configuration(config: Dict) -> bool:
         data=export_json,
         file_name="roi_config.json",
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
     )
 
     imported = st.file_uploader("Import ROI config", type=["json"], accept_multiple_files=False)
@@ -1266,7 +1266,7 @@ def render_import_export(config: Dict, config_path: Path, default_config_path: P
             data=yaml_content,
             file_name=f"{config.get('project', {}).get('name', 'config').replace(' ', '_').lower()}_config.yaml",
             mime="text/yaml",
-            use_container_width=True
+            width="stretch"
         )
 
         # Show current config preview

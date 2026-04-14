@@ -52,7 +52,7 @@ hpc:
 
   singularity_images:
     fmriprep: "/path/to/fmriprep.sif"
-    xcp_d: "~/software/xcp_d.sif"
+    xcp_d: "~/software/xcp-d-26.0.2.sif"
     fmripost_aroma: "/path/to/fmripost-aroma.sif"
     qsiprep: "/path/to/qsiprep.sif"
     qsirecon: "/path/to/qsirecon.sif"
@@ -85,7 +85,7 @@ fmriprep:
   legacy_symlink: true
 
 xcpd:
-  singularity_image_path: "~/software/xcp_d.sif"
+  singularity_image_path: "~/software/xcp-d-26.0.2.sif"
   singularity_bind_mounts:
     - "${project_root}"
     - "${bids_dir}"

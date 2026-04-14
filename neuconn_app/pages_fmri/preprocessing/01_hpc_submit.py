@@ -1335,7 +1335,7 @@ def render_monitor(config: Dict):
                 "Job ID":   s.job_id
             })
 
-        st.dataframe(table_data, use_container_width=True)
+        st.dataframe(table_data, width="stretch")
 
         # ── Kill & Restart Controls ──────────────────────────────────
         _render_kill_restart(state, config)

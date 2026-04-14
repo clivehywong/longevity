@@ -112,7 +112,7 @@ def render():
     # Apply styling
     styled_df = df_display.style.apply(highlight_status, axis=1)
 
-    st.dataframe(styled_df, use_container_width=True, height=600)
+    st.dataframe(styled_df, width="stretch", height=600)
 
     # Export button
     st.markdown("---")
@@ -125,7 +125,7 @@ def render():
             data=csv,
             file_name="dimension_table.csv",
             mime="text/csv",
-            use_container_width=True
+            width="stretch"
         )
 
     with col2:

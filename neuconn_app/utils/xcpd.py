@@ -330,6 +330,7 @@ def start_remote_xcpd_run(
     remote_command = (
         f"mkdir -p {shlex.quote(str(remote_output))} "
         f"{shlex.quote(str(hpc_cfg.remote_work))} && "
+        f"{{ command -v module &>/dev/null && module load singularity 2>/dev/null || true; }} && "
         f"nohup {' '.join(shlex.quote(part) for part in command)} > {shlex.quote(remote_log)} 2>&1 & echo $!"
     )
 
