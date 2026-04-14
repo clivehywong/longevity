@@ -7,7 +7,9 @@ fmriprep
 qa_images_full
 results
 atlases
-docs/archive
+docs/archive/*
+!docs/archive/
+!docs/archive/README.md
 validation_reports
 tools
 __pycache__/

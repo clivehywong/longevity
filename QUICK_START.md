@@ -1,143 +1,67 @@
-# Quick Start Guide - Connectivity Analysis Pipeline
+# Quick Start
 
-## Current Status
-🔄 **Test workflow running** (started 2026-02-11)  
-Processing: sub-033 and sub-034 (test mode)  
-Estimated completion: 1-2 hours from start
+Use this file as the shortest path into the new documentation tree.
 
-## Monitor Progress
+## Choose your entrypoint
+
+- **Users**: start with [`docs/user/README.md`](docs/user/README.md)
+- **Developers**: start with [`docs/developer/README.md`](docs/developer/README.md)
+- **Legacy and historical notes**: use [`docs/archive/`](docs/archive/)
+
+## Common workflows
+
+### 1. Check raw BIDS data
 
 ```bash
-# Quick status check
-bash monitor_workflow.sh
-
-# Follow live output
-tail -f /tmp/claude-1002/-home-clivewong-proj-longevity/tasks/bfcfbd1.output
+python script/validate_bids_names.py bids/
+python script/qa_check_images.py --bids-dir bids --output qa_images_full
 ```
 
-## When Workflow Completes
+Then read:
 
-### 1. View Results
+- [`docs/user/workflows/bids-validation-and-qc.md`](docs/user/workflows/bids-validation-and-qc.md)
+- [`docs/user/troubleshooting/common-failures.md`](docs/user/troubleshooting/common-failures.md)
+
+### 2. Run fMRIPrep batches on HPC
+
 ```bash
-# Open interactive HTML report in browser
-firefox results/connectivity_report.html
+bash script/batch_fmriprep.sh
+bash script/batch_fmriprep.sh status
 ```
 
-### 2. Check Output Files
+Then read:
+
+- [`docs/user/workflows/fmriprep-hpc-workflow.md`](docs/user/workflows/fmriprep-hpc-workflow.md)
+- [`docs/user/troubleshooting/hpc-and-path-issues.md`](docs/user/troubleshooting/hpc-and-path-issues.md)
+
+### 3. Run connectivity analysis
+
 ```bash
-# List generated files
-ls -lh results/local_measures/
-ls -lh results/seed_based/
-ls -lh results/group_analysis/
-
-# View summary
-cat results/local_measures/local_measures_summary.csv
-```
-
-### 3. Visualize Brain Maps
-```bash
-# View fALFF map
-fsleyes results/local_measures/sub-033_ses-01_fALFF.nii.gz
-
-# View seed connectivity z-map
-fsleyes results/seed_based/dlpfc_coarse/sub-033_ses-01_zmap.nii.gz
-
-# View group statistical map
-fsleyes results/group_analysis/fALFF/interaction_fwe_p05.nii.gz
-```
-
-## Next Steps
-
-### Run Full Analysis (All 8 Subjects)
-Once test mode completes successfully:
-```bash
+bash script/master_full_connectivity_workflow.sh --test
 bash script/master_full_connectivity_workflow.sh
 ```
-- Processes all 16 subject-sessions
-- Estimated time: 6-8 hours
-- Creates complete analysis + HTML report
 
-## Available Scripts
+Then read:
 
-| Script | Purpose | Time |
-|--------|---------|------|
-| `master_full_connectivity_workflow.sh --test` | Test with 2 subjects | 1-2 hrs |
-| `master_full_connectivity_workflow.sh` | Full analysis (all) | 6-8 hrs |
-| `test_local_measures.sh` | Quick validation | 10 min |
-| `compute_local_measures.py` | fALFF & ReHo only | Variable |
-| `seed_based_connectivity.py` | Seed analysis only | Variable |
-| `group_level_analysis.py` | Group stats only | Variable |
-| `generate_html_report.py` | Create HTML report | 1-2 min |
+- [`docs/user/workflows/connectivity-analysis.md`](docs/user/workflows/connectivity-analysis.md)
+- [`docs/user/reference/parameter-considerations.md`](docs/user/reference/parameter-considerations.md)
 
-## Documentation
+### 4. Launch the NeuConn app
 
-- **`CONNECTIVITY_ANALYSIS_GUIDE.md`** - Complete usage guide
-- **`CLAUDE.md`** - Project overview with connectivity section
-- **`TEST_RESULTS_SUMMARY.md`** - Validation results
-
-## Troubleshooting
-
-### Workflow stuck?
 ```bash
-# Check if process still running
-ps aux | grep python
-
-# View full log
-less /tmp/claude-1002/-home-clivewong-proj-longevity/tasks/bfcfbd1.output
+cd neuconn_app
+pip install -r requirements.txt
+python test_cli.py
+streamlit run app.py
 ```
 
-### Need to restart?
-```bash
-# Kill running workflow
-pkill -f master_full_connectivity_workflow
+Then read:
 
-# Restart test mode
-bash script/master_full_connectivity_workflow.sh --test
-```
+- [`docs/user/workflows/neuconn-app.md`](docs/user/workflows/neuconn-app.md)
+- [`docs/developer/architecture/neuconn-app-architecture.md`](docs/developer/architecture/neuconn-app-architecture.md)
 
-### Missing dependencies?
-All required packages are already installed:
-- ✅ nilearn 0.13.0
-- ✅ plotly 6.3.0  
-- ✅ statsmodels 0.14.5
-- ✅ nibabel, pandas, scipy, numpy, matplotlib
+## What changed
 
-## Expected Output Structure
-
-```
-results/
-├── connectivity_report.html          # Main deliverable
-├── metadata.csv                      # Subject metadata
-├── local_measures/
-│   ├── *_fALFF.nii.gz               # 4 files (2 subjects × 2 sessions)
-│   ├── *_ReHo.nii.gz                # 4 files
-│   └── local_measures_summary.csv
-├── seed_based/
-│   ├── dlpfc_coarse/                # 4 z-maps
-│   ├── dlpfc_dorsal/                # 4 z-maps
-│   ├── anterior_insula/             # 4 z-maps
-│   └── ... (12 seeds total)
-├── network_connectivity/
-│   ├── within_salience/             # ANOVA results
-│   └── between_*/                   # Network pairs
-└── group_analysis/
-    ├── fALFF/                       # Statistical maps
-    ├── ReHo/
-    └── seed_*/                      # Cluster tables
-```
-
-## Key Features
-
-✅ **Local Measures**: fALFF, ReHo  
-✅ **15 Seed Regions**: DLPFC, insula, dACC, hippocampus  
-✅ **Network Analysis**: Within/between connectivity  
-✅ **Group Statistics**: Voxelwise LME with TFCE correction  
-✅ **Interactive Report**: Browser-based with significance highlighting  
-✅ **Motion QC**: Automated FD calculation and covariate control  
-
-## Support
-
-For detailed information, see:
-- Usage examples: `CONNECTIVITY_ANALYSIS_GUIDE.md`
-- Test results: `TEST_RESULTS_SUMMARY.md`
-- Project overview: `CLAUDE.md`
+- The primary docs are now organized by **audience** and **task**.
+- Time-bound notes and old run-status material are no longer the main entrypoints.
+- Script-folder markdown files are treated as legacy sources, not the main way to navigate the repo.

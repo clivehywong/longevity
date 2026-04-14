@@ -43,9 +43,9 @@ bash script/master_full_connectivity_workflow.sh --test
 
 ## Documentation
 
-- **Quick Start**: `QUICK_START.md` - Essential workflows
-- **Connectivity**: `docs/CONNECTIVITY_ANALYSIS_GUIDE.md` - Analysis pipeline details
-- **HPC**: `docs/HPC_SEED_CONNECTIVITY_GUIDE.md` - Remote processing
+- **Quick Start**: `QUICK_START.md` - top-level navigation into the current docs hierarchy
+- **User Docs**: `docs/user/README.md` - setup, workflows, troubleshooting, and parameter guidance
+- **Developer Docs**: `docs/developer/README.md` - architecture, repository structure, and maintenance notes
 - **Memory**: `.claude/memory/` - HPC config, analysis parameters
 
 ## Claude Code Usage
