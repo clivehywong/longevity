@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 from typing import Dict, List
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -31,6 +32,7 @@ from utils.xcpd import (
     start_xcpd_run,
     stop_xcpd_run,
 )
+from utils.subject_level_fc import load_connectome_table
 
 
 def render() -> None:
@@ -93,10 +95,11 @@ def render_fd_inspection(config: Dict, state: Dict) -> None:
     col1, col2 = st.columns([1, 2])
     with col1:
         if st.button("Generate / Refresh FD Summary", use_container_width=True):
+            configured_tr = float(config.get("connectivity", {}).get("local_measures", {}).get("tr") or 0.8)
             summary = build_fd_summary(
                 fmriprep_dir=fmriprep_dir,
                 output_dir=output_dir,
-                tr=float(config.get("connectivity", {}).get("local_measures", {}).get("tr") or 0.8),
+                tr=configured_tr,
             )
             generate_fd_plots(fmriprep_dir, output_dir, summary)
             state = set_step_status(
@@ -169,7 +172,12 @@ def render_fd_inspection(config: Dict, state: Dict) -> None:
                 step=10,
             )
 
-        preview = build_threshold_preview(summary, new_fc_fd, new_ec_exclusion)
+        preview = build_threshold_preview(
+            summary,
+            new_fc_fd,
+            new_ec_exclusion,
+            tr=float(config.get("connectivity", {}).get("local_measures", {}).get("tr") or 0.8),
+        )
         styled = (
             preview.style.apply(
                 lambda row: [
@@ -231,15 +239,25 @@ def render_fd_inspection(config: Dict, state: Dict) -> None:
             st.rerun()
 
 
-def build_threshold_preview(summary: pd.DataFrame, fc_fd_thresh: float, ec_exclusion: float) -> pd.DataFrame:
+def build_threshold_preview(
+    summary: pd.DataFrame,
+    fc_fd_thresh: float,
+    ec_exclusion: float,
+    tr: float | None = None,
+) -> pd.DataFrame:
     preview_rows = []
     for _, row in summary.iterrows():
         confounds = pd.read_csv(row["confounds_file"], sep="\t")
         fd = confounds["framewise_displacement"].fillna(0.0)
+        row_tr = tr
+        if row_tr is None and "tr" in row.index and pd.notna(row["tr"]):
+            row_tr = float(row["tr"])
+        if row_tr is None:
+            row_tr = 0.8
         preview_rows.append(
             {
                 **row.to_dict(),
-                "fc_remaining_sec": float((fd <= fc_fd_thresh).sum() * 0.8),
+                "fc_remaining_sec": float((fd <= fc_fd_thresh).sum() * row_tr),
                 "ec_included": bool(float(row["mean_fd"]) <= ec_exclusion),
             }
         )
@@ -404,9 +422,12 @@ def compute_qc_fc_summary(config: Dict) -> float | None:
             session = next(part for part in parts if part.startswith("ses-"))
             if (subject, session) not in summary.index:
                 continue
-            matrix = pd.read_csv(connectome_path, sep="\t", header=None)
+            matrix = load_connectome_table(connectome_path)
+            values = matrix.to_numpy(dtype=float)
+            if values.shape[0] == values.shape[1] and values.shape[0] > 1:
+                values = values[~np.eye(values.shape[0], dtype=bool)]
             fd_values.append(float(summary.loc[(subject, session), "mean_fd"]))
-            edge_means.append(float(matrix.abs().stack().mean()))
+            edge_means.append(float(np.nanmean(np.abs(values))))
         except Exception:
             continue
 

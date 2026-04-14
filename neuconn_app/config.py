@@ -16,12 +16,7 @@ import os
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_PROJECT_ROOT = APP_DIR.parent
-DEFAULT_LABEL_FILE = (
-    APP_DIR
-    / "resources"
-    / "Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_label.txt"
-)
-DEFAULT_ROI_CONFIG = APP_DIR / "roi_config.json"
+ATLAS_LABEL_FILENAME = "Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_label.txt"
 DEFAULT_XCPD_IMAGE = "~/software/xcp_d.sif"
 
 RERUN_REQUIRED_KEYS = {
@@ -62,6 +57,16 @@ def _setdefault_nested(config: Dict[str, Any], path: List[str], value: Any) -> N
     current.setdefault(path[-1], value)
 
 
+def _infer_root_from_derivatives_path(derivatives_path: Path) -> Optional[Path]:
+    if derivatives_path.name == "derivatives":
+        return derivatives_path.parent
+    if derivatives_path.name == "preprocessing" and derivatives_path.parent.name == "derivatives":
+        return derivatives_path.parent.parent
+    if (derivatives_path / "derivatives").exists() and (derivatives_path / "bids").exists():
+        return derivatives_path
+    return None
+
+
 def get_project_root(config: Optional[Dict[str, Any]] = None) -> Path:
     """Return the configured project root or the repository root."""
     if config:
@@ -83,10 +88,7 @@ def get_project_root(config: Optional[Dict[str, Any]] = None) -> Path:
         derivatives_parent: Optional[Path] = None
         if derivatives_dir:
             derivatives_path = Path(os.path.expanduser(str(derivatives_dir))).resolve()
-            if derivatives_path.name == "derivatives":
-                derivatives_parent = derivatives_path.parent
-            elif derivatives_path.name != "long" and (derivatives_path / "bids").exists():
-                derivatives_parent = derivatives_path
+            derivatives_parent = _infer_root_from_derivatives_path(derivatives_path)
 
         if explicit_root:
             resolved_root = Path(os.path.expanduser(str(explicit_root))).resolve()
@@ -113,12 +115,13 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
     subject_level = derivatives / "subject_level"
     group_level = derivatives / "group_level"
     qc = derivatives / "qc"
-    atlas_resources = APP_DIR / "resources"
+    app_root = project_root / "neuconn_app"
+    atlas_resources = app_root / "resources"
 
     return {
         "project_root": str(project_root),
         "bids_dir": str(project_root / "bids"),
-        "neuconn_app_dir": str(project_root / "neuconn_app"),
+        "neuconn_app_dir": str(app_root),
         "derivatives_dir": str(derivatives),
         "preprocessing_dir": str(preprocessing),
         "fmriprep_dir": str(fmriprep),
@@ -139,8 +142,8 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
         "excluded_dir": str(project_root / "bids_excluded"),
         "atlases_dir": str(project_root / "atlases"),
         "atlas_resources_dir": str(atlas_resources),
-        "roi_config_path": str(DEFAULT_ROI_CONFIG),
-        "atlas_label_file": str(DEFAULT_LABEL_FILE),
+        "roi_config_path": str(app_root / "roi_config.json"),
+        "atlas_label_file": str(atlas_resources / ATLAS_LABEL_FILENAME),
         "temp_dir": "/tmp/neuconn",
         "cache_dir": "~/.cache/neuconn",
     }

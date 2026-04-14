@@ -225,6 +225,11 @@ def load_manifest_table(config: Dict[str, Any], name: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def load_connectome_table(source_file: Path) -> pd.DataFrame:
+    """Load an XCP-D connectome TSV into a numeric square table."""
+    return _load_connectome(source_file)
+
+
 def _artifact_row(path: Path, artifact_type: str) -> Dict[str, Any]:
     file_name = path.name
     return {

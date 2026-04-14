@@ -17,6 +17,15 @@ from utils.pipeline_state import set_run_info, set_step_status, append_pipeline_
 from utils.hpc import HPCConfig, HPCConnection
 
 
+def _safe_disconnect(conn: Optional[HPCConnection]) -> None:
+    if conn is None:
+        return
+    try:
+        conn.disconnect()
+    except Exception:
+        pass
+
+
 def _strip_bids_prefix(values: Optional[Iterable[str]], prefix: str) -> List[str]:
     if not values:
         return []
@@ -32,6 +41,50 @@ def _strip_bids_prefix(values: Optional[Iterable[str]], prefix: str) -> List[str
 def _bind_arg(path: str) -> str:
     expanded = os.path.expanduser(path)
     return f"{expanded}:{expanded}"
+
+
+def _deduplicate_paths(paths: Iterable[str]) -> List[str]:
+    unique: List[str] = []
+    for path in paths:
+        if path and path not in unique:
+            unique.append(path)
+    return unique
+
+
+def _build_remote_bind_mounts(config: Dict[str, Any], hpc_cfg: HPCConfig) -> List[str]:
+    base = hpc_cfg.remote_base
+    remote_derivatives = str(Path(base) / "derivatives") if base else ""
+
+    remote_bind_mounts = config.get("hpc", {}).get("remote_bind_mounts", [])
+    if remote_bind_mounts:
+        resolved: List[str] = []
+        expansions = {
+            "base": base,
+            "bids": hpc_cfg.remote_bids,
+            "fmriprep": hpc_cfg.remote_fmriprep,
+            "xcpd_fc": hpc_cfg.remote_xcpd_fc,
+            "xcpd_ec": hpc_cfg.remote_xcpd_ec,
+            "work": hpc_cfg.remote_work,
+            "derivatives": remote_derivatives,
+            "atlases": str(Path(base) / "atlases") if base else "",
+        }
+        for bind_mount in remote_bind_mounts:
+            text = str(bind_mount)
+            for key, value in expansions.items():
+                text = text.replace(f"${{{key}}}", value)
+            resolved.append(text)
+        return _deduplicate_paths(resolved)
+
+    return _deduplicate_paths(
+        [
+            base,
+            hpc_cfg.remote_bids,
+            remote_derivatives,
+            str(Path(base) / "atlases") if base else "",
+            hpc_cfg.remote_work,
+            str(Path(hpc_cfg.singularity_xcpd).parent) if hpc_cfg.singularity_xcpd else "",
+        ]
+    )
 
 
 def build_xcpd_command(
@@ -118,11 +171,10 @@ def build_remote_xcpd_command(
     image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
     remote_output = hpc_cfg.remote_xcpd_fc if pipeline_name == "fc" else hpc_cfg.remote_xcpd_ec
 
-    bind_mounts = config["xcpd"].get("singularity_bind_mounts", [])
+    bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
     command = ["singularity", "run"]
     for bind_mount in bind_mounts:
-        expanded = os.path.expanduser(bind_mount)
-        command.extend(["-B", f"{expanded}:{expanded}"])
+        command.extend(["-B", f"{bind_mount}:{bind_mount}"])
 
     command.extend(
         [
@@ -269,10 +321,13 @@ def start_remote_xcpd_run(
     with open(artifacts["command_file"], "w") as f:
         f.write(remote_command + "\n")
 
-    conn = HPCConnection(hpc_cfg)
-    conn.connect()
-    stdout, stderr, exit_code = conn.execute(remote_command, timeout=60)
-    conn.disconnect()
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        stdout, stderr, exit_code = conn.execute(remote_command, timeout=60)
+    finally:
+        _safe_disconnect(conn)
 
     if exit_code != 0:
         raise RuntimeError(stderr or stdout or "Failed to start remote XCP-D run")
@@ -320,16 +375,18 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
     backend = run_info.get("backend", "local")
     if pid:
         if backend == "hpc":
+            conn = None
             try:
                 hpc_cfg = HPCConfig.from_config(config)
                 conn = HPCConnection(hpc_cfg)
                 conn.connect()
                 stdout, _, _ = conn.execute(f"ps -p {int(pid)} -o pid=", timeout=30)
-                conn.disconnect()
                 if stdout.strip():
                     return state
             except Exception:
                 return state
+            finally:
+                _safe_disconnect(conn)
         elif is_process_running(pid):
             return state
 
@@ -352,14 +409,32 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
     pid = int(run_info["pid"])
     try:
         if run_info.get("backend") == "hpc":
+            conn = None
             try:
                 hpc_cfg = HPCConfig.from_config(config)
                 conn = HPCConnection(hpc_cfg)
                 conn.connect()
-                conn.execute(f"kill {pid}", timeout=30)
-                conn.disconnect()
-            except Exception:
-                pass
+                stdout, stderr, exit_code = conn.execute(f"kill {pid}", timeout=30)
+                if exit_code != 0:
+                    raise RuntimeError(stderr or stdout or f"kill exited with status {exit_code}")
+            except Exception as exc:
+                _safe_disconnect(conn)
+                set_step_status(
+                    config,
+                    f"xcpd_{pipeline_name}",
+                    "failed",
+                    f"Failed to stop HPC process: {exc}",
+                    state=state,
+                )
+                append_pipeline_log(
+                    config,
+                    f"Failed to stop XCP-D {pipeline_name.upper()} run on HPC: {exc}",
+                    level="error",
+                    state=state,
+                )
+                return state
+            finally:
+                _safe_disconnect(conn)
         else:
             os.killpg(pid, signal.SIGTERM)
         run_info["status"] = "stopped"

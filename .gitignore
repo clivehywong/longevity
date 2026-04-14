@@ -10,3 +10,4 @@ atlases
 docs/archive
 validation_reports
 tools
+**/__pycache__

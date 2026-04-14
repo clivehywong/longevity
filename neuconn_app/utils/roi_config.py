@@ -79,10 +79,20 @@ def parse_combined_atlas_label_file(label_file: Path) -> List[AtlasLabel]:
     with open(label_file, "r") as f:
         lines = [line.strip() for line in f if line.strip()]
 
+    if len(lines) % 2 != 0:
+        raise ValueError(
+            f"Invalid atlas label file format in {label_file}: expected alternating label/RGBA lines."
+        )
+
     labels: List[AtlasLabel] = []
     for idx in range(0, len(lines), 2):
         label = lines[idx]
-        rgba = [int(value) for value in lines[idx + 1].split()]
+        rgba_parts = lines[idx + 1].split()
+        if len(rgba_parts) < 4:
+            raise ValueError(
+                f"Invalid RGBA/index line for atlas label '{label}' in {label_file}: {lines[idx + 1]}"
+            )
+        rgba = [int(value) for value in rgba_parts]
         labels.append(AtlasLabel(label=label, index=rgba[0], rgb=rgba[1:4]))
     return labels
 
@@ -102,14 +112,29 @@ def filter_labels(
     if network_filter:
         filtered = [label for label in filtered if network_filter in label.label]
     if hemisphere:
-        hemi_token = f"{hemisphere}_"
-        hemi_suffix = f"-{hemisphere.lower()}"
-        filtered = [
-            label
-            for label in filtered
-            if label.label.startswith(hemi_token) or label.label.endswith(hemi_suffix)
-        ]
+        filtered = [label for label in filtered if _matches_hemisphere(label.label, hemisphere)]
     return filtered
+
+
+def _matches_hemisphere(label: str, hemisphere: str) -> bool:
+    normalized = hemisphere.strip().lower()
+    label_norm = label.lower()
+
+    if normalized in {"lh", "left"}:
+        return (
+            "_lh_" in label_norm
+            or label_norm.endswith("-lh")
+            or label_norm.endswith("_lh")
+            or "left" in label_norm
+        )
+    if normalized in {"rh", "right"}:
+        return (
+            "_rh_" in label_norm
+            or label_norm.endswith("-rh")
+            or label_norm.endswith("_rh")
+            or "right" in label_norm
+        )
+    return normalized in label_norm
 
 
 def seed_rois(roi_config: Dict[str, Any]) -> List[Dict[str, Any]]:

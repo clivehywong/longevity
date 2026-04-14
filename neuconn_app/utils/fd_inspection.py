@@ -7,7 +7,6 @@ from __future__ import annotations
 from math import ceil
 from pathlib import Path
 from typing import Dict, List
-import math
 
 import matplotlib
 
@@ -53,6 +52,7 @@ def build_fd_summary(fmriprep_dir: Path, output_dir: Path, tr: float = 0.8) -> p
                 "pct_vols_gt_0.8": float((fd > 0.8).mean() * 100),
                 "pct_vols_gt_1.5": float((fd > 1.5).mean() * 100),
                 "total_volumes": total_volumes,
+                "tr": float(tr),
                 "est_remaining_60s": float((fd <= 0.3).sum() * tr),
                 "est_remaining_100s": float((fd <= 0.5).sum() * tr),
                 "confounds_file": str(confounds_file),

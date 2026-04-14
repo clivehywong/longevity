@@ -195,14 +195,15 @@ def render_path_settings(config: Dict) -> bool:
         ]
 
         for key, label in derived_keys:
-            st.text_input(label, value=paths.get(key, ''), disabled=True, key=f"derived_{key}")
+            st.text_input(label, value=paths.get(key, ''), disabled=True)
 
         if st.form_submit_button("Apply Path Settings"):
             if new_project_root != current_project_root:
                 config['project_root'] = new_project_root
+                rehydrate_project_paths(config)
                 changes = True
             if changes:
-                st.success("Project root updated. Save configuration to persist the new derived layout.")
+                st.success("Project root updated and derived paths refreshed. Save configuration to persist the new layout.")
 
     # Validate BIDS directory
     st.markdown("---")
@@ -237,6 +238,15 @@ def render_path_settings(config: Dict) -> bool:
             st.error(f"BIDS directory does not exist: {expanded_bids}")
 
     return changes
+
+
+def rehydrate_project_paths(config: Dict) -> None:
+    """Recompute derived path defaults after project-root edits."""
+    from utils.config import project_config
+
+    hydrated = project_config.ensure_project_defaults(config)
+    config.clear()
+    config.update(hydrated)
 
 
 def render_hpc_settings(config: Dict) -> bool:

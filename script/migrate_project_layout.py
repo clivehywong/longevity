@@ -15,6 +15,23 @@ import argparse
 import shutil
 
 
+def _ensure_legacy_symlink(legacy_fmriprep: Path, target_fmriprep: Path, dry_run: bool) -> None:
+    if legacy_fmriprep.exists() or legacy_fmriprep.is_symlink():
+        if legacy_fmriprep.is_symlink() and legacy_fmriprep.resolve() == target_fmriprep.resolve():
+            print("Compatibility symlink already exists at project_root/fmriprep")
+            return
+        raise RuntimeError(
+            f"Cannot create compatibility symlink because {legacy_fmriprep} already exists."
+        )
+
+    if dry_run:
+        print("[dry-run] Would create compatibility symlink: fmriprep -> derivatives/preprocessing/fmriprep")
+        return
+
+    legacy_fmriprep.symlink_to(Path("derivatives") / "preprocessing" / "fmriprep")
+    print("Created compatibility symlink at project_root/fmriprep")
+
+
 def migrate_layout(project_root: Path, create_legacy_symlink: bool, dry_run: bool) -> None:
     legacy_fmriprep = project_root / "fmriprep"
     target_fmriprep = project_root / "derivatives" / "preprocessing" / "fmriprep"
@@ -23,9 +40,19 @@ def migrate_layout(project_root: Path, create_legacy_symlink: bool, dry_run: boo
     print(f"Legacy fMRIPrep dir: {legacy_fmriprep}")
     print(f"Target fMRIPrep dir: {target_fmriprep}")
 
-    if target_fmriprep.exists() and legacy_fmriprep.is_symlink():
-        print("Layout already migrated.")
-        return
+    if target_fmriprep.exists():
+        if legacy_fmriprep.is_symlink():
+            print("Layout already migrated.")
+            return
+        if not legacy_fmriprep.exists():
+            print("Layout already migrated (legacy root-level directory already removed).")
+            if create_legacy_symlink:
+                _ensure_legacy_symlink(legacy_fmriprep, target_fmriprep, dry_run)
+            return
+        raise RuntimeError(
+            "Target fMRIPrep directory already exists while the legacy path is still present. "
+            "Resolve the duplicate directories before migrating."
+        )
 
     if not legacy_fmriprep.exists():
         print("No legacy root-level fmriprep/ directory found. Nothing to migrate.")
@@ -40,11 +67,7 @@ def migrate_layout(project_root: Path, create_legacy_symlink: bool, dry_run: boo
         print("Moved fMRIPrep directory into derivatives/preprocessing/fmriprep")
 
     if create_legacy_symlink:
-        if dry_run:
-            print("[dry-run] Would create compatibility symlink: fmriprep -> derivatives/preprocessing/fmriprep")
-        else:
-            legacy_fmriprep.symlink_to(target_fmriprep)
-            print("Created compatibility symlink at project_root/fmriprep")
+        _ensure_legacy_symlink(legacy_fmriprep, target_fmriprep, dry_run)
 
 
 def main() -> None:
@@ -52,8 +75,8 @@ def main() -> None:
     parser.add_argument(
         "--project-root",
         type=Path,
-        default=Path("/home/clivewong/proj/longevity"),
-        help="Path to the project root",
+        default=Path.cwd(),
+        help="Path to the project root (defaults to the current working directory)",
     )
     parser.add_argument(
         "--no-legacy-symlink",
