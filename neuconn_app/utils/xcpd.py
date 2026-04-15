@@ -195,16 +195,14 @@ def build_xcpd_command(
 
     if xcpd_config.get("despike", True):
         command.append("--despike")
-    if xcpd_config.get("bandpass_filter", True):
+    # Bandpass filter is ON by default; only add --disable-bandpass-filter to turn it off
+    if not xcpd_config.get("bandpass_filter", True):
+        command.append("--disable-bandpass-filter")
+    else:
         command.extend([
-            "--bandpass-filter",
-            "--high-pass", str(xcpd_config.get("high_pass", 0.01)),
-            "--low-pass", str(xcpd_config.get("low_pass", 0.08)),
+            "--lower-bpf", str(xcpd_config.get("high_pass", xcpd_config.get("lower_bpf", 0.01))),
+            "--upper-bpf", str(xcpd_config.get("low_pass", xcpd_config.get("upper_bpf", 0.08))),
         ])
-
-    correlation_lengths = xcpd_config.get("correlation_lengths")
-    if correlation_lengths:
-        command.extend(["--correlation-lengths", str(correlation_lengths)])
 
     if fs_license:
         command.extend(["--fs-license-file", fs_license])
@@ -295,16 +293,14 @@ def build_remote_xcpd_command(
 
     if xcpd_config.get("despike", True):
         command.append("--despike")
-    if xcpd_config.get("bandpass_filter", True):
+    # Bandpass filter is ON by default; only add --disable-bandpass-filter to turn it off
+    if not xcpd_config.get("bandpass_filter", True):
+        command.append("--disable-bandpass-filter")
+    else:
         command.extend([
-            "--bandpass-filter",
-            "--high-pass", str(xcpd_config.get("high_pass", 0.01)),
-            "--low-pass", str(xcpd_config.get("low_pass", 0.08)),
+            "--lower-bpf", str(xcpd_config.get("high_pass", xcpd_config.get("lower_bpf", 0.01))),
+            "--upper-bpf", str(xcpd_config.get("low_pass", xcpd_config.get("upper_bpf", 0.08))),
         ])
-
-    correlation_lengths = xcpd_config.get("correlation_lengths")
-    if correlation_lengths:
-        command.extend(["--correlation-lengths", str(correlation_lengths)])
 
     if fs_license:
         command.extend(["--fs-license-file", fs_license])

@@ -128,17 +128,18 @@ Three pipelines run through XCP-D to support both functional connectivity (FC) a
 | `smoothing` | 6 mm | 6 mm | 0 mm | Smoothing boosts BOLD SNR for correlation-based FC; corrupts parcel-level temporal dynamics for EC |
 | `low_pass` | 0.08 Hz | 0.08 Hz | 0.1 Hz | 0.08 Hz is the canonical BOLD FC band; wider band preserves temporal structure for EC |
 | `fd_thresh` | 0.3 mm | 0.3 mm | 0.5 mm | FC tolerates censoring gaps; EC needs maximal data continuity |
-| `correlation_lengths` | 300 s | 300 s | — | Equalises data contribution per participant for FC matrices; not applicable to EC |
 | `min_time` | 240 s | 240 s | 300 s | EC models need longer epochs; 4 min is sufficient for FC matrix estimation |
 
-**Shared settings (all pipelines):** `mode=linc`, `file_format=cifti`, `motion_filter_type=bandstop`, `band_stop_min=12`, `band_stop_max=18`, `high_pass=0.01`, `dummy_scans=auto`, `despike=True`, `bandpass_filter=True`, `head_radius=auto`, `min_coverage=0.5`.
+**Shared settings (all pipelines):** `mode=linc`, `file_format=cifti`, `motion_filter_type=notch`, `band_stop_min=12`, `band_stop_max=18`, `high_pass=0.01`, `dummy_scans=auto`, `despike=True`, `bandpass_filter=True`, `head_radius=auto`, `min_coverage=0.5`.
 
 **Why two FC pipelines?** Global Signal Regression (GSR) is disputed in the FC literature. It can inflate specificity of network-level correlations but also removes genuine neural signal and distorts negative correlations. The default `fc` pipeline uses `acompcor` (no GSR) as the conservative choice. The `fc_gsr` pipeline uses `36P` (which includes GSR) so researchers can directly compare GSR vs. no-GSR results for the same dataset.
 
 ### Config key notes
-- `high_pass` / `low_pass` map to XCP-D CLI flags `--high-pass` / `--low-pass` (XCP-D ≥ 0.6). The old names `lower_bpf` / `upper_bpf` are recognised as fallbacks in `xcpd.py` command builders but are deprecated.
-- `correlation_lengths` is only emitted by the command builder if the config key is present and non-empty; the `ec` pipeline omits it.
-- `despike` and `bandpass_filter` are boolean flags; they emit `--despike` / `--bandpass-filter` only when `True`.
+- `high_pass` / `low_pass` in config map to XCP-D CLI flags `--lower-bpf` / `--upper-bpf`. The old config names `lower_bpf` / `upper_bpf` are also accepted as fallbacks in `xcpd.py` for backward compatibility.
+- Bandpass filtering is **on by default** in XCP-D. When `bandpass_filter=False`, the builder emits `--disable-bandpass-filter`. When `True` (the default), it emits `--lower-bpf` / `--upper-bpf` to set the cutoffs.
+- `despike` is a boolean; emits `--despike` when `True`.
+- `motion_filter_type=notch` is the correct XCP-D value for a band-stop (respiratory) filter. The old value `bandstop` is not recognised by XCP-D; valid choices are `notch`, `lp`, `none`.
+- `--create-matrices` (the XCP-D flag for per-subject equal-length correlation windows) is only valid in `abcd`/`hbcd` modes, not `linc`. There is no equivalent for `linc` mode; the `correlation_lengths` config key is therefore unused and has been removed.
 
 
 - The app is strongest today in QC, configuration, and workflow support.

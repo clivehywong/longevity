@@ -711,6 +711,9 @@ def render_analysis_settings(config: Dict) -> bool:
 > **FC default (`fc`):** `acompcor` — no global signal regression (conservative; GSR is controversial).
 > **FC + GSR (`fc_gsr`):** `36P` — includes GSR for comparison. Use alongside `fc` to assess GSR impact.
 > **Effective Connectivity (`ec`):** `acompcor` — no smoothing, wider bandpass, stricter min-time for temporal precision.
+
+**Motion filter:** `notch` = band-stop filter (removes respiratory artifact ~12–18 BPM); `lp` = low-pass; `none` = disabled.
+**Bandpass filter:** enabled by default. Disable only if you need unfiltered residuals.
 """)
 
         for pipeline_name in ('fc', 'fc_gsr', 'ec'):
@@ -740,8 +743,9 @@ def render_analysis_settings(config: Dict) -> bool:
                     )
                     new_filter_type = st.selectbox(
                         "Motion filter type",
-                        options=["bandstop", "notch", "none"],
-                        index=["bandstop", "notch", "none"].index(pipeline.get("motion_filter_type", "bandstop")),
+                        options=["notch", "lp", "none"],
+                        index=["notch", "lp", "none"].index(pipeline.get("motion_filter_type", "notch") if pipeline.get("motion_filter_type", "notch") in ["notch", "lp", "none"] else "notch"),
+                        help="notch = band-stop (respiratory); lp = low-pass; none = disabled",
                         key=f"xcpd_{pipeline_name}_filter_type",
                     )
                     new_band_min = st.number_input(
@@ -823,15 +827,6 @@ def render_analysis_settings(config: Dict) -> bool:
                         step=10,
                         key=f"xcpd_{pipeline_name}_min_time",
                     )
-                    if pipeline_name in ("fc", "fc_gsr"):
-                        new_corr_lengths = st.number_input(
-                            "Correlation lengths (s)",
-                            min_value=0, max_value=2000,
-                            value=int(pipeline.get("correlation_lengths", 300)),
-                            step=10,
-                            help="Equalises data contribution per participant for FC matrices",
-                            key=f"xcpd_{pipeline_name}_corr_lengths",
-                        )
                     new_output_type = st.selectbox(
                         "Output type",
                         options=["censored", "interpolated", "auto"],
@@ -875,8 +870,6 @@ def render_analysis_settings(config: Dict) -> bool:
                         'file_format': new_file_format,
                         'atlases': normalize_xcpd_atlas_selection(new_atlases),
                     }
-                    if pipeline_name in ("fc", "fc_gsr"):
-                        updates['correlation_lengths'] = new_corr_lengths
                     for key, value in updates.items():
                         if value != pipeline.get(key):
                             pipeline[key] = value
