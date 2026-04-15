@@ -335,6 +335,8 @@ def generate_xcpd_slurm_script(
 
 
 
+def _run_artifact_paths(config: Dict[str, Any], pipeline_name: str) -> Dict[str, Any]:
+    """Create and return local run artifact paths for this pipeline."""
     qc_root = Path(
         config["paths"]["xcpd_fc_qc_dir"]
         if pipeline_name == "fc"
