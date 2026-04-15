@@ -721,6 +721,27 @@ def render_analysis_settings(config: Dict) -> bool:
             with st.form(f"xcpd_{pipeline_name}_form"):
                 label = {"fc": "FC (no GSR)", "fc_gsr": "FC + GSR", "ec": "Effective Connectivity"}[pipeline_name]
                 st.markdown(f"**{label} pipeline (`{pipeline_name}`)**")
+
+                _mode_options = ["linc", "abcd", "hbcd", "nichart", "none"]
+                _current_mode = pipeline.get("mode", "linc")
+                _mode_index = _mode_options.index(_current_mode) if _current_mode in _mode_options else 0
+                new_mode = st.selectbox(
+                    "Pipeline mode",
+                    options=_mode_options,
+                    index=_mode_index,
+                    help=(
+                        "**linc** = LINC/PennLINC standard QC + outputs (recommended for research). "
+                        "abcd/hbcd/nichart = study-specific presets. "
+                        "**none** = manual mode — requires many extra flags, advanced use only."
+                    ),
+                    key=f"xcpd_{pipeline_name}_mode",
+                )
+                if new_mode == "none":
+                    st.warning(
+                        "⚠️ `none` mode requires many additional flags (`--abcc-qc`, `--combine-runs`, etc.) "
+                        "that are not configured here. Use `linc` unless you know what you're doing."
+                    )
+
                 col1, col2, col3 = st.columns(3)
 
                 # --- Column 1: Motion / censoring ---
@@ -852,6 +873,7 @@ def render_analysis_settings(config: Dict) -> bool:
 
                 if st.form_submit_button(f"Apply {label} XCP-D Settings"):
                     updates = {
+                        'mode': new_mode,
                         'nuisance_regressors': new_nuisance,
                         'fd_thresh': new_fd,
                         'motion_filter_type': new_filter_type,

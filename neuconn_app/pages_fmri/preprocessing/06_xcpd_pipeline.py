@@ -26,6 +26,9 @@ from utils.pipeline_state import (
     set_step_status,
 )
 from utils.xcpd import (
+    build_remote_xcpd_command,
+    build_xcpd_command,
+    generate_xcpd_slurm_script,
     refresh_xcpd_run,
     start_remote_xcpd_run,
     start_xcpd_run,
@@ -52,6 +55,7 @@ def render() -> None:
 
     state = load_pipeline_state(config)
     state = refresh_xcpd_run(config, "fc", state)
+    state = refresh_xcpd_run(config, "fc_gsr", state)
     state = refresh_xcpd_run(config, "ec", state)
     save_pipeline_state(config, state)
 
@@ -308,116 +312,147 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
     )
 
     fc_defaults = normalize_xcpd_atlas_selection(config["xcpd"]["fc"].get("atlases", [])) or recommended_xcpd_atlases()
+    fc_gsr_defaults = normalize_xcpd_atlas_selection(config["xcpd"].get("fc_gsr", {}).get("atlases", [])) or recommended_xcpd_atlases()
     ec_defaults = normalize_xcpd_atlas_selection(config["xcpd"]["ec"].get("atlases", [])) or recommended_xcpd_atlases()
-    atlas_options = atlas_option_ids(config, list(fc_defaults) + list(ec_defaults))
+    atlas_options = atlas_option_ids(config, list(fc_defaults) + list(fc_gsr_defaults) + list(ec_defaults))
 
     st.markdown("### Atlas Selection")
-    atlas_col1, atlas_col2 = st.columns(2)
+    atlas_col1, atlas_col2, atlas_col3 = st.columns(3)
     with atlas_col1:
         selected_fc_atlases = st.multiselect(
             "FC atlases",
             options=atlas_options,
-            default=[atlas_id for atlas_id in fc_defaults if atlas_id in atlas_options],
+            default=[a for a in fc_defaults if a in atlas_options],
             format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
             key="xcpd_fc_run_atlases",
-            help="Choose one or more atlases to apply during the FC XCP-D run.",
+            help="Atlases for the FC (no-GSR) pipeline.",
         )
     with atlas_col2:
+        selected_fc_gsr_atlases = st.multiselect(
+            "FC+GSR atlases",
+            options=atlas_options,
+            default=[a for a in fc_gsr_defaults if a in atlas_options],
+            format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
+            key="xcpd_fc_gsr_run_atlases",
+            help="Atlases for the FC + GSR comparison pipeline.",
+        )
+    with atlas_col3:
         selected_ec_atlases = st.multiselect(
             "EC atlases",
             options=atlas_options,
-            default=[atlas_id for atlas_id in ec_defaults if atlas_id in atlas_options],
+            default=[a for a in ec_defaults if a in atlas_options],
             format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
             key="xcpd_ec_run_atlases",
-            help="Choose one or more atlases to apply during the EC XCP-D run.",
+            help="Atlases for the effective connectivity pipeline.",
         )
 
-    atlas_rows = build_xcpd_atlas_status_rows(
-        config,
-        list(selected_fc_atlases) + list(selected_ec_atlases),
-    )
+    all_selected_atlases = list(selected_fc_atlases) + list(selected_fc_gsr_atlases) + list(selected_ec_atlases)
+    atlas_rows = build_xcpd_atlas_status_rows(config, all_selected_atlases)
     if atlas_rows:
         with st.expander("Atlas availability", expanded=False):
             st.dataframe(atlas_rows, width="stretch", hide_index=True)
 
     fc_info = state.get("runs", {}).get("xcpd_fc", {})
+    fc_gsr_info = state.get("runs", {}).get("xcpd_fc_gsr", {})
     ec_info = state.get("runs", {}).get("xcpd_ec", {})
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.subheader("FC Pipeline")
-        st.code(" ".join(selected_fc_atlases), language="text")
-        st.caption(f"Status: {fc_info.get('status', state['steps']['xcpd_fc']['status'])}")
-        if fc_info.get("job_id"):
-            st.caption(f"SLURM job ID: {fc_info['job_id']}")
-        elif fc_info.get("pid"):
-            st.caption(f"PID: {fc_info['pid']}")
-        if fc_info.get("local_script") and Path(fc_info["local_script"]).exists():
-            with st.expander("View SLURM Script"):
-                st.code(Path(fc_info["local_script"]).read_text(), language="bash")
-        if fc_info.get("remote_log_out"):
-            st.caption(f"Remote log: {fc_info['remote_log_out']}")
-        if st.button("Start FC XCP-D", width="stretch"):
-            missing = missing_xcpd_atlas_resources(config, selected_fc_atlases)
-            if missing:
-                st.error("Missing atlas resources: " + ", ".join(str(path) for path in missing))
-            else:
-                try:
-                    config["xcpd"]["fc"]["atlases"] = normalize_xcpd_atlas_selection(selected_fc_atlases)
-                    save_runtime_config(config)
-                    if run_on_hpc:
-                        run_info = start_remote_xcpd_run(config, "fc", selected_subjects or None, sessions or None)
-                    else:
-                        run_info = start_xcpd_run(config, "fc", selected_subjects or None, sessions or None)
-                    job_label = f"job {run_info.get('job_id', run_info.get('pid', '?'))}"
-                    st.success(f"Started FC XCP-D ({job_label})")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to start FC XCP-D: {e}")
-        if fc_info.get("status") == "running":
-            if st.button("Stop FC XCP-D", width="stretch"):
-                stop_xcpd_run(config, "fc", state)
-                st.rerun()
-        if fc_info.get("log_file"):
-            st.caption(fc_info["log_file"])
-
+        _render_pipeline_panel(
+            config, state, "fc", "FC (no GSR)", selected_fc_atlases,
+            fc_info, run_on_hpc, selected_subjects, sessions,
+        )
     with col2:
-        st.subheader("EC Pipeline")
-        st.code(" ".join(selected_ec_atlases), language="text")
-        st.caption(f"Status: {ec_info.get('status', state['steps']['xcpd_ec']['status'])}")
-        if ec_info.get("job_id"):
-            st.caption(f"SLURM job ID: {ec_info['job_id']}")
-        elif ec_info.get("pid"):
-            st.caption(f"PID: {ec_info['pid']}")
-        st.info("EC pipeline runs without scrubbing and uses interpolated output.")
-        if ec_info.get("local_script") and Path(ec_info["local_script"]).exists():
-            with st.expander("View SLURM Script"):
-                st.code(Path(ec_info["local_script"]).read_text(), language="bash")
-        if ec_info.get("remote_log_out"):
-            st.caption(f"Remote log: {ec_info['remote_log_out']}")
-        if st.button("Start EC XCP-D", width="stretch"):
-            missing = missing_xcpd_atlas_resources(config, selected_ec_atlases)
-            if missing:
-                st.error("Missing atlas resources: " + ", ".join(str(path) for path in missing))
-            else:
-                try:
-                    config["xcpd"]["ec"]["atlases"] = normalize_xcpd_atlas_selection(selected_ec_atlases)
-                    save_runtime_config(config)
-                    if run_on_hpc:
-                        run_info = start_remote_xcpd_run(config, "ec", selected_subjects or None, sessions or None)
-                    else:
-                        run_info = start_xcpd_run(config, "ec", selected_subjects or None, sessions or None)
-                    job_label = f"job {run_info.get('job_id', run_info.get('pid', '?'))}"
-                    st.success(f"Started EC XCP-D ({job_label})")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to start EC XCP-D: {e}")
-        if ec_info.get("status") == "running":
-            if st.button("Stop EC XCP-D", width="stretch"):
-                stop_xcpd_run(config, "ec", state)
+        _render_pipeline_panel(
+            config, state, "fc_gsr", "FC + GSR", selected_fc_gsr_atlases,
+            fc_gsr_info, run_on_hpc, selected_subjects, sessions,
+            extra_note="36P regressors including global signal regression. Run alongside FC to compare.",
+        )
+    with col3:
+        _render_pipeline_panel(
+            config, state, "ec", "Effective Connectivity", selected_ec_atlases,
+            ec_info, run_on_hpc, selected_subjects, sessions,
+            extra_note="No scrubbing; interpolated output; no smoothing; wider bandpass.",
+        )
+
+
+def _render_pipeline_panel(
+    config: Dict,
+    state: Dict,
+    pipeline_name: str,
+    label: str,
+    selected_atlases: List[str],
+    run_info: Dict,
+    run_on_hpc: bool,
+    selected_subjects: List[str],
+    sessions: List[str],
+    extra_note: str = "",
+) -> None:
+    """Render the run/status panel for a single XCP-D pipeline."""
+    step_key = f"xcpd_{pipeline_name}"
+    st.subheader(label)
+    st.caption(f"mode: `{config['xcpd'].get(pipeline_name, {}).get('mode', 'linc')}`")
+    st.code(" ".join(selected_atlases) if selected_atlases else "(no atlases)", language="text")
+    if extra_note:
+        st.info(extra_note)
+
+    step_status = state["steps"].get(step_key, {}).get("status", "not_started")
+    st.caption(f"Status: {run_info.get('status', step_status)}")
+    if run_info.get("job_id"):
+        st.caption(f"SLURM job ID: {run_info['job_id']}")
+    elif run_info.get("pid"):
+        st.caption(f"PID: {run_info['pid']}")
+    if run_info.get("local_script") and Path(run_info["local_script"]).exists():
+        with st.expander("View SLURM Script"):
+            st.code(Path(run_info["local_script"]).read_text(), language="bash")
+    if run_info.get("remote_log_out"):
+        st.caption(f"Remote log: {run_info['remote_log_out']}")
+
+    if st.button(f"Start {label} XCP-D", key=f"start_{pipeline_name}", width="stretch"):
+        missing = missing_xcpd_atlas_resources(config, selected_atlases)
+        if missing:
+            st.error("Missing atlas resources: " + ", ".join(str(p) for p in missing))
+        else:
+            try:
+                config["xcpd"][pipeline_name]["atlases"] = normalize_xcpd_atlas_selection(selected_atlases)
+                save_runtime_config(config)
+                if run_on_hpc:
+                    info = start_remote_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
+                else:
+                    info = start_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
+                job_label = f"job {info.get('job_id', info.get('pid', '?'))}"
+                st.success(f"Started {label} XCP-D ({job_label})")
                 st.rerun()
-        if ec_info.get("log_file"):
-            st.caption(ec_info["log_file"])
+            except Exception as e:
+                st.error(f"Failed to start {label} XCP-D: {e}")
+    if run_info.get("status") == "running":
+        if st.button(f"Stop {label} XCP-D", key=f"stop_{pipeline_name}", width="stretch"):
+            stop_xcpd_run(config, pipeline_name, state)
+            st.rerun()
+    if run_info.get("log_file"):
+        st.caption(run_info["log_file"])
+
+    # Script / command preview — shown after the action buttons so the user can
+    # verify exactly what will be (or was) submitted without cluttering the flow.
+    expander_label = "Preview SLURM script" if run_on_hpc else "Preview command"
+    with st.expander(expander_label, expanded=False):
+        try:
+            if run_on_hpc:
+                script = generate_xcpd_slurm_script(
+                    config, pipeline_name,
+                    [s.removeprefix("sub-") for s in selected_subjects] if selected_subjects else None,
+                    [s.removeprefix("ses-") for s in sessions] if sessions else None,
+                )
+                st.code(script, language="bash")
+            else:
+                cmd = build_xcpd_command(
+                    config, pipeline_name,
+                    selected_subjects or None,
+                    sessions or None,
+                )
+                st.code(" \\\n  ".join(cmd), language="bash")
+        except Exception as exc:
+            st.warning(f"Cannot build preview: {exc}")
 
 
 def render_logs(config: Dict, state: Dict) -> None:

@@ -313,6 +313,15 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
         else:
             xcpd.setdefault(key, value)
 
+    # Heal None mode values: YAML `mode: none` (unquoted) is parsed as Python None,
+    # which str(None)="None" causes XCP-D to fall into "none" mode unexpectedly.
+    _VALID_XCPD_MODES = {"linc", "abcd", "hbcd", "nichart", "none"}
+    for _pipeline_key in ("fc", "fc_gsr", "ec"):
+        if _pipeline_key in xcpd and isinstance(xcpd[_pipeline_key], dict):
+            _current_mode = xcpd[_pipeline_key].get("mode")
+            if not _current_mode or _current_mode not in _VALID_XCPD_MODES:
+                xcpd[_pipeline_key]["mode"] = "linc"
+
     if not xcpd.get("singularity_bind_mounts"):
         xcpd["singularity_bind_mounts"] = default_bind_mounts(project_root)
     else:
