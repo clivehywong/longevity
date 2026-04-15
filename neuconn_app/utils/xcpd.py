@@ -135,7 +135,8 @@ def build_xcpd_command(
     bind_mounts = _local_bind_mounts(config)
     selected_atlases = normalize_xcpd_atlas_selection(xcpd_config.get("atlases", []))
 
-    output_dir = paths["xcpd_fc_dir"] if pipeline_name == "fc" else paths["xcpd_ec_dir"]
+    output_dir_key = f"xcpd_{pipeline_name}_dir"
+    output_dir = paths.get(output_dir_key) or paths["xcpd_fc_dir"]
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     command = ["singularity", "run"]
@@ -161,6 +162,8 @@ def build_xcpd_command(
             str(xcpd_config["mode"]),
             "-p",
             str(xcpd_config["nuisance_regressors"]),
+            "--dummy-scans",
+            str(xcpd_config.get("dummy_scans", "auto")),
             "-f",
             str(xcpd_config["fd_thresh"]),
             "--min-time",
@@ -171,12 +174,12 @@ def build_xcpd_command(
             str(xcpd_config["band_stop_min"]),
             "--band-stop-max",
             str(xcpd_config["band_stop_max"]),
-            "--lower-bpf",
-            str(xcpd_config["lower_bpf"]),
-            "--upper-bpf",
-            str(xcpd_config["upper_bpf"]),
             "--smoothing",
             str(xcpd_config["smoothing"]),
+            "--head-radius",
+            str(xcpd_config.get("head_radius", "auto")),
+            "--min-coverage",
+            str(xcpd_config.get("min_coverage", 0.5)),
             "--output-type",
             str(xcpd_config["output_type"]),
             "--output-layout",
@@ -184,11 +187,24 @@ def build_xcpd_command(
             "--input-type",
             str(xcpd_config.get("input_type", "fmriprep")),
             "--file-format",
-            str(xcpd_config.get("file_format", "nifti")),
+            str(xcpd_config.get("file_format", "cifti")),
             "--report-output-level",
             str(xcpd_config.get("report_output_level", "session")),
         ]
     )
+
+    if xcpd_config.get("despike", True):
+        command.append("--despike")
+    if xcpd_config.get("bandpass_filter", True):
+        command.extend([
+            "--bandpass-filter",
+            "--high-pass", str(xcpd_config.get("high_pass", 0.01)),
+            "--low-pass", str(xcpd_config.get("low_pass", 0.08)),
+        ])
+
+    correlation_lengths = xcpd_config.get("correlation_lengths")
+    if correlation_lengths:
+        command.extend(["--correlation-lengths", str(correlation_lengths)])
 
     if fs_license:
         command.extend(["--fs-license-file", fs_license])
@@ -219,7 +235,12 @@ def build_remote_xcpd_command(
     hpc_cfg = HPCConfig.from_config(config)
     xcpd_config = config["xcpd"][pipeline_name]
     image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
-    remote_output = hpc_cfg.remote_xcpd_fc if pipeline_name == "fc" else hpc_cfg.remote_xcpd_ec
+    if pipeline_name == "fc":
+        remote_output = hpc_cfg.remote_xcpd_fc
+    elif pipeline_name == "fc_gsr":
+        remote_output = hpc_cfg.remote_xcpd_fc_gsr
+    else:
+        remote_output = hpc_cfg.remote_xcpd_ec
     selected_atlases = normalize_xcpd_atlas_selection(xcpd_config.get("atlases", []))
 
     bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
@@ -241,6 +262,8 @@ def build_remote_xcpd_command(
             str(xcpd_config["mode"]),
             "-p",
             str(xcpd_config["nuisance_regressors"]),
+            "--dummy-scans",
+            str(xcpd_config.get("dummy_scans", "auto")),
             "-f",
             str(xcpd_config["fd_thresh"]),
             "--min-time",
@@ -251,12 +274,12 @@ def build_remote_xcpd_command(
             str(xcpd_config["band_stop_min"]),
             "--band-stop-max",
             str(xcpd_config["band_stop_max"]),
-            "--lower-bpf",
-            str(xcpd_config["lower_bpf"]),
-            "--upper-bpf",
-            str(xcpd_config["upper_bpf"]),
             "--smoothing",
             str(xcpd_config["smoothing"]),
+            "--head-radius",
+            str(xcpd_config.get("head_radius", "auto")),
+            "--min-coverage",
+            str(xcpd_config.get("min_coverage", 0.5)),
             "--output-type",
             str(xcpd_config["output_type"]),
             "--output-layout",
@@ -264,11 +287,24 @@ def build_remote_xcpd_command(
             "--input-type",
             str(xcpd_config.get("input_type", "fmriprep")),
             "--file-format",
-            str(xcpd_config.get("file_format", "nifti")),
+            str(xcpd_config.get("file_format", "cifti")),
             "--report-output-level",
             str(xcpd_config.get("report_output_level", "session")),
         ]
     )
+
+    if xcpd_config.get("despike", True):
+        command.append("--despike")
+    if xcpd_config.get("bandpass_filter", True):
+        command.extend([
+            "--bandpass-filter",
+            "--high-pass", str(xcpd_config.get("high_pass", 0.01)),
+            "--low-pass", str(xcpd_config.get("low_pass", 0.08)),
+        ])
+
+    correlation_lengths = xcpd_config.get("correlation_lengths")
+    if correlation_lengths:
+        command.extend(["--correlation-lengths", str(correlation_lengths)])
 
     if fs_license:
         command.extend(["--fs-license-file", fs_license])
@@ -303,7 +339,12 @@ def generate_xcpd_slurm_script(
         raise RuntimeError("jinja2 is required but not installed")
 
     hpc_cfg = HPCConfig.from_config(config)
-    remote_output = hpc_cfg.remote_xcpd_fc if pipeline_name == "fc" else hpc_cfg.remote_xcpd_ec
+    if pipeline_name == "fc":
+        remote_output = hpc_cfg.remote_xcpd_fc
+    elif pipeline_name == "fc_gsr":
+        remote_output = hpc_cfg.remote_xcpd_fc_gsr
+    else:
+        remote_output = hpc_cfg.remote_xcpd_ec
 
     # Build the full singularity command, then strip off the "singularity run -B … image"
     # prefix to get just the XCP-D CLI arguments.
@@ -355,11 +396,8 @@ def generate_xcpd_slurm_script(
 
 def _run_artifact_paths(config: Dict[str, Any], pipeline_name: str) -> Dict[str, Any]:
     """Create and return local run artifact paths for this pipeline."""
-    qc_root = Path(
-        config["paths"]["xcpd_fc_qc_dir"]
-        if pipeline_name == "fc"
-        else config["paths"]["xcpd_ec_qc_dir"]
-    )
+    qc_dir_key = f"xcpd_{pipeline_name}_qc_dir"
+    qc_root = Path(config["paths"].get(qc_dir_key) or config["paths"]["xcpd_fc_qc_dir"])
     qc_root.mkdir(parents=True, exist_ok=True)
     run_dir = qc_root / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir.mkdir(parents=True, exist_ok=True)

@@ -693,91 +693,197 @@ def render_analysis_settings(config: Dict) -> bool:
             config['xcpd'] = {}
         xcpd = config['xcpd']
 
-        for pipeline_name in ('fc', 'ec'):
+        st.markdown("""
+**Confound Pipeline Reference**
+
+| Pipeline | Motion (6P) | WM | CSF | Global Signal | aCompCor | AROMA |
+|---|---|---|---|---|---|---|
+| `24P` | X, X², ΔX, ΔX² | | | | | |
+| `27P` | X, X², ΔX, ΔX² | X | X | X | | |
+| `36P` | X, X², ΔX, ΔX² | X, X², ΔX, ΔX² | X, X², ΔX, ΔX² | X, X², ΔX, ΔX² | | |
+| `acompcor` | X, ΔX | | | | 5 WM + 5 CSF | |
+| `acompcor_gsr` | X, ΔX | | | X | 5 WM + 5 CSF | |
+| `aroma` | X, ΔX | X | X | | | X |
+| `aroma_gsr` | X, ΔX | X | X | X | | X |
+| `gsr_only` | | | | X | | |
+| `none` | | | | | | |
+
+> **FC default (`fc`):** `acompcor` — no global signal regression (conservative; GSR is controversial).
+> **FC + GSR (`fc_gsr`):** `36P` — includes GSR for comparison. Use alongside `fc` to assess GSR impact.
+> **Effective Connectivity (`ec`):** `acompcor` — no smoothing, wider bandpass, stricter min-time for temporal precision.
+""")
+
+        for pipeline_name in ('fc', 'fc_gsr', 'ec'):
             pipeline = xcpd.setdefault(pipeline_name, {})
             with st.form(f"xcpd_{pipeline_name}_form"):
-                st.markdown(f"**{pipeline_name.upper()} pipeline**")
-                col1, col2 = st.columns(2)
+                label = {"fc": "FC (no GSR)", "fc_gsr": "FC + GSR", "ec": "Effective Connectivity"}[pipeline_name]
+                st.markdown(f"**{label} pipeline (`{pipeline_name}`)**")
+                col1, col2, col3 = st.columns(3)
 
+                # --- Column 1: Motion / censoring ---
                 with col1:
+                    st.markdown("**Motion & censoring**")
+                    new_nuisance = st.selectbox(
+                        "Nuisance regressors",
+                        options=["24P", "27P", "36P", "acompcor", "acompcor_gsr", "aroma", "aroma_gsr", "gsr_only", "none"],
+                        index=["24P", "27P", "36P", "acompcor", "acompcor_gsr", "aroma", "aroma_gsr", "gsr_only", "none"].index(
+                            pipeline.get("nuisance_regressors", "36P" if pipeline_name == "fc_gsr" else "acompcor")
+                        ),
+                        key=f"xcpd_{pipeline_name}_nuisance",
+                    )
                     new_fd = st.number_input(
-                        f"{pipeline_name.upper()} FD threshold",
-                        min_value=0.0,
-                        max_value=2.0,
-                        value=float(pipeline.get('fd_thresh', 0.5 if pipeline_name == 'fc' else 0.0)),
+                        "FD threshold (mm)",
+                        min_value=0.0, max_value=2.0,
+                        value=float(pipeline.get("fd_thresh", 0.3 if pipeline_name in ("fc", "fc_gsr") else 0.5)),
                         step=0.05,
                         key=f"xcpd_{pipeline_name}_fd",
                     )
-                    new_min_time = st.number_input(
-                        f"{pipeline_name.upper()} minimum time (s)",
-                        min_value=0,
-                        max_value=2000,
-                        value=int(pipeline.get('min_time', 100 if pipeline_name == 'fc' else 0)),
-                        step=10,
-                        key=f"xcpd_{pipeline_name}_min_time",
+                    new_filter_type = st.selectbox(
+                        "Motion filter type",
+                        options=["bandstop", "notch", "none"],
+                        index=["bandstop", "notch", "none"].index(pipeline.get("motion_filter_type", "bandstop")),
+                        key=f"xcpd_{pipeline_name}_filter_type",
                     )
-                    new_output_type = st.selectbox(
-                        f"{pipeline_name.upper()} output type",
-                        options=["censored", "interpolated", "auto"],
-                        index=["censored", "interpolated", "auto"].index(pipeline.get('output_type', 'censored' if pipeline_name == 'fc' else 'interpolated')),
-                        key=f"xcpd_{pipeline_name}_output_type",
+                    new_band_min = st.number_input(
+                        "Band-stop min (BPM)",
+                        min_value=0, max_value=60,
+                        value=int(pipeline.get("band_stop_min", 12)),
+                        step=1,
+                        key=f"xcpd_{pipeline_name}_band_min",
+                    )
+                    new_band_max = st.number_input(
+                        "Band-stop max (BPM)",
+                        min_value=0, max_value=60,
+                        value=int(pipeline.get("band_stop_max", 18)),
+                        step=1,
+                        key=f"xcpd_{pipeline_name}_band_max",
                     )
 
+                # --- Column 2: Denoising / signal ---
                 with col2:
+                    st.markdown("**Denoising & signal**")
+                    new_dummy = st.text_input(
+                        "Dummy scans",
+                        value=str(pipeline.get("dummy_scans", "auto")),
+                        help="Number of initial volumes to discard, or 'auto'",
+                        key=f"xcpd_{pipeline_name}_dummy",
+                    )
+                    new_despike = st.checkbox(
+                        "Despike",
+                        value=bool(pipeline.get("despike", True)),
+                        key=f"xcpd_{pipeline_name}_despike",
+                    )
                     new_smoothing = st.number_input(
-                        f"{pipeline_name.upper()} smoothing (mm)",
-                        min_value=0.0,
-                        max_value=20.0,
-                        value=float(pipeline.get('smoothing', 6.0)),
+                        "Smoothing FWHM (mm)",
+                        min_value=0.0, max_value=20.0,
+                        value=float(pipeline.get("smoothing", 0.0 if pipeline_name == "ec" else 6.0)),
                         step=0.5,
                         key=f"xcpd_{pipeline_name}_smoothing",
                     )
-                    new_low = st.number_input(
-                        f"{pipeline_name.upper()} lower BPF",
-                        min_value=0.0,
-                        max_value=1.0,
-                        value=float(pipeline.get('lower_bpf', 0.01)),
-                        step=0.01,
-                        format="%.2f",
-                        key=f"xcpd_{pipeline_name}_low",
+                    new_bpf = st.checkbox(
+                        "Bandpass filter",
+                        value=bool(pipeline.get("bandpass_filter", True)),
+                        key=f"xcpd_{pipeline_name}_bpf",
                     )
-                    new_high = st.number_input(
-                        f"{pipeline_name.upper()} upper BPF",
-                        min_value=0.0,
-                        max_value=1.0,
-                        value=float(pipeline.get('upper_bpf', 0.10)),
-                        step=0.01,
-                        format="%.2f",
-                        key=f"xcpd_{pipeline_name}_high",
+                    new_high_pass = st.number_input(
+                        "High-pass (Hz)",
+                        min_value=0.0, max_value=1.0,
+                        value=float(pipeline.get("high_pass", pipeline.get("lower_bpf", 0.01))),
+                        step=0.005, format="%.3f",
+                        key=f"xcpd_{pipeline_name}_high_pass",
+                    )
+                    new_low_pass = st.number_input(
+                        "Low-pass (Hz)",
+                        min_value=0.0, max_value=1.0,
+                        value=float(pipeline.get("low_pass", pipeline.get("upper_bpf", 0.1 if pipeline_name == "ec" else 0.08))),
+                        step=0.005, format="%.3f",
+                        key=f"xcpd_{pipeline_name}_low_pass",
+                    )
+
+                # --- Column 3: Quality / output ---
+                with col3:
+                    st.markdown("**Quality & output**")
+                    new_head_radius = st.text_input(
+                        "Head radius",
+                        value=str(pipeline.get("head_radius", "auto")),
+                        help="Head radius in mm for FD computation, or 'auto'",
+                        key=f"xcpd_{pipeline_name}_head_radius",
+                    )
+                    new_min_coverage = st.number_input(
+                        "Min parcel coverage",
+                        min_value=0.0, max_value=1.0,
+                        value=float(pipeline.get("min_coverage", 0.5)),
+                        step=0.05, format="%.2f",
+                        key=f"xcpd_{pipeline_name}_min_coverage",
+                    )
+                    new_min_time = st.number_input(
+                        "Minimum time (s)",
+                        min_value=0, max_value=2000,
+                        value=int(pipeline.get("min_time", 300 if pipeline_name == "ec" else 240)),
+                        step=10,
+                        key=f"xcpd_{pipeline_name}_min_time",
+                    )
+                    if pipeline_name in ("fc", "fc_gsr"):
+                        new_corr_lengths = st.number_input(
+                            "Correlation lengths (s)",
+                            min_value=0, max_value=2000,
+                            value=int(pipeline.get("correlation_lengths", 300)),
+                            step=10,
+                            help="Equalises data contribution per participant for FC matrices",
+                            key=f"xcpd_{pipeline_name}_corr_lengths",
+                        )
+                    new_output_type = st.selectbox(
+                        "Output type",
+                        options=["censored", "interpolated", "auto"],
+                        index=["censored", "interpolated", "auto"].index(pipeline.get("output_type", "censored")),
+                        key=f"xcpd_{pipeline_name}_output_type",
+                    )
+                    new_file_format = st.selectbox(
+                        "File format",
+                        options=["cifti", "nifti"],
+                        index=["cifti", "nifti"].index(pipeline.get("file_format", "cifti")),
+                        key=f"xcpd_{pipeline_name}_file_format",
                     )
 
                 current_atlases = normalize_xcpd_atlas_selection(pipeline.get('atlases', [])) or recommended_xcpd_atlases()
                 atlas_options = atlas_option_ids(config, current_atlases)
                 new_atlases = st.multiselect(
-                    f"{pipeline_name.upper()} atlases",
+                    f"Atlases",
                     options=atlas_options,
                     default=[atlas for atlas in current_atlases if atlas in atlas_options],
                     format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
                     key=f"xcpd_{pipeline_name}_atlases",
                 )
 
-                if st.form_submit_button(f"Apply {pipeline_name.upper()} XCP-D Settings"):
+                if st.form_submit_button(f"Apply {label} XCP-D Settings"):
                     updates = {
+                        'nuisance_regressors': new_nuisance,
                         'fd_thresh': new_fd,
+                        'motion_filter_type': new_filter_type,
+                        'band_stop_min': new_band_min,
+                        'band_stop_max': new_band_max,
+                        'dummy_scans': new_dummy,
+                        'despike': new_despike,
+                        'smoothing': new_smoothing,
+                        'bandpass_filter': new_bpf,
+                        'high_pass': new_high_pass,
+                        'low_pass': new_low_pass,
+                        'head_radius': new_head_radius,
+                        'min_coverage': new_min_coverage,
                         'min_time': new_min_time,
                         'output_type': new_output_type,
-                        'smoothing': new_smoothing,
-                        'lower_bpf': new_low,
-                        'upper_bpf': new_high,
+                        'file_format': new_file_format,
                         'atlases': normalize_xcpd_atlas_selection(new_atlases),
                     }
+                    if pipeline_name in ("fc", "fc_gsr"):
+                        updates['correlation_lengths'] = new_corr_lengths
                     for key, value in updates.items():
                         if value != pipeline.get(key):
                             pipeline[key] = value
                             changes = True
                     if changes:
                         st.warning("Changing this parameter will require re-running XCP-D. Proceed?")
-                        st.success(f"{pipeline_name.upper()} XCP-D settings updated")
+                        st.success(f"{label} XCP-D settings updated")
 
     # Connectivity settings
     with st.expander("Connectivity Analysis Settings"):

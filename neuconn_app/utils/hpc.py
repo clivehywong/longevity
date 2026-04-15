@@ -67,6 +67,7 @@ class HPCConfig:
     remote_bids: str = ""
     remote_fmriprep: str = ""
     remote_xcpd_fc: str = ""
+    remote_xcpd_fc_gsr: str = ""
     remote_xcpd_ec: str = ""
     remote_work: str = ""
     singularity_fmriprep: str = ""
@@ -99,6 +100,7 @@ class HPCConfig:
         bids = remote.get('bids', '').replace('${base}', base)
         fmriprep = remote.get('fmriprep', '').replace('${base}', base)
         xcpd_fc = remote.get('xcpd_fc', '').replace('${base}', base)
+        xcpd_fc_gsr = remote.get('xcpd_fc_gsr', '').replace('${base}', base)
         xcpd_ec = remote.get('xcpd_ec', '').replace('${base}', base)
         work = remote.get('work', '').replace('${base}', base)
 
@@ -110,6 +112,7 @@ class HPCConfig:
             remote_bids=bids,
             remote_fmriprep=fmriprep,
             remote_xcpd_fc=xcpd_fc,
+            remote_xcpd_fc_gsr=xcpd_fc_gsr,
             remote_xcpd_ec=xcpd_ec,
             remote_work=work,
             singularity_fmriprep=singularity.get('fmriprep', ''),

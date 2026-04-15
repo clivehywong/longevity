@@ -43,6 +43,7 @@ hpc:
     bids: "${base}/bids"
     fmriprep: "${base}/derivatives/preprocessing/fmriprep"
     xcpd_fc: "${base}/derivatives/preprocessing/xcpd/fc"
+    xcpd_fc_gsr: "${base}/derivatives/preprocessing/xcpd/fc_gsr"
     xcpd_ec: "${base}/derivatives/preprocessing/xcpd/ec"
     work: "${base}/work"
   singularity_images:
@@ -96,42 +97,80 @@ fmriprep:
 
 xcpd:
   singularity_image_path: "/home/clivewong/software/xcp-d-26.0.2.sif"
+  # FC: functional connectivity, conservative (no GSR)
   fc:
-    mode: "none"
-    nuisance_regressors: "36P"
-    fd_thresh: 0.5
-    min_time: 100
-    motion_filter_type: "notch"
+    mode: "linc"
+    nuisance_regressors: "acompcor"
+    fd_thresh: 0.3
+    min_time: 240
+    motion_filter_type: "bandstop"
     band_stop_min: 12
-    band_stop_max: 20
-    lower_bpf: 0.01
-    upper_bpf: 0.10
+    band_stop_max: 18
+    high_pass: 0.01
+    low_pass: 0.08
     smoothing: 6.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "nifti"
+    file_format: "cifti"
     output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
     output_run_wise_correlations: true
-  ec:
-    mode: "none"
+    dummy_scans: "auto"
+    despike: true
+    bandpass_filter: true
+    head_radius: "auto"
+    min_coverage: 0.5
+    correlation_lengths: 300
+  # FC-GSR: same as FC but with global signal regression (36P) for comparison
+  fc_gsr:
+    mode: "linc"
     nuisance_regressors: "36P"
-    fd_thresh: 0.0
-    min_time: 0
-    motion_filter_type: "notch"
+    fd_thresh: 0.3
+    min_time: 240
+    motion_filter_type: "bandstop"
     band_stop_min: 12
-    band_stop_max: 20
-    lower_bpf: 0.01
-    upper_bpf: 0.10
+    band_stop_max: 18
+    high_pass: 0.01
+    low_pass: 0.08
     smoothing: 6.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "nifti"
+    file_format: "cifti"
+    output_type: "censored"
+    output_layout: "bids"
+    report_output_level: "session"
+    output_run_wise_correlations: true
+    dummy_scans: "auto"
+    despike: true
+    bandpass_filter: true
+    head_radius: "auto"
+    min_coverage: 0.5
+    correlation_lengths: 300
+  # EC: effective connectivity (no GSR, no smoothing, longer min_time)
+  ec:
+    mode: "linc"
+    nuisance_regressors: "acompcor"
+    fd_thresh: 0.5
+    min_time: 300
+    motion_filter_type: "bandstop"
+    band_stop_min: 12
+    band_stop_max: 18
+    high_pass: 0.01
+    low_pass: 0.10
+    smoothing: 0.0
+    atlases: ["LongevitySchaefer200", "Tian"]
+    input_type: "fmriprep"
+    file_format: "cifti"
     output_type: "interpolated"
     output_layout: "bids"
     report_output_level: "session"
     output_run_wise_correlations: true
+    dummy_scans: "auto"
+    despike: true
+    bandpass_filter: true
+    head_radius: "auto"
+    min_coverage: 0.5
 
 subject_exclusion:
   mean_fd_threshold: 0.5

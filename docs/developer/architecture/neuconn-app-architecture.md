@@ -118,7 +118,28 @@ The "Software / Images" tab was separated from HPC Settings so local execution p
 | `utils/qa_image_generator.py` | image generation used by both app and CLI-style workflows |
 | `utils/pipeline_state.py` | pipeline gate summaries and state loading |
 
-## Current practical notes
+## XCP-D pipeline parameter rationale
+
+Three pipelines run through XCP-D to support both functional connectivity (FC) analysis and effective connectivity (EC) modelling.
+
+| Parameter | `fc` | `fc_gsr` | `ec` | Rationale |
+|---|---|---|---|---|
+| `nuisance_regressors` | `acompcor` | `36P` | `acompcor` | `acompcor` avoids GSR (controversial); `36P` includes GSR for comparison |
+| `smoothing` | 6 mm | 6 mm | 0 mm | Smoothing boosts BOLD SNR for correlation-based FC; corrupts parcel-level temporal dynamics for EC |
+| `low_pass` | 0.08 Hz | 0.08 Hz | 0.1 Hz | 0.08 Hz is the canonical BOLD FC band; wider band preserves temporal structure for EC |
+| `fd_thresh` | 0.3 mm | 0.3 mm | 0.5 mm | FC tolerates censoring gaps; EC needs maximal data continuity |
+| `correlation_lengths` | 300 s | 300 s | — | Equalises data contribution per participant for FC matrices; not applicable to EC |
+| `min_time` | 240 s | 240 s | 300 s | EC models need longer epochs; 4 min is sufficient for FC matrix estimation |
+
+**Shared settings (all pipelines):** `mode=linc`, `file_format=cifti`, `motion_filter_type=bandstop`, `band_stop_min=12`, `band_stop_max=18`, `high_pass=0.01`, `dummy_scans=auto`, `despike=True`, `bandpass_filter=True`, `head_radius=auto`, `min_coverage=0.5`.
+
+**Why two FC pipelines?** Global Signal Regression (GSR) is disputed in the FC literature. It can inflate specificity of network-level correlations but also removes genuine neural signal and distorts negative correlations. The default `fc` pipeline uses `acompcor` (no GSR) as the conservative choice. The `fc_gsr` pipeline uses `36P` (which includes GSR) so researchers can directly compare GSR vs. no-GSR results for the same dataset.
+
+### Config key notes
+- `high_pass` / `low_pass` map to XCP-D CLI flags `--high-pass` / `--low-pass` (XCP-D ≥ 0.6). The old names `lower_bpf` / `upper_bpf` are recognised as fallbacks in `xcpd.py` command builders but are deprecated.
+- `correlation_lengths` is only emitted by the command builder if the config key is present and non-empty; the `ec` pipeline omits it.
+- `despike` and `bandpass_filter` are boolean flags; they emit `--despike` / `--bandpass-filter` only when `True`.
+
 
 - The app is strongest today in QC, configuration, and workflow support.
 - Several pages still represent scaffolding or future work.
