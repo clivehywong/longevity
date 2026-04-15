@@ -47,7 +47,7 @@ hpc:
     work: "${base}/work"
   singularity_images:
     fmriprep: "/home/clivewong/software/fmriprep-25.1.4.simg"
-    xcp_d: "/home/clivewong/software/xcp_d.sif"
+    xcp_d: "/home/clivewong/software/xcp-d-26.0.2.sif"
     freesurfer_license: "/home/clivewong/freesurfer/license.txt"
   transfer:
     modalities: ["anat", "fmap", "func"]
@@ -75,7 +75,7 @@ fmriprep:
   legacy_symlink: true
 
 xcpd:
-  singularity_image_path: "/home/clivewong/software/xcp_d.sif"
+  singularity_image_path: "/home/clivewong/software/xcp-d-26.0.2.sif"
   singularity_bind_mounts:
     - "/home/clivewong/proj/longevity"
     - "/home/clivewong/proj/longevity/bids"

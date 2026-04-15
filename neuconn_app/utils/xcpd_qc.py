@@ -43,7 +43,7 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
         st.write(qc_report_summary(ec_qc))
         exclusions = build_ec_exclusion_table(config)
         if exclusions is not None:
-            st.dataframe(exclusions, use_container_width=True, hide_index=True)
+            st.dataframe(exclusions, width="stretch", hide_index=True)
             exclusions.to_csv(qc_dirs["ec"] / "ec_exclusions.csv", index=False)
 
     qcfc_value = compute_qc_fc_summary(config)

@@ -34,7 +34,7 @@ def render() -> None:
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Refresh FC manifests", use_container_width=True):
+        if st.button("Refresh FC manifests", width="stretch"):
             manifests = refresh_subject_level_fc(config)
             append_pipeline_log(
                 config,
@@ -46,7 +46,7 @@ def render() -> None:
         if st.button(
             "Export atlas-based seed summaries",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=not qc_approved,
         ):
             exports = export_seed_level_outputs(config)
@@ -77,14 +77,14 @@ def render() -> None:
 
     if not inventory.empty:
         st.subheader("Available FC inputs")
-        st.dataframe(inventory, use_container_width=True, hide_index=True)
+        st.dataframe(inventory, width="stretch", hide_index=True)
     else:
         st.info("No FC manifests yet. Refresh them after XCP-D FC completes.")
         return
 
     if not seed_support.empty:
         st.subheader("Seed support")
-        st.dataframe(seed_support, use_container_width=True, hide_index=True)
+        st.dataframe(seed_support, width="stretch", hide_index=True)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -96,7 +96,7 @@ def render() -> None:
                 seed_timeseries[
                     ["subject_id", "session", "atlas", "seed_count", "seed_ids", "export_file"]
                 ],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
             preview_seed_timeseries(seed_timeseries)
@@ -110,7 +110,7 @@ def render() -> None:
                 seed_connectivity[
                     ["subject_id", "session", "atlas", "seed_count", "seed_ids", "matrix_file"]
                 ],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
             preview_seed_matrix(seed_connectivity)
@@ -125,7 +125,7 @@ def preview_seed_timeseries(seed_timeseries: pd.DataFrame) -> None:
     export_file = Path(options[label])
     if export_file.exists():
         preview = pd.read_csv(export_file, sep="\t").head(20)
-        st.dataframe(preview, use_container_width=True, hide_index=True)
+        st.dataframe(preview, width="stretch", hide_index=True)
 
 
 def preview_seed_matrix(seed_connectivity: pd.DataFrame) -> None:
@@ -137,7 +137,7 @@ def preview_seed_matrix(seed_connectivity: pd.DataFrame) -> None:
     export_file = Path(options[label])
     if export_file.exists():
         preview = pd.read_csv(export_file, sep="\t", index_col=0)
-        st.dataframe(preview, use_container_width=True)
+        st.dataframe(preview, width="stretch")
 
 
 if __name__ == "__main__":

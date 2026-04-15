@@ -172,7 +172,7 @@ def render():
                 st.info(f"**{len(selected_to_exclude)}** images selected")
 
             with col2:
-                if st.button("🗑️ Move Selected to Excluded", type="primary", use_container_width=True):
+                if st.button("🗑️ Move Selected to Excluded", type="primary", width="stretch"):
                     # Confirm
                     if 'confirm_exclude' not in st.session_state:
                         st.session_state.confirm_exclude = True

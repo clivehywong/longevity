@@ -222,17 +222,17 @@ def render_cache_section(bids_dir: Path):
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                if st.button("Pre-Generate All", key="gen_all", use_container_width=True):
+                if st.button("Pre-Generate All", key="gen_all", width="stretch"):
                     start_background_generation(cache)
                     st.rerun()
 
             with col2:
-                if st.button("Generate Missing Only", key="gen_missing", use_container_width=True):
+                if st.button("Generate Missing Only", key="gen_missing", width="stretch"):
                     start_background_generation(cache, force=False)
                     st.rerun()
 
             with col3:
-                if st.button("Clear Cache", key="clear_cache", use_container_width=True):
+                if st.button("Clear Cache", key="clear_cache", width="stretch"):
                     cache.clear_cache()
                     st.success("Cache cleared!")
                     st.rerun()

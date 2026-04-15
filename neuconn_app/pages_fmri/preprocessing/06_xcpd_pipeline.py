@@ -101,7 +101,7 @@ def render_fd_inspection(config: Dict, state: Dict) -> None:
 
     col1, col2 = st.columns([1, 2])
     with col1:
-        if st.button("Generate / Refresh FD Summary", use_container_width=True):
+        if st.button("Generate / Refresh FD Summary", width="stretch"):
             configured_tr = float(config.get("connectivity", {}).get("local_measures", {}).get("tr") or 0.8)
             summary = build_fd_summary(
                 fmriprep_dir=fmriprep_dir,
@@ -204,7 +204,7 @@ def render_fd_inspection(config: Dict, state: Dict) -> None:
                 }
             )
         )
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        st.dataframe(styled, width="stretch", hide_index=True)
 
         for plot_name in (
             "fd_group_histogram.png",
@@ -338,7 +338,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
     )
     if atlas_rows:
         with st.expander("Atlas availability", expanded=False):
-            st.dataframe(atlas_rows, use_container_width=True, hide_index=True)
+            st.dataframe(atlas_rows, width="stretch", hide_index=True)
 
     fc_info = state.get("runs", {}).get("xcpd_fc", {})
     ec_info = state.get("runs", {}).get("xcpd_ec", {})
@@ -348,7 +348,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         st.subheader("FC Pipeline")
         st.code(" ".join(selected_fc_atlases), language="text")
         st.caption(f"Status: {fc_info.get('status', state['steps']['xcpd_fc']['status'])}")
-        if st.button("Start FC XCP-D", use_container_width=True):
+        if st.button("Start FC XCP-D", width="stretch"):
             missing = missing_xcpd_atlas_resources(config, selected_fc_atlases)
             if missing:
                 st.error("Missing atlas resources: " + ", ".join(str(path) for path in missing))
@@ -365,7 +365,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                 except Exception as e:
                     st.error(f"Failed to start FC XCP-D: {e}")
         if fc_info.get("status") == "running":
-            if st.button("Stop FC XCP-D", use_container_width=True):
+            if st.button("Stop FC XCP-D", width="stretch"):
                 stop_xcpd_run(config, "fc", state)
                 st.rerun()
         if fc_info.get("log_file"):
@@ -376,7 +376,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         st.code(" ".join(selected_ec_atlases), language="text")
         st.caption(f"Status: {ec_info.get('status', state['steps']['xcpd_ec']['status'])}")
         st.info("EC pipeline runs without scrubbing and uses interpolated output.")
-        if st.button("Start EC XCP-D", use_container_width=True):
+        if st.button("Start EC XCP-D", width="stretch"):
             missing = missing_xcpd_atlas_resources(config, selected_ec_atlases)
             if missing:
                 st.error("Missing atlas resources: " + ", ".join(str(path) for path in missing))
@@ -393,7 +393,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                 except Exception as e:
                     st.error(f"Failed to start EC XCP-D: {e}")
         if ec_info.get("status") == "running":
-            if st.button("Stop EC XCP-D", use_container_width=True):
+            if st.button("Stop EC XCP-D", width="stretch"):
                 stop_xcpd_run(config, "ec", state)
                 st.rerun()
         if ec_info.get("log_file"):
@@ -405,7 +405,7 @@ def render_logs(config: Dict, state: Dict) -> None:
     if log_rows.empty:
         st.caption("No pipeline log entries yet.")
     else:
-        st.dataframe(log_rows, use_container_width=True, hide_index=True)
+        st.dataframe(log_rows, width="stretch", hide_index=True)
 
     for run_key in ("xcpd_fc", "xcpd_ec"):
         run_info = state.get("runs", {}).get(run_key)

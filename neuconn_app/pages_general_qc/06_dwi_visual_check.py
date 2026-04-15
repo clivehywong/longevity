@@ -39,12 +39,12 @@ def render():
 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("◀ Previous", key="prev_dwi", use_container_width=True):
+            if st.button("◀ Previous", key="prev_dwi", width="stretch"):
                 if st.session_state.dwi_subject_idx > 0:
                     st.session_state.dwi_subject_idx -= 1
                     st.rerun()
         with col2:
-            if st.button("Next ▶", key="next_dwi", use_container_width=True):
+            if st.button("Next ▶", key="next_dwi", width="stretch"):
                 if st.session_state.dwi_subject_idx < len(subjects) - 1:
                     st.session_state.dwi_subject_idx += 1
                     st.rerun()
