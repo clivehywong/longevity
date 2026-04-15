@@ -462,7 +462,7 @@ def render_logs(config: Dict, state: Dict) -> None:
     else:
         st.dataframe(log_rows, width="stretch", hide_index=True)
 
-    for run_key in ("xcpd_fc", "xcpd_ec"):
+    for run_key in ("xcpd_fc", "xcpd_fc_gsr", "xcpd_ec"):
         run_info = state.get("runs", {}).get(run_key)
         if not run_info or not run_info.get("log_file"):
             continue
