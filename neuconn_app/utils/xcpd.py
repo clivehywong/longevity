@@ -142,6 +142,14 @@ def build_xcpd_command(
     for bind_mount in bind_mounts:
         command.extend(["-B", _bind_arg(bind_mount)])
 
+    # Bind-mount the FreeSurfer license file if it's not already covered
+    fs_license = os.path.expanduser(
+        config.get("software", {}).get("singularity_images", {}).get("freesurfer_license", "")
+        or config.get("xcpd", {}).get("freesurfer_license", "")
+    )
+    if fs_license and Path(fs_license).exists():
+        command.extend(["-B", f"{fs_license}:{fs_license}"])
+
     dataset_root = ensure_xcpd_atlas_dataset(config, selected_atlases)
     command.extend(
         [
@@ -182,6 +190,9 @@ def build_xcpd_command(
         ]
     )
 
+    if fs_license:
+        command.extend(["--fs-license-file", fs_license])
+
     command.extend(atlas_cli_dataset_args(config, selected_atlases, str(dataset_root) if dataset_root else None))
     if selected_atlases:
         command.extend(["--atlases", *[str(atlas) for atlas in selected_atlases]])
@@ -215,6 +226,10 @@ def build_remote_xcpd_command(
     command = ["singularity", "run"]
     for bind_mount in bind_mounts:
         command.extend(["-B", f"{bind_mount}:{bind_mount}"])
+
+    fs_license = os.path.expanduser(hpc_cfg.freesurfer_license or "")
+    if fs_license:
+        command.extend(["-B", f"{fs_license}:{fs_license}"])
 
     command.extend(
         [
@@ -254,6 +269,9 @@ def build_remote_xcpd_command(
             str(xcpd_config.get("report_output_level", "session")),
         ]
     )
+
+    if fs_license:
+        command.extend(["--fs-license-file", fs_license])
 
     command.extend(atlas_cli_dataset_args(config, selected_atlases, remote_dataset_root))
     if selected_atlases:
