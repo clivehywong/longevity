@@ -122,6 +122,7 @@ def _local_bind_mounts(config: Dict[str, Any]) -> List[str]:
 
 
 
+def build_xcpd_command(
     config: Dict[str, Any],
     pipeline_name: str,
     participant_labels: Optional[Iterable[str]] = None,
