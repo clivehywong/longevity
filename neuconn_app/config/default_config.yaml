@@ -53,9 +53,9 @@ hpc:
   singularity_images:
     fmriprep: "/path/to/fmriprep.sif"
     xcp_d: "~/software/xcp-d-26.0.2.sif"
-    fmripost_aroma: "/path/to/fmripost-aroma.sif"
-    qsiprep: "/path/to/qsiprep.sif"
-    qsirecon: "/path/to/qsirecon.sif"
+    fmripost_aroma: ""
+    qsiprep: ""
+    qsirecon: ""
     freesurfer_license: "/path/to/license.txt"
 
   transfer:
@@ -70,6 +70,23 @@ hpc:
     max_concurrent_jobs: 4
     batch_size: 4
     poll_interval: 300
+    xcpd_cpus: 16
+    xcpd_memory: "64GB"
+    xcpd_time: "12:00:00"
+
+software:
+  singularity_images:
+    fmriprep: "~/software/fmriprep-25.1.4.simg"
+    xcp_d: "~/software/xcp-d-26.0.2.sif"
+    fmripost_aroma: ""
+    qsiprep: ""
+    qsirecon: ""
+    freesurfer_license: "~/freesurfer/license.txt"
+  singularity_bind_mounts:
+    - "${project_root}"
+    - "${bids_dir}"
+    - "${derivatives_dir}"
+    - "~/software"
 
 fmriprep:
   version: "25.2.5"

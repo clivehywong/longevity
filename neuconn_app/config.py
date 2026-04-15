@@ -315,6 +315,38 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
         ["hpc", "singularity_images", "xcp_d"],
         os.path.expanduser(DEFAULT_XCPD_IMAGE),
     )
+    _setdefault_nested(hydrated, ["hpc", "singularity_images", "fmripost_aroma"], "")
+    _setdefault_nested(hydrated, ["hpc", "singularity_images", "qsiprep"], "")
+    _setdefault_nested(hydrated, ["hpc", "singularity_images", "qsirecon"], "")
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_cpus"], 16)
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_memory"], "64GB")
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_time"], "12:00:00")
+
+    # software.singularity_images: local image paths for all tools
+    software = hydrated.setdefault("software", {})
+    simg = software.setdefault("singularity_images", {})
+    simg.setdefault("fmriprep", os.path.expanduser("~/software/fmriprep-25.1.4.simg"))
+    simg.setdefault("xcp_d", os.path.expanduser(DEFAULT_XCPD_IMAGE))
+    simg.setdefault("fmripost_aroma", "")
+    simg.setdefault("qsiprep", "")
+    simg.setdefault("qsirecon", "")
+    simg.setdefault("freesurfer_license", os.path.expanduser("~/freesurfer/license.txt"))
+    if not software.get("singularity_bind_mounts"):
+        software["singularity_bind_mounts"] = default_bind_mounts(project_root)
+    else:
+        bind_mounts = [
+            _resolve_template_value(str(m), derived_paths)
+            for m in software["singularity_bind_mounts"]
+        ]
+        for required in default_bind_mounts(project_root):
+            if required not in bind_mounts:
+                bind_mounts.append(required)
+        software["singularity_bind_mounts"] = list(dict.fromkeys(bind_mounts))
+    # Expand ~ in local image paths
+    for key in ("fmriprep", "xcp_d", "fmripost_aroma", "qsiprep", "qsirecon", "freesurfer_license"):
+        val = simg.get(key, "")
+        if val:
+            simg[key] = os.path.expanduser(str(val))
 
     return hydrated
 

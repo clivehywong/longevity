@@ -48,6 +48,9 @@ hpc:
   singularity_images:
     fmriprep: "/home/clivewong/software/fmriprep-25.1.4.simg"
     xcp_d: "/home/clivewong/software/xcp-d-26.0.2.sif"
+    fmripost_aroma: ""
+    qsiprep: ""
+    qsirecon: ""
     freesurfer_license: "/home/clivewong/freesurfer/license.txt"
   transfer:
     modalities: ["anat", "fmap", "func"]
@@ -60,6 +63,23 @@ hpc:
     max_concurrent_jobs: 4
     batch_size: 4
     poll_interval: 300
+    xcpd_cpus: 16
+    xcpd_memory: "64GB"
+    xcpd_time: "12:00:00"
+
+software:
+  singularity_images:
+    fmriprep: "/home/clivewong/software/fmriprep-25.1.4.simg"
+    xcp_d: "/home/clivewong/software/xcp-d-26.0.2.sif"
+    fmripost_aroma: ""
+    qsiprep: ""
+    qsirecon: ""
+    freesurfer_license: "/home/clivewong/freesurfer/license.txt"
+  singularity_bind_mounts:
+    - "/home/clivewong/proj/longevity"
+    - "/home/clivewong/proj/longevity/bids"
+    - "/home/clivewong/proj/longevity/derivatives"
+    - "/home/clivewong/software"
 
 fmriprep:
   version: "25.1.4"
@@ -76,11 +96,6 @@ fmriprep:
 
 xcpd:
   singularity_image_path: "/home/clivewong/software/xcp-d-26.0.2.sif"
-  singularity_bind_mounts:
-    - "/home/clivewong/proj/longevity"
-    - "/home/clivewong/proj/longevity/bids"
-    - "/home/clivewong/proj/longevity/derivatives"
-    - "/home/clivewong/software"
   fc:
     mode: "none"
     nuisance_regressors: "36P"

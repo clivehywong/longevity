@@ -13,6 +13,12 @@ import shlex
 import signal
 import subprocess
 
+try:
+    from jinja2 import Environment, FileSystemLoader
+except ImportError:
+    Environment = None  # type: ignore[assignment,misc]
+    FileSystemLoader = None  # type: ignore[assignment]
+
 from utils.pipeline_state import set_run_info, set_step_status, append_pipeline_log
 from utils.hpc import HPCConfig, HPCConnection
 from utils.xcpd_atlases import (
@@ -94,7 +100,28 @@ def _build_remote_bind_mounts(config: Dict[str, Any], hpc_cfg: HPCConfig) -> Lis
     )
 
 
-def build_xcpd_command(
+def _local_xcpd_image(config: Dict[str, Any]) -> str:
+    """Return the resolved local XCP-D Singularity image path.
+
+    Preference order:
+    1. software.singularity_images.xcp_d  (new canonical key)
+    2. xcpd.singularity_image_path        (legacy key, kept for backward compat)
+    """
+    software_path = config.get("software", {}).get("singularity_images", {}).get("xcp_d", "")
+    if software_path:
+        return os.path.expanduser(software_path)
+    return os.path.expanduser(config["xcpd"]["singularity_image_path"])
+
+
+def _local_bind_mounts(config: Dict[str, Any]) -> List[str]:
+    """Return local bind mounts, preferring software.singularity_bind_mounts."""
+    mounts = config.get("software", {}).get("singularity_bind_mounts")
+    if mounts:
+        return mounts
+    return config["xcpd"].get("singularity_bind_mounts", [])
+
+
+
     config: Dict[str, Any],
     pipeline_name: str,
     participant_labels: Optional[Iterable[str]] = None,
@@ -103,8 +130,8 @@ def build_xcpd_command(
     """Build the Singularity command for an XCP-D run."""
     paths = config["paths"]
     xcpd_config = config["xcpd"][pipeline_name]
-    image_path = os.path.expanduser(config["xcpd"]["singularity_image_path"])
-    bind_mounts = config["xcpd"].get("singularity_bind_mounts", [])
+    image_path = _local_xcpd_image(config)
+    bind_mounts = _local_bind_mounts(config)
     selected_atlases = normalize_xcpd_atlas_selection(xcpd_config.get("atlases", []))
 
     output_dir = paths["xcpd_fc_dir"] if pipeline_name == "fc" else paths["xcpd_ec_dir"]
@@ -242,7 +269,71 @@ def build_remote_xcpd_command(
     return command
 
 
-def _run_artifact_paths(config: Dict[str, Any], pipeline_name: str) -> Dict[str, Path]:
+def generate_xcpd_slurm_script(
+    config: Dict[str, Any],
+    pipeline_name: str,
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+    remote_dataset_root: Optional[str] = None,
+) -> str:
+    """Render the XCP-D SLURM batch script using the xcpd_slurm.j2 template.
+
+    Returns the rendered script as a string.
+    """
+    if Environment is None:
+        raise RuntimeError("jinja2 is required but not installed")
+
+    hpc_cfg = HPCConfig.from_config(config)
+    remote_output = hpc_cfg.remote_xcpd_fc if pipeline_name == "fc" else hpc_cfg.remote_xcpd_ec
+
+    # Build the full singularity command, then strip off the "singularity run -B … image"
+    # prefix to get just the XCP-D CLI arguments.
+    full_command = build_remote_xcpd_command(
+        config,
+        pipeline_name,
+        participant_labels=participant_labels,
+        session_ids=session_ids,
+        remote_dataset_root=remote_dataset_root,
+    )
+    # full_command = ["singularity", "run", "-B", "...", ..., image_path, fmriprep_dir, ...]
+    # Split at the image path to get post-image args; the template handles bind mounts separately.
+    image_path = hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"]
+    try:
+        img_idx = full_command.index(image_path)
+        xcpd_args = " ".join(shlex.quote(p) for p in full_command[img_idx + 1:])
+    except ValueError:
+        # Fallback: use everything after the last bind-mount argument
+        xcpd_args = " ".join(shlex.quote(p) for p in full_command[2:])
+
+    bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
+
+    cpus = hpc_cfg.xcpd_cpus if hpc_cfg.xcpd_cpus else hpc_cfg.cpus
+    memory = hpc_cfg.xcpd_memory if hpc_cfg.xcpd_memory else hpc_cfg.memory
+    time_limit = hpc_cfg.xcpd_time_limit if hpc_cfg.xcpd_time_limit else hpc_cfg.time_limit
+
+    templates_dir = Path(__file__).parent.parent / "templates"
+    env = Environment(loader=FileSystemLoader(str(templates_dir)))
+    template = env.get_template("xcpd_slurm.j2")
+
+    return template.render(
+        job_name=f"xcpd_{pipeline_name}",
+        pipeline=pipeline_name,
+        partition=hpc_cfg.partition,
+        cpus=cpus,
+        memory=memory,
+        time_limit=time_limit,
+        remote_base=hpc_cfg.remote_base,
+        remote_output=remote_output,
+        remote_fmriprep=hpc_cfg.remote_fmriprep,
+        remote_work=hpc_cfg.remote_work,
+        singularity_image=image_path,
+        bind_mounts=bind_mounts,
+        xcpd_args=xcpd_args,
+        participants=list(_strip_bids_prefix(participant_labels, "sub-") or []),
+    )
+
+
+
     qc_root = Path(
         config["paths"]["xcpd_fc_qc_dir"]
         if pipeline_name == "fc"
@@ -313,61 +404,70 @@ def start_remote_xcpd_run(
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
-    """Start an XCP-D run on the configured HPC host via SSH."""
+    """Submit an XCP-D SLURM job on the configured HPC host."""
     artifacts = _run_artifact_paths(config, pipeline_name)
     hpc_cfg = HPCConfig.from_config(config)
     selected_atlases = normalize_xcpd_atlas_selection(config["xcpd"][pipeline_name].get("atlases", []))
     remote_dataset_root = _sync_remote_xcpd_atlas_dataset(config, selected_atlases, hpc_cfg)
-    command = build_remote_xcpd_command(
+
+    # Render SLURM script
+    script_content = generate_xcpd_slurm_script(
         config,
         pipeline_name,
         participant_labels=participant_labels,
         session_ids=session_ids,
         remote_dataset_root=remote_dataset_root,
     )
-    remote_output = hpc_cfg.remote_xcpd_fc if pipeline_name == "fc" else hpc_cfg.remote_xcpd_ec
-    remote_log = f"{hpc_cfg.remote_base}/{pipeline_name}_xcpd.log"
-    remote_command = (
-        f"mkdir -p {shlex.quote(str(remote_output))} "
-        f"{shlex.quote(str(hpc_cfg.remote_work))} && "
-        f"{{ command -v module &>/dev/null && module load singularity 2>/dev/null || true; }} && "
-        f"nohup {' '.join(shlex.quote(part) for part in command)} > {shlex.quote(remote_log)} 2>&1 & echo $!"
-    )
 
-    with open(artifacts["command_file"], "w") as f:
-        f.write(remote_command + "\n")
+    # Save script locally for inspection
+    local_script = artifacts["run_dir"] / f"xcpd_{pipeline_name}_job.sh"
+    with open(local_script, "w") as f:
+        f.write(script_content)
+
+    # Upload script to HPC and submit
+    remote_script = f"{hpc_cfg.remote_base}/xcpd_{pipeline_name}_job.sh"
+    remote_log_out = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_${{SLURM_JOB_ID}}.out"
+    remote_log_err = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_${{SLURM_JOB_ID}}.err"
 
     conn = None
     try:
         conn = HPCConnection(hpc_cfg)
         conn.connect()
-        stdout, stderr, exit_code = conn.execute(remote_command, timeout=60)
+        conn.write_file(remote_script, script_content)
+        mkdir_cmd = f"mkdir -p {shlex.quote(f'{hpc_cfg.remote_base}/logs')}"
+        conn.execute(mkdir_cmd, timeout=30)
+        sbatch_cmd = f"sbatch {shlex.quote(remote_script)}"
+        stdout, stderr, exit_code = conn.execute(sbatch_cmd, timeout=60)
     finally:
         _safe_disconnect(conn)
 
     if exit_code != 0:
-        raise RuntimeError(stderr or stdout or "Failed to start remote XCP-D run")
+        raise RuntimeError(stderr or stdout or "sbatch failed")
 
-    pid = int(stdout.strip().splitlines()[-1])
+    # sbatch stdout: "Submitted batch job 12345"
+    job_id = stdout.strip().split()[-1]
+
     run_info = {
         "pipeline": pipeline_name,
-        "pid": pid,
+        "job_id": job_id,
         "status": "running",
         "backend": "hpc",
-        "command": command,
-        "remote_log": remote_log,
+        "remote_script": remote_script,
+        "remote_log_out": remote_log_out,
+        "remote_log_err": remote_log_err,
         "started_at": datetime.now().isoformat(),
         "participant_labels": list(participant_labels or []),
         "session_ids": list(session_ids or []),
         "run_dir": str(artifacts["run_dir"]),
         "log_file": str(artifacts["log_file"]),
+        "local_script": str(local_script),
     }
     with open(artifacts["manifest_file"], "w") as f:
         json.dump(run_info, f, indent=2)
 
     set_run_info(config, f"xcpd_{pipeline_name}", run_info)
-    set_step_status(config, f"xcpd_{pipeline_name}", "running", f"HPC pid {pid}")
-    append_pipeline_log(config, f"Started remote XCP-D {pipeline_name.upper()} run (pid={pid})")
+    set_step_status(config, f"xcpd_{pipeline_name}", "running", f"SLURM job {job_id}")
+    append_pipeline_log(config, f"Submitted XCP-D {pipeline_name.upper()} SLURM job {job_id}")
     return run_info
 
 
@@ -387,24 +487,43 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
     if not run_info:
         return state
 
-    pid = run_info.get("pid")
     backend = run_info.get("backend", "local")
-    if pid:
-        if backend == "hpc":
-            conn = None
-            try:
-                hpc_cfg = HPCConfig.from_config(config)
-                conn = HPCConnection(hpc_cfg)
-                conn.connect()
-                stdout, _, _ = conn.execute(f"ps -p {int(pid)} -o pid=", timeout=30)
-                if stdout.strip():
-                    return state
-            except Exception:
+    job_id = run_info.get("job_id")
+    pid = run_info.get("pid")
+
+    if backend == "hpc" and job_id:
+        conn = None
+        try:
+            hpc_cfg = HPCConfig.from_config(config)
+            conn = HPCConnection(hpc_cfg)
+            conn.connect()
+            stdout, _, _ = conn.execute(
+                f"squeue -j {shlex.quote(str(job_id))} -h -o %T 2>/dev/null || sacct -j {shlex.quote(str(job_id))} -n -o State 2>/dev/null | head -1",
+                timeout=30,
+            )
+            slurm_state = stdout.strip().upper()
+            if slurm_state in ("RUNNING", "PENDING", "COMPLETING"):
                 return state
-            finally:
-                _safe_disconnect(conn)
-        elif is_process_running(pid):
+        except Exception:
             return state
+        finally:
+            _safe_disconnect(conn)
+    elif backend == "hpc" and pid:
+        # Legacy: old runs tracked by PID
+        conn = None
+        try:
+            hpc_cfg = HPCConfig.from_config(config)
+            conn = HPCConnection(hpc_cfg)
+            conn.connect()
+            stdout, _, _ = conn.execute(f"ps -p {int(pid)} -o pid=", timeout=30)
+            if stdout.strip():
+                return state
+        except Exception:
+            return state
+        finally:
+            _safe_disconnect(conn)
+    elif pid and is_process_running(pid):
+        return state
 
     run_info["status"] = "completed"
     run_info["completed_at"] = datetime.now().isoformat()
@@ -416,30 +535,37 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
 
 
 def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, Any]) -> Dict[str, Any]:
-    """Terminate a running XCP-D process."""
+    """Terminate a running XCP-D process or cancel a SLURM job."""
     run_key = f"xcpd_{pipeline_name}"
     run_info = state.get("runs", {}).get(run_key)
-    if not run_info or not run_info.get("pid"):
+    if not run_info:
         return state
 
-    pid = int(run_info["pid"])
+    backend = run_info.get("backend", "local")
+    job_id = run_info.get("job_id")
+    pid = run_info.get("pid")
+
     try:
-        if run_info.get("backend") == "hpc":
+        if backend == "hpc":
             conn = None
             try:
                 hpc_cfg = HPCConfig.from_config(config)
                 conn = HPCConnection(hpc_cfg)
                 conn.connect()
-                stdout, stderr, exit_code = conn.execute(f"kill {pid}", timeout=30)
+                if job_id:
+                    cancel_cmd = f"scancel {shlex.quote(str(job_id))}"
+                else:
+                    cancel_cmd = f"kill {int(pid)}"
+                stdout, stderr, exit_code = conn.execute(cancel_cmd, timeout=30)
                 if exit_code != 0:
-                    raise RuntimeError(stderr or stdout or f"kill exited with status {exit_code}")
+                    raise RuntimeError(stderr or stdout or f"Cancel exited with status {exit_code}")
             except Exception as exc:
                 _safe_disconnect(conn)
                 set_step_status(
                     config,
                     f"xcpd_{pipeline_name}",
                     "failed",
-                    f"Failed to stop HPC process: {exc}",
+                    f"Failed to stop HPC job: {exc}",
                     state=state,
                 )
                 append_pipeline_log(
@@ -451,8 +577,9 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
                 return state
             finally:
                 _safe_disconnect(conn)
-        else:
-            os.killpg(pid, signal.SIGTERM)
+        elif pid:
+            os.killpg(int(pid), signal.SIGTERM)
+
         run_info["status"] = "stopped"
         run_info["stopped_at"] = datetime.now().isoformat()
         state["runs"][run_key] = run_info

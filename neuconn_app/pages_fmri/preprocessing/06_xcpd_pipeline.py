@@ -348,6 +348,15 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         st.subheader("FC Pipeline")
         st.code(" ".join(selected_fc_atlases), language="text")
         st.caption(f"Status: {fc_info.get('status', state['steps']['xcpd_fc']['status'])}")
+        if fc_info.get("job_id"):
+            st.caption(f"SLURM job ID: {fc_info['job_id']}")
+        elif fc_info.get("pid"):
+            st.caption(f"PID: {fc_info['pid']}")
+        if fc_info.get("local_script") and Path(fc_info["local_script"]).exists():
+            with st.expander("View SLURM Script"):
+                st.code(Path(fc_info["local_script"]).read_text(), language="bash")
+        if fc_info.get("remote_log_out"):
+            st.caption(f"Remote log: {fc_info['remote_log_out']}")
         if st.button("Start FC XCP-D", width="stretch"):
             missing = missing_xcpd_atlas_resources(config, selected_fc_atlases)
             if missing:
@@ -360,7 +369,8 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                         run_info = start_remote_xcpd_run(config, "fc", selected_subjects or None, sessions or None)
                     else:
                         run_info = start_xcpd_run(config, "fc", selected_subjects or None, sessions or None)
-                    st.success(f"Started FC XCP-D (pid={run_info['pid']})")
+                    job_label = f"job {run_info.get('job_id', run_info.get('pid', '?'))}"
+                    st.success(f"Started FC XCP-D ({job_label})")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to start FC XCP-D: {e}")
@@ -375,7 +385,16 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         st.subheader("EC Pipeline")
         st.code(" ".join(selected_ec_atlases), language="text")
         st.caption(f"Status: {ec_info.get('status', state['steps']['xcpd_ec']['status'])}")
+        if ec_info.get("job_id"):
+            st.caption(f"SLURM job ID: {ec_info['job_id']}")
+        elif ec_info.get("pid"):
+            st.caption(f"PID: {ec_info['pid']}")
         st.info("EC pipeline runs without scrubbing and uses interpolated output.")
+        if ec_info.get("local_script") and Path(ec_info["local_script"]).exists():
+            with st.expander("View SLURM Script"):
+                st.code(Path(ec_info["local_script"]).read_text(), language="bash")
+        if ec_info.get("remote_log_out"):
+            st.caption(f"Remote log: {ec_info['remote_log_out']}")
         if st.button("Start EC XCP-D", width="stretch"):
             missing = missing_xcpd_atlas_resources(config, selected_ec_atlases)
             if missing:
@@ -388,7 +407,8 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                         run_info = start_remote_xcpd_run(config, "ec", selected_subjects or None, sessions or None)
                     else:
                         run_info = start_xcpd_run(config, "ec", selected_subjects or None, sessions or None)
-                    st.success(f"Started EC XCP-D (pid={run_info['pid']})")
+                    job_label = f"job {run_info.get('job_id', run_info.get('pid', '?'))}"
+                    st.success(f"Started EC XCP-D ({job_label})")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to start EC XCP-D: {e}")

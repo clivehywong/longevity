@@ -71,6 +71,9 @@ class HPCConfig:
     remote_work: str = ""
     singularity_fmriprep: str = ""
     singularity_xcpd: str = ""
+    singularity_fmripost_aroma: str = ""
+    singularity_qsiprep: str = ""
+    singularity_qsirecon: str = ""
     freesurfer_license: str = ""
     partition: str = "shared_cpu"
     cpus: int = 8
@@ -78,6 +81,9 @@ class HPCConfig:
     time_limit: str = "24:00:00"
     max_concurrent: int = 4
     modalities: List[str] = field(default_factory=lambda: ["anat", "fmap", "func"])
+    xcpd_cpus: int = 0
+    xcpd_memory: str = ""
+    xcpd_time_limit: str = ""
 
     @classmethod
     def from_config(cls, config: Dict) -> 'HPCConfig':
@@ -108,13 +114,19 @@ class HPCConfig:
             remote_work=work,
             singularity_fmriprep=singularity.get('fmriprep', ''),
             singularity_xcpd=singularity.get('xcp_d', ''),
+            singularity_fmripost_aroma=singularity.get('fmripost_aroma', ''),
+            singularity_qsiprep=singularity.get('qsiprep', ''),
+            singularity_qsirecon=singularity.get('qsirecon', ''),
             freesurfer_license=singularity.get('freesurfer_license', ''),
             partition=slurm.get('partition', 'shared_cpu'),
             cpus=slurm.get('default_cpus', 8),
             memory=slurm.get('default_memory', '32GB'),
             time_limit=slurm.get('default_time', '24:00:00'),
             max_concurrent=slurm.get('max_concurrent_jobs', 4),
-            modalities=transfer.get('modalities', ['anat', 'fmap', 'func'])
+            modalities=transfer.get('modalities', ['anat', 'fmap', 'func']),
+            xcpd_cpus=slurm.get('xcpd_cpus', 0),
+            xcpd_memory=slurm.get('xcpd_memory', ''),
+            xcpd_time_limit=slurm.get('xcpd_time', ''),
         )
 
 
