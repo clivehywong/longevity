@@ -444,49 +444,51 @@ def _render_pipeline_panel(
     if run_info.get("remote_log_out"):
         st.caption(f"Remote log: {run_info['remote_log_out']}")
 
-    if st.button(f"Start {label} XCP-D", key=f"start_{pipeline_name}", width="stretch"):
-        missing = missing_xcpd_atlas_resources(config, selected_atlases)
-        if missing:
-            st.error("Missing atlas resources: " + ", ".join(str(p) for p in missing))
-        else:
-            try:
-                config["xcpd"][pipeline_name]["atlases"] = normalize_xcpd_atlas_selection(selected_atlases)
-                save_runtime_config(config)
-                if run_on_hpc:
-                    info = start_remote_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
-                else:
-                    info = start_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
-                job_label = f"job {info.get('job_id', info.get('pid', '?'))}"
-                st.success(f"Started {label} XCP-D ({job_label})")
-                st.rerun()
-            except RuntimeError as e:
-                err_msg = str(e)
-                if "no remote fMRIPrep directory" in err_msg and run_on_hpc:
-                    st.error(f"Failed to start {label} XCP-D: {err_msg}")
-                    st.warning(
-                        "fMRIPrep derivatives are not present on the HPC. "
-                        "Use the button below to upload your local fMRIPrep outputs first."
-                    )
-                    if st.button(
-                        f"📤 Upload fMRIPrep to HPC",
-                        key=f"upload_fmriprep_{pipeline_name}",
-                        width="stretch",
-                    ):
-                        try:
-                            with st.spinner("Uploading fMRIPrep derivatives to HPC…"):
-                                remote_dir = sync_fmriprep_to_hpc(
-                                    config,
-                                    selected_subjects or None,
-                                    sessions or None,
-                                )
-                            st.success(f"fMRIPrep uploaded to {remote_dir}. Try starting XCP-D again.")
-                            st.rerun()
-                        except Exception as upload_err:
-                            st.error(f"Upload failed: {upload_err}")
-                else:
+    is_running = run_info.get("status") == "running" or step_status == "running"
+    if not is_running:
+        if st.button(f"Start {label} XCP-D", key=f"start_{pipeline_name}", width="stretch"):
+            missing = missing_xcpd_atlas_resources(config, selected_atlases)
+            if missing:
+                st.error("Missing atlas resources: " + ", ".join(str(p) for p in missing))
+            else:
+                try:
+                    config["xcpd"][pipeline_name]["atlases"] = normalize_xcpd_atlas_selection(selected_atlases)
+                    save_runtime_config(config)
+                    if run_on_hpc:
+                        info = start_remote_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
+                    else:
+                        info = start_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
+                    job_label = f"job {info.get('job_id', info.get('pid', '?'))}"
+                    st.success(f"Started {label} XCP-D ({job_label})")
+                    st.rerun()
+                except RuntimeError as e:
+                    err_msg = str(e)
+                    if "no remote fMRIPrep directory" in err_msg and run_on_hpc:
+                        st.error(f"Failed to start {label} XCP-D: {err_msg}")
+                        st.warning(
+                            "fMRIPrep derivatives are not present on the HPC. "
+                            "Use the button below to upload your local fMRIPrep outputs first."
+                        )
+                        if st.button(
+                            f"📤 Upload fMRIPrep to HPC",
+                            key=f"upload_fmriprep_{pipeline_name}",
+                            width="stretch",
+                        ):
+                            try:
+                                with st.spinner("Uploading fMRIPrep derivatives to HPC…"):
+                                    remote_dir = sync_fmriprep_to_hpc(
+                                        config,
+                                        selected_subjects or None,
+                                        sessions or None,
+                                    )
+                                st.success(f"fMRIPrep uploaded to {remote_dir}. Try starting XCP-D again.")
+                                st.rerun()
+                            except Exception as upload_err:
+                                st.error(f"Upload failed: {upload_err}")
+                    else:
+                        st.error(f"Failed to start {label} XCP-D: {e}")
+                except Exception as e:
                     st.error(f"Failed to start {label} XCP-D: {e}")
-            except Exception as e:
-                st.error(f"Failed to start {label} XCP-D: {e}")
     if run_info.get("status") == "running":
         if st.button(f"Stop {label} XCP-D", key=f"stop_{pipeline_name}", width="stretch"):
             stop_xcpd_run(config, pipeline_name, state)
