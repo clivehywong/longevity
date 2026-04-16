@@ -383,7 +383,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         _render_pipeline_panel(
             config, state, "fc", "FC (no GSR)", selected_fc_atlases,
             fc_info, run_on_hpc, selected_subjects, sessions,
-            extra_note="aCompCor / 36P nuisance regression without global signal removal. Primary FC pipeline.",
+            extra_note="aCompCor nuisance regression without global signal removal. Primary FC pipeline.",
         )
     with col2:
         _render_pipeline_panel(

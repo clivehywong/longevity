@@ -747,11 +747,21 @@ def render_analysis_settings(config: Dict) -> bool:
                 # --- Column 1: Motion / censoring ---
                 with col1:
                     st.markdown("**Motion & censoring**")
+                    _nuisance_opts = ["24P", "27P", "36P", "acompcor", "acompcor_gsr", "aroma", "aroma_gsr", "gsr_only", "none"]
                     new_nuisance = st.selectbox(
                         "Nuisance regressors",
-                        options=["24P", "27P", "36P", "acompcor", "acompcor_gsr", "aroma", "aroma_gsr", "gsr_only", "none"],
-                        index=["24P", "27P", "36P", "acompcor", "acompcor_gsr", "aroma", "aroma_gsr", "gsr_only", "none"].index(
+                        options=_nuisance_opts,
+                        index=_nuisance_opts.index(
                             pipeline.get("nuisance_regressors", "36P" if pipeline_name == "fc_gsr" else "acompcor")
+                        ),
+                        help=(
+                            "**No GSR**: 24P, acompcor, aroma, none  \n"
+                            "**Includes GSR**: 27P, 36P, acompcor_gsr, aroma_gsr, gsr_only  \n\n"
+                            "24P = 6 motion params + derivatives + squares (no global signal).  \n"
+                            "27P = 24P + WM + CSF + global signal.  \n"
+                            "36P = 27P + derivatives + squares of tissue/GS regressors.  \n"
+                            "acompcor = anatomical CompCor (WM/CSF) without global signal.  \n"
+                            "acompcor_gsr = aCompCor + global signal regression."
                         ),
                         key=f"xcpd_{pipeline_name}_nuisance",
                     )
