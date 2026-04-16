@@ -544,6 +544,24 @@ def _render_pipeline_panel(
                         st.warning("Could not fetch remote log.")
                     st.rerun()
 
+        # Download outputs from HPC when job completed
+        if run_info.get("backend") == "hpc" and current_status == "completed":
+            with st.expander("📥 Download XCP-D outputs from HPC", expanded=False):
+                st.caption("Rsync XCP-D outputs from HPC to local machine.")
+                dl_subjects = run_info.get("participant_labels") or []
+                if st.button(
+                    f"⬇️ Download {label} outputs",
+                    key=f"download_{pipeline_name}",
+                ):
+                    with st.spinner("Downloading XCP-D outputs from HPC (this may take a while)…"):
+                        try:
+                            local_dir = download_xcpd_outputs_from_hpc(
+                                config, pipeline_name, dl_subjects or None
+                            )
+                            st.success(f"Downloaded to `{local_dir}`")
+                        except Exception as dl_err:
+                            st.error(f"Download failed: {dl_err}")
+
     if run_info.get("log_file"):
         st.caption(run_info["log_file"])
 

@@ -17,11 +17,14 @@ from utils.xcpd import collect_qc_reports, download_xcpd_outputs_from_hpc
 
 
 def ensure_xcpd_qc_dirs(config: Dict) -> Dict[str, Path]:
-    fc_dir = Path(config["paths"]["xcpd_fc_qc_dir"])
-    ec_dir = Path(config["paths"]["xcpd_ec_qc_dir"])
+    paths = config["paths"]
+    fc_dir = Path(paths["xcpd_fc_qc_dir"])
+    fc_gsr_dir = Path(paths.get("xcpd_fc_gsr_qc_dir", str(Path(paths["xcpd_fc_qc_dir"]).parent / "xcpd_fc_gsr")))
+    ec_dir = Path(paths["xcpd_ec_qc_dir"])
     fc_dir.mkdir(parents=True, exist_ok=True)
+    fc_gsr_dir.mkdir(parents=True, exist_ok=True)
     ec_dir.mkdir(parents=True, exist_ok=True)
-    return {"fc": fc_dir, "ec": ec_dir}
+    return {"fc": fc_dir, "fc_gsr": fc_gsr_dir, "ec": ec_dir}
 
 
 def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = None) -> None:
@@ -31,18 +34,21 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
     paths = config["paths"]
     qc_dirs = ensure_xcpd_qc_dirs(config)
     fc_dir = Path(paths["xcpd_fc_dir"])
+    fc_gsr_dir = Path(paths.get("xcpd_fc_gsr_dir", str(Path(paths["xcpd_fc_dir"]).parent / "fc_gsr")))
     ec_dir = Path(paths["xcpd_ec_dir"])
     fc_qc = collect_qc_reports(fc_dir)
+    fc_gsr_qc = collect_qc_reports(fc_gsr_dir)
     ec_qc = collect_qc_reports(ec_dir)
 
     # HPC download helper
     runs = state.get("runs", {})
     fc_run = runs.get("xcpd_fc", {})
+    fc_gsr_run = runs.get("xcpd_fc_gsr", {})
     ec_run = runs.get("xcpd_ec", {})
-    if fc_run.get("backend") == "hpc" or ec_run.get("backend") == "hpc":
+    if any(r.get("backend") == "hpc" for r in [fc_run, fc_gsr_run, ec_run]):
         with st.expander("📥 Download XCP-D outputs from HPC", expanded=False):
             st.caption("Sync finished HPC XCP-D results to your local machine for QC.")
-            cols = st.columns(2)
+            cols = st.columns(3)
             with cols[0]:
                 if st.button("Download FC outputs", key="dl_fc_hpc"):
                     with st.spinner("Downloading FC outputs from HPC…"):
@@ -53,6 +59,15 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
                         except Exception as exc:
                             st.error(f"Download failed: {exc}")
             with cols[1]:
+                if st.button("Download FC+GSR outputs", key="dl_fc_gsr_hpc"):
+                    with st.spinner("Downloading FC+GSR outputs from HPC…"):
+                        try:
+                            out = download_xcpd_outputs_from_hpc(config, "fc_gsr")
+                            st.success(f"FC+GSR outputs saved to {out}")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Download failed: {exc}")
+            with cols[2]:
                 if st.button("Download EC outputs", key="dl_ec_hpc"):
                     with st.spinner("Downloading EC outputs from HPC…"):
                         try:
@@ -62,11 +77,14 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
                         except Exception as exc:
                             st.error(f"Download failed: {exc}")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("FC Pipeline QC")
         _render_pipeline_qc_column(fc_qc, qc_dirs["fc"], "fc")
     with col2:
+        st.subheader("FC+GSR Pipeline QC")
+        _render_pipeline_qc_column(fc_gsr_qc, qc_dirs["fc_gsr"], "fc_gsr")
+    with col3:
         st.subheader("EC Pipeline QC")
         _render_pipeline_qc_column(ec_qc, qc_dirs["ec"], "ec")
         exclusions = build_ec_exclusion_table(config)

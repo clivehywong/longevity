@@ -99,14 +99,14 @@ def get_project_root(config: Optional[Dict[str, Any]] = None) -> Path:
 
         bids_dir = config.get("paths", {}).get("bids_dir")
         bids_parent: Optional[Path] = None
-        if bids_dir:
+        if bids_dir and "${" not in str(bids_dir):
             bids_path = Path(os.path.expanduser(str(bids_dir))).resolve()
             if bids_path.name == "bids":
                 bids_parent = bids_path.parent
 
         derivatives_dir = config.get("paths", {}).get("derivatives_dir")
         derivatives_parent: Optional[Path] = None
-        if derivatives_dir:
+        if derivatives_dir and "${" not in str(derivatives_dir):
             derivatives_path = Path(os.path.expanduser(str(derivatives_dir))).resolve()
             derivatives_parent = _infer_root_from_derivatives_path(derivatives_path)
 
