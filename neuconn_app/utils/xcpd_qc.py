@@ -110,11 +110,15 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
     fc_has_outputs = bool(fc_qc["exec_reports"] or fc_qc["bold"] or fc_qc["motion"])
     if fc_has_outputs:
         if state.get("approvals", {}).get("qc_gate", {}).get("approved"):
+            # Ensure qc_gate step is marked completed (may have been set before this fix)
+            if state.get("steps", {}).get("qc_gate", {}).get("status") != "completed":
+                state = set_step_status(config, "qc_gate", "completed", "QC gate approved", state=state)
             st.success("✅ Post-XCP-D QC approved. Subject/group analysis stages are unlocked.")
         else:
             if st.button("Approve and Proceed", type="primary"):
                 state = set_step_status(config, "post_xcpd_qc", "completed", "QC reviewed", state=state)
                 state = set_approval(config, "qc_gate", True, state=state)
+                state = set_step_status(config, "qc_gate", "completed", "QC gate approved", state=state)
                 append_pipeline_log(config, "Approved post-XCP-D QC", state=state)
                 st.success("QC approved. Subject/group analysis stages are now unlocked.")
                 st.rerun()
