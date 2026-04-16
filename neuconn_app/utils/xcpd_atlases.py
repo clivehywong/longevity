@@ -10,6 +10,8 @@ from typing import Dict, Iterable, List, Optional
 import json
 import shutil
 
+import nibabel as nib
+
 
 PROJECT_ATLAS_DATASET_KEY = "longevity"
 PROJECT_ATLAS_DATASET_DIRNAME = "xcpd_project_atlases"
@@ -228,8 +230,12 @@ def ensure_xcpd_atlas_dataset(
         stem = (
             f"tpl-{spec.template}_atlas-{spec.atlas_id}_res-{spec.resolution}_{spec.image_suffix}"
         )
-        image_name = f"{stem}{_full_suffix(source_path)}"
-        shutil.copy2(source_path, template_dir / image_name)
+        # Always stage as .nii.gz so XCP-D can read/resample without compression errors.
+        image_name = f"{stem}.nii.gz"
+        dest_path = template_dir / image_name
+        if not dest_path.exists() or dest_path.stat().st_mtime < source_path.stat().st_mtime:
+            img = nib.load(source_path)
+            nib.save(img, dest_path)
 
         labels = _load_labels(label_path)
         _write_label_tsv(template_dir / f"{stem}.tsv", labels)
