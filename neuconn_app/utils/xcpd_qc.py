@@ -90,7 +90,7 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
         exclusions = build_ec_exclusion_table(config)
         if exclusions is not None:
             st.caption("EC exclusion preview (mean FD threshold applied)")
-            st.dataframe(exclusions, use_container_width=True, hide_index=True)
+            st.dataframe(exclusions, width="stretch", hide_index=True)
             exclusions.to_csv(qc_dirs["ec"] / "ec_exclusions.csv", index=False)
 
     # QC-FC correlation metric
@@ -104,7 +104,7 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
     motion_df = collect_xcpd_motion_stats(fc_dir)
     if motion_df is not None and not motion_df.empty:
         st.subheader("FC Motion / Censoring Summary")
-        st.dataframe(motion_df, use_container_width=True, hide_index=True)
+        st.dataframe(motion_df, width="stretch", hide_index=True)
 
     # QC gate — only FC is required; EC is optional
     fc_has_outputs = bool(fc_qc["exec_reports"] or fc_qc["bold"] or fc_qc["motion"])
@@ -139,7 +139,7 @@ def _render_pipeline_qc_column(qc_reports: Dict[str, List[Path]], qc_dir: Path, 
         [(k, v) for k, v in non_empty.items()],
         columns=["type", "count"],
     )
-    st.dataframe(count_df, use_container_width=True, hide_index=True)
+    st.dataframe(count_df, width="stretch", hide_index=True)
 
     # Subject-level HTML reports with download buttons
     exec_reports = qc_reports.get("exec_reports", [])

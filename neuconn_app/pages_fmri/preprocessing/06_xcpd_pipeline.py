@@ -446,7 +446,22 @@ def _render_pipeline_panel(
 
     is_running = run_info.get("status") == "running" or step_status == "running"
     if not is_running:
-        if st.button(f"Start {label} XCP-D", key=f"start_{pipeline_name}", width="stretch"):
+        # Safety: warn when re-running a completed pipeline
+        already_completed = step_status == "completed"
+        qc_approved = state.get("approvals", {}).get("qc_gate", {}).get("approved", False)
+        if already_completed:
+            if qc_approved:
+                st.warning(
+                    f"⚠️ {label} outputs already exist and the QC gate has been approved. "
+                    "Re-running will invalidate the QC approval — you must re-review QC afterwards."
+                )
+            else:
+                st.info(f"ℹ️ {label} outputs already exist. Re-running will overwrite them.")
+
+        confirm_key = f"confirm_rerun_{pipeline_name}"
+        btn_label = f"↺ Re-run {label} XCP-D" if already_completed else f"Start {label} XCP-D"
+        btn_type = "secondary" if already_completed else "primary"
+        if st.button(btn_label, key=f"start_{pipeline_name}", width="stretch", type=btn_type):
             missing = missing_xcpd_atlas_resources(config, selected_atlases)
             if missing:
                 st.error("Missing atlas resources: " + ", ".join(str(p) for p in missing))
@@ -458,6 +473,14 @@ def _render_pipeline_panel(
                         info = start_remote_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
                     else:
                         info = start_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
+                    # Invalidate QC gate when re-running a completed pipeline
+                    if already_completed and qc_approved:
+                        from utils.pipeline_state import set_approval
+                        _state = load_pipeline_state(config)
+                        _state = set_approval(config, "qc_gate", False, state=_state)
+                        _state = set_step_status(config, "qc_gate", "not_started", "Invalidated by re-run", state=_state)
+                        _state = set_step_status(config, "post_xcpd_qc", "not_started", "", state=_state)
+                        save_pipeline_state(config, _state)
                     job_label = f"job {info.get('job_id', info.get('pid', '?'))}"
                     st.success(f"Started {label} XCP-D ({job_label})")
                     st.rerun()
