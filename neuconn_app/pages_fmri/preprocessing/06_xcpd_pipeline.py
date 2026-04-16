@@ -90,13 +90,26 @@ def render_pipeline_progress(state: Dict) -> None:
         "failed": "🔴",
         "awaiting_approval": "🟠",
     }
+    step_labels = {
+        "fmriprep": "fMRIPrep",
+        "fd_inspection": "FD Inspection",
+        "fd_gate": "FD Gate",
+        "xcpd_fc": "XCP-D FC",
+        "xcpd_fc_gsr": "XCP-D FC+GSR",
+        "xcpd_ec": "XCP-D EC",
+        "post_xcpd_qc": "Post-QC",
+        "qc_gate": "QC Gate",
+        "subject_level": "Subject",
+        "group_level": "Group",
+    }
     st.subheader("Pipeline Progress")
     cols = st.columns(len(STEP_ORDER))
     for col, step in zip(cols, STEP_ORDER):
         info = state["steps"].get(step, {})
         status = info.get("status", "not_started")
-        col.metric(step.replace("_", " ").title(), status)
-        col.caption(status_colors.get(status, "⚪"))
+        label = step_labels.get(step, step.replace("_", " ").title())
+        col.metric(label, status_colors.get(status, "⚪"))
+        col.caption(status)
 
 
 def render_fd_inspection(config: Dict, state: Dict) -> None:
