@@ -28,11 +28,15 @@ from utils.pipeline_state import (
 from utils.xcpd import (
     build_remote_xcpd_command,
     build_xcpd_command,
+    download_xcpd_outputs_from_hpc,
+    fetch_hpc_xcpd_log,
     generate_xcpd_slurm_script,
+    parse_xcpd_progress,
     refresh_xcpd_run,
     start_remote_xcpd_run,
     start_xcpd_run,
     stop_xcpd_run,
+    sync_fmriprep_to_hpc,
 )
 from utils.xcpd_atlases import (
     atlas_option_ids,
@@ -311,6 +315,24 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         help="Use the configured HPC SSH connection for long-running XCP-D jobs.",
     )
 
+    if run_on_hpc:
+        with st.expander("📤 Upload fMRIPrep to HPC", expanded=False):
+            st.caption(
+                "If fMRIPrep derivatives have been removed from the HPC, "
+                "upload them from your local machine before starting XCP-D."
+            )
+            if st.button("Upload fMRIPrep derivatives", key="upload_fmriprep_global", width="stretch"):
+                try:
+                    with st.spinner("Uploading fMRIPrep derivatives to HPC…"):
+                        remote_dir = sync_fmriprep_to_hpc(
+                            config,
+                            selected_subjects or None,
+                            sessions or None,
+                        )
+                    st.success(f"fMRIPrep uploaded to `{remote_dir}`.")
+                except Exception as upload_err:
+                    st.error(f"Upload failed: {upload_err}")
+
     fc_defaults = normalize_xcpd_atlas_selection(config["xcpd"]["fc"].get("atlases", [])) or recommended_xcpd_atlases()
     fc_gsr_defaults = normalize_xcpd_atlas_selection(config["xcpd"].get("fc_gsr", {}).get("atlases", [])) or recommended_xcpd_atlases()
     ec_defaults = normalize_xcpd_atlas_selection(config["xcpd"]["ec"].get("atlases", [])) or recommended_xcpd_atlases()
@@ -361,6 +383,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         _render_pipeline_panel(
             config, state, "fc", "FC (no GSR)", selected_fc_atlases,
             fc_info, run_on_hpc, selected_subjects, sessions,
+            extra_note="aCompCor / 36P nuisance regression without global signal removal. Primary FC pipeline.",
         )
     with col2:
         _render_pipeline_panel(
@@ -423,12 +446,89 @@ def _render_pipeline_panel(
                 job_label = f"job {info.get('job_id', info.get('pid', '?'))}"
                 st.success(f"Started {label} XCP-D ({job_label})")
                 st.rerun()
+            except RuntimeError as e:
+                err_msg = str(e)
+                if "no remote fMRIPrep directory" in err_msg and run_on_hpc:
+                    st.error(f"Failed to start {label} XCP-D: {err_msg}")
+                    st.warning(
+                        "fMRIPrep derivatives are not present on the HPC. "
+                        "Use the button below to upload your local fMRIPrep outputs first."
+                    )
+                    if st.button(
+                        f"📤 Upload fMRIPrep to HPC",
+                        key=f"upload_fmriprep_{pipeline_name}",
+                        width="stretch",
+                    ):
+                        try:
+                            with st.spinner("Uploading fMRIPrep derivatives to HPC…"):
+                                remote_dir = sync_fmriprep_to_hpc(
+                                    config,
+                                    selected_subjects or None,
+                                    sessions or None,
+                                )
+                            st.success(f"fMRIPrep uploaded to {remote_dir}. Try starting XCP-D again.")
+                            st.rerun()
+                        except Exception as upload_err:
+                            st.error(f"Upload failed: {upload_err}")
+                else:
+                    st.error(f"Failed to start {label} XCP-D: {e}")
             except Exception as e:
                 st.error(f"Failed to start {label} XCP-D: {e}")
     if run_info.get("status") == "running":
         if st.button(f"Stop {label} XCP-D", key=f"stop_{pipeline_name}", width="stretch"):
             stop_xcpd_run(config, pipeline_name, state)
             st.rerun()
+
+    # --- Live monitoring (shown when running or recently completed) ---
+    current_status = run_info.get("status", "not_started")
+    if current_status in ("running", "completed", "failed"):
+        log_file = run_info.get("log_file")
+        stored_total = run_info.get("nodes_total")
+        progress = parse_xcpd_progress(
+            Path(log_file) if log_file else None,
+            stored_total=stored_total,
+        )
+
+        # Persist nodes_total back into run_info so we don't lose it on log refetch
+        if progress["nodes_total"] and not stored_total:
+            run_info["nodes_total"] = progress["nodes_total"]
+            from utils.pipeline_state import set_run_info as _set_run_info
+            _set_run_info(config, f"xcpd_{pipeline_name}", run_info)
+
+        if progress["nodes_total"]:
+            pct = min(progress["nodes_done"] / progress["nodes_total"], 1.0)
+            st.progress(pct, text=f"{progress['nodes_done']}/{progress['nodes_total']} nodes")
+        elif current_status == "running":
+            st.progress(0.0, text="Waiting for workflow to initialise…")
+
+        if progress["current_node"] and current_status == "running":
+            st.caption(f"▶ `{progress['current_node']}`")
+
+        if progress["has_error"]:
+            st.error("⚠ Error detected in log")
+        elif progress["is_done"]:
+            st.success("✅ Workflow finished successfully")
+
+        with st.expander("📋 Log tail", expanded=False):
+            tail = "\n".join(progress["last_lines"][-25:]) if progress["last_lines"] else "(no log content)"
+            st.code(tail, language="text")
+
+        # Refresh controls
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            if st.button("🔄 Refresh status", key=f"refresh_{pipeline_name}"):
+                st.rerun()
+        with col_r2:
+            if run_info.get("backend") == "hpc" and run_info.get("remote_log_out"):
+                if st.button("📥 Fetch HPC log", key=f"fetch_log_{pipeline_name}"):
+                    with st.spinner("Fetching remote log…"):
+                        fetched = fetch_hpc_xcpd_log(config, run_info)
+                    if fetched:
+                        st.success(f"Log saved to {fetched.name}")
+                    else:
+                        st.warning("Could not fetch remote log.")
+                    st.rerun()
+
     if run_info.get("log_file"):
         st.caption(run_info["log_file"])
 

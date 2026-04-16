@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 import json
 import os
+import re
 import shlex
+import shutil
 import signal
 import subprocess
 
@@ -25,6 +27,7 @@ from utils.xcpd_atlases import (
     atlas_cli_dataset_args,
     custom_xcpd_atlas_ids,
     ensure_xcpd_atlas_dataset,
+    missing_xcpd_atlas_resources,
     normalize_xcpd_atlas_selection,
     remote_xcpd_atlas_dataset_path,
 )
@@ -62,6 +65,328 @@ def _deduplicate_paths(paths: Iterable[str]) -> List[str]:
         if path and path not in unique:
             unique.append(path)
     return unique
+
+
+def _bool_flag(value: Any) -> str:
+    return "y" if bool(value) else "n"
+
+
+def _local_xcpd_work_dir(config: Dict[str, Any], pipeline_name: str) -> Path:
+    work_dir = Path(config["paths"]["xcpd_dir"]) / "work" / pipeline_name
+    work_dir.mkdir(parents=True, exist_ok=True)
+    return work_dir
+
+
+def _remote_xcpd_work_dir(hpc_cfg: HPCConfig, pipeline_name: str) -> str:
+    work_root = hpc_cfg.remote_work or str(Path(hpc_cfg.remote_base) / "work")
+    return str(Path(work_root) / "xcpd" / pipeline_name)
+
+
+def _resolved_local_fmriprep_dir(config: Dict[str, Any]) -> str:
+    candidates = _deduplicate_paths(
+        [
+            os.path.expanduser(str(config["paths"].get("fmriprep_dir", ""))),
+            os.path.expanduser(str(config["paths"].get("legacy_fmriprep_dir", ""))),
+        ]
+    )
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+    return candidates[0] if candidates else ""
+
+
+def _remote_dir_exists(conn: HPCConnection, remote_path: str) -> bool:
+    stdout, _, exit_code = conn.execute(f"test -d {shlex.quote(remote_path)} && echo READY", timeout=30)
+    return exit_code == 0 and stdout.strip() == "READY"
+
+
+def _remote_file_exists(conn: HPCConnection, remote_path: str) -> bool:
+    stdout, _, exit_code = conn.execute(f"test -f {shlex.quote(remote_path)} && echo READY", timeout=30)
+    return exit_code == 0 and stdout.strip() == "READY"
+
+
+def _resolved_remote_fmriprep_dir(hpc_cfg: HPCConfig, conn: Optional[HPCConnection] = None) -> str:
+    candidates = _deduplicate_paths([hpc_cfg.remote_fmriprep, hpc_cfg.remote_legacy_fmriprep])
+    if conn is None:
+        return candidates[0] if candidates else ""
+    for candidate in candidates:
+        if candidate and _remote_dir_exists(conn, candidate):
+            return candidate
+    return candidates[0] if candidates else ""
+
+
+def _path_matches_filters(path: Path, participant_labels: Optional[Iterable[str]], session_ids: Optional[Iterable[str]]) -> bool:
+    parts = set(path.parts)
+    participants = {f"sub-{label}" for label in _strip_bids_prefix(participant_labels, "sub-")}
+    sessions = {f"ses-{label}" for label in _strip_bids_prefix(session_ids, "ses-")}
+    if participants and not participants.intersection(parts):
+        return False
+    if sessions and not sessions.intersection(parts):
+        return False
+    return True
+
+
+def _local_has_matching_inputs(
+    fmriprep_dir: str,
+    file_format: str,
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+) -> bool:
+    input_dir = Path(fmriprep_dir)
+    pattern = "*dtseries.nii" if file_format == "cifti" else "*desc-preproc_bold.nii.gz"
+    for candidate in input_dir.rglob(pattern):
+        if _path_matches_filters(candidate, participant_labels, session_ids):
+            return True
+    return False
+
+
+def _detect_local_file_formats(
+    fmriprep_dir: str,
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+) -> List[str]:
+    detected: List[str] = []
+    if _local_has_matching_inputs(fmriprep_dir, "nifti", participant_labels, session_ids):
+        detected.append("nifti")
+    if _local_has_matching_inputs(fmriprep_dir, "cifti", participant_labels, session_ids):
+        detected.append("cifti")
+    return detected
+
+
+def _remote_find_pattern(
+    fmriprep_dir: str,
+    file_pattern: str,
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+) -> str:
+    base = f"find {shlex.quote(fmriprep_dir)}"
+    subjects = [f"sub-{label}" for label in _strip_bids_prefix(participant_labels, "sub-")]
+    sessions = [f"ses-{label}" for label in _strip_bids_prefix(session_ids, "ses-")]
+    if not subjects:
+        subjects = ["sub-*"]
+    if not sessions:
+        sessions = ["ses-*"]
+    predicates = [
+        f"-path {shlex.quote(f'*/{subject}/{session}/func/{file_pattern}')}"
+        for subject in subjects
+        for session in sessions
+    ]
+    return f"{base} \\( {' -o '.join(predicates)} \\) -print -quit"
+
+
+def _remote_has_matching_inputs(
+    conn: HPCConnection,
+    fmriprep_dir: str,
+    file_format: str,
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+) -> bool:
+    pattern = "*dtseries.nii" if file_format == "cifti" else "*desc-preproc_bold.nii.gz"
+    stdout, _, exit_code = conn.execute(
+        _remote_find_pattern(
+            fmriprep_dir,
+            pattern,
+            participant_labels=participant_labels,
+            session_ids=session_ids,
+        ),
+        timeout=60,
+    )
+    return exit_code == 0 and bool(stdout.strip())
+
+
+def _detect_remote_file_formats(
+    conn: HPCConnection,
+    fmriprep_dir: str,
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+) -> List[str]:
+    detected: List[str] = []
+    if _remote_has_matching_inputs(conn, fmriprep_dir, "nifti", participant_labels, session_ids):
+        detected.append("nifti")
+    if _remote_has_matching_inputs(conn, fmriprep_dir, "cifti", participant_labels, session_ids):
+        detected.append("cifti")
+    return detected
+
+
+def _xcpd_fs_license(config: Dict[str, Any], hpc_cfg: Optional[HPCConfig] = None) -> str:
+    if hpc_cfg is not None:
+        return os.path.expanduser(hpc_cfg.freesurfer_license or "")
+    return os.path.expanduser(
+        config.get("software", {}).get("singularity_images", {}).get("freesurfer_license", "")
+        or config.get("xcpd", {}).get("freesurfer_license", "")
+    )
+
+
+def _local_xcpd_preflight(
+    config: Dict[str, Any],
+    pipeline_name: str,
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    xcpd_config = config["xcpd"][pipeline_name]
+    image_path = _local_xcpd_image(config)
+    fs_license = _xcpd_fs_license(config)
+    if shutil.which("singularity") is None:
+        raise RuntimeError("Local XCP-D preflight failed: singularity is not available on PATH.")
+    if not image_path or not Path(image_path).exists():
+        raise RuntimeError(f"Local XCP-D preflight failed: image not found at {image_path}.")
+    if fs_license and not Path(fs_license).exists():
+        raise RuntimeError(f"Local XCP-D preflight failed: FreeSurfer license not found at {fs_license}.")
+
+    fmriprep_dir = _resolved_local_fmriprep_dir(config)
+    if not fmriprep_dir or not Path(fmriprep_dir).exists():
+        raise RuntimeError(
+            "Local XCP-D preflight failed: could not find fMRIPrep derivatives in either "
+            f"{config['paths'].get('fmriprep_dir')} or {config['paths'].get('legacy_fmriprep_dir')}."
+        )
+    if not (Path(fmriprep_dir) / "dataset_description.json").exists():
+        raise RuntimeError(
+            f"Local XCP-D preflight failed: {fmriprep_dir} is missing dataset_description.json."
+        )
+
+    configured_format = str(xcpd_config.get("file_format", "auto"))
+    detected_formats = _detect_local_file_formats(
+        fmriprep_dir,
+        participant_labels=participant_labels,
+        session_ids=session_ids,
+    )
+    if configured_format != "auto" and configured_format not in detected_formats:
+        detected_label = ", ".join(detected_formats) if detected_formats else "none"
+        raise RuntimeError(
+            "Local XCP-D preflight failed: configured file_format "
+            f"'{configured_format}' is incompatible with {fmriprep_dir}. Detected formats: {detected_label}."
+        )
+
+    missing = missing_xcpd_atlas_resources(config, xcpd_config.get("atlases", []))
+    if missing:
+        raise RuntimeError(
+            "Local XCP-D preflight failed: missing atlas resources: "
+            + ", ".join(str(path) for path in missing)
+        )
+
+    work_dir = _local_xcpd_work_dir(config, pipeline_name)
+    return {
+        "backend": "local",
+        "fmriprep_dir": fmriprep_dir,
+        "work_dir": str(work_dir),
+        "image_path": image_path,
+        "fs_license": fs_license,
+        "detected_formats": detected_formats,
+    }
+
+
+def _remote_xcpd_preflight(
+    config: Dict[str, Any],
+    pipeline_name: str,
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    hpc_cfg = HPCConfig.from_config(config)
+    image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
+    fs_license = _xcpd_fs_license(config, hpc_cfg)
+    atlas_ids = config["xcpd"][pipeline_name].get("atlases", [])
+    missing = missing_xcpd_atlas_resources(config, atlas_ids)
+    if missing:
+        raise RuntimeError(
+            "HPC XCP-D preflight failed: missing atlas resources: "
+            + ", ".join(str(path) for path in missing)
+        )
+    if custom_xcpd_atlas_ids(config, atlas_ids) and shutil.which("rsync") is None:
+        raise RuntimeError("HPC XCP-D preflight failed: rsync is required to sync custom atlas datasets.")
+
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        singularity_check = (
+            "if [ -f /etc/profile.d/modules.sh ]; then source /etc/profile.d/modules.sh; "
+            "elif [ -f /usr/share/Modules/init/bash ]; then source /usr/share/Modules/init/bash; fi; "
+            "if command -v singularity >/dev/null 2>&1; then echo READY; "
+            "elif command -v module >/dev/null 2>&1; then module load singularity >/dev/null 2>&1 || true; "
+            "command -v singularity >/dev/null 2>&1 && echo READY || echo MISSING; "
+            "else echo MISSING; fi"
+        )
+        stdout, _, exit_code = conn.execute(singularity_check, timeout=60)
+        if exit_code != 0 or stdout.strip() != "READY":
+            raise RuntimeError(
+                "HPC XCP-D preflight failed: singularity is unavailable until module initialization succeeds."
+            )
+        stdout, _, exit_code = conn.execute(f"test -f {shlex.quote(image_path)} && echo READY", timeout=30)
+        if exit_code != 0 or stdout.strip() != "READY":
+            raise RuntimeError(f"HPC XCP-D preflight failed: image not found at {image_path}.")
+        if fs_license:
+            stdout, _, exit_code = conn.execute(f"test -f {shlex.quote(fs_license)} && echo READY", timeout=30)
+            if exit_code != 0 or stdout.strip() != "READY":
+                raise RuntimeError(f"HPC XCP-D preflight failed: FreeSurfer license not found at {fs_license}.")
+
+        configured_format = str(config["xcpd"][pipeline_name].get("file_format", "auto"))
+        detected_formats: List[str] = []
+        fmriprep_dir = ""
+        searched_candidates = _deduplicate_paths([hpc_cfg.remote_fmriprep, hpc_cfg.remote_legacy_fmriprep])
+        for candidate in searched_candidates:
+            if not candidate or not _remote_dir_exists(conn, candidate):
+                continue
+            if not _remote_file_exists(conn, str(Path(candidate) / "dataset_description.json")):
+                continue
+            candidate_formats = _detect_remote_file_formats(
+                conn,
+                candidate,
+                participant_labels=participant_labels,
+                session_ids=session_ids,
+            )
+            if configured_format != "auto" and configured_format in candidate_formats:
+                fmriprep_dir = candidate
+                detected_formats = candidate_formats
+                break
+            if candidate_formats and not fmriprep_dir:
+                fmriprep_dir = candidate
+                detected_formats = candidate_formats
+
+        if not fmriprep_dir:
+            raise RuntimeError(
+                "HPC XCP-D preflight failed: no remote fMRIPrep directory with dataset_description.json contains XCP-D-readable inputs under "
+                + ", ".join(searched_candidates)
+                + "."
+            )
+        if configured_format != "auto" and configured_format not in detected_formats:
+            detected_label = ", ".join(detected_formats) if detected_formats else "none"
+            raise RuntimeError(
+                "HPC XCP-D preflight failed: configured file_format "
+                f"'{configured_format}' is incompatible with {fmriprep_dir}. Detected formats: {detected_label}."
+            )
+    finally:
+        _safe_disconnect(conn)
+
+    return {
+        "backend": "hpc",
+        "fmriprep_dir": fmriprep_dir,
+        "work_dir": _remote_xcpd_work_dir(hpc_cfg, pipeline_name),
+        "image_path": image_path,
+        "fs_license": fs_license,
+        "detected_formats": detected_formats,
+    }
+
+
+def run_xcpd_preflight(
+    config: Dict[str, Any],
+    pipeline_name: str,
+    backend: str = "local",
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    if backend == "hpc":
+        return _remote_xcpd_preflight(
+            config,
+            pipeline_name,
+            participant_labels=participant_labels,
+            session_ids=session_ids,
+        )
+    return _local_xcpd_preflight(
+        config,
+        pipeline_name,
+        participant_labels=participant_labels,
+        session_ids=session_ids,
+    )
 
 
 def _build_remote_bind_mounts(config: Dict[str, Any], hpc_cfg: HPCConfig) -> List[str]:
@@ -127,6 +452,8 @@ def build_xcpd_command(
     pipeline_name: str,
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
+    fmriprep_dir: Optional[str] = None,
+    work_dir: Optional[str] = None,
 ) -> List[str]:
     """Build the Singularity command for an XCP-D run."""
     paths = config["paths"]
@@ -138,6 +465,9 @@ def build_xcpd_command(
     output_dir_key = f"xcpd_{pipeline_name}_dir"
     output_dir = paths.get(output_dir_key) or paths["xcpd_fc_dir"]
     Path(output_dir).mkdir(parents=True, exist_ok=True)
+    resolved_fmriprep_dir = fmriprep_dir or _resolved_local_fmriprep_dir(config)
+    resolved_work_dir = work_dir or str(_local_xcpd_work_dir(config, pipeline_name))
+    Path(resolved_work_dir).mkdir(parents=True, exist_ok=True)
 
     command = ["singularity", "run"]
     for bind_mount in bind_mounts:
@@ -155,7 +485,7 @@ def build_xcpd_command(
     command.extend(
         [
             image_path,
-            paths["fmriprep_dir"],
+            resolved_fmriprep_dir,
             output_dir,
             "participant",
             "--mode",
@@ -190,6 +520,10 @@ def build_xcpd_command(
             str(xcpd_config.get("file_format", "cifti")),
             "--report-output-level",
             str(xcpd_config.get("report_output_level", "session")),
+            "--output-run-wise-correlations",
+            _bool_flag(xcpd_config.get("output_run_wise_correlations", True)),
+            "-w",
+            resolved_work_dir,
         ]
     )
 
@@ -203,6 +537,8 @@ def build_xcpd_command(
             "--lower-bpf", str(xcpd_config.get("high_pass", xcpd_config.get("lower_bpf", 0.01))),
             "--upper-bpf", str(xcpd_config.get("low_pass", xcpd_config.get("upper_bpf", 0.08))),
         ])
+    if xcpd_config.get("clean_workdir"):
+        command.append("--clean-workdir")
 
     if fs_license:
         command.extend(["--fs-license-file", fs_license])
@@ -228,6 +564,8 @@ def build_remote_xcpd_command(
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
     remote_dataset_root: Optional[str] = None,
+    remote_fmriprep_dir: Optional[str] = None,
+    work_dir: Optional[str] = None,
 ) -> List[str]:
     """Build the remote Singularity command for an XCP-D run."""
     hpc_cfg = HPCConfig.from_config(config)
@@ -239,6 +577,8 @@ def build_remote_xcpd_command(
         remote_output = hpc_cfg.remote_xcpd_fc_gsr
     else:
         remote_output = hpc_cfg.remote_xcpd_ec
+    resolved_remote_fmriprep = remote_fmriprep_dir or hpc_cfg.remote_fmriprep or hpc_cfg.remote_legacy_fmriprep
+    resolved_work_dir = work_dir or _remote_xcpd_work_dir(hpc_cfg, pipeline_name)
     selected_atlases = normalize_xcpd_atlas_selection(xcpd_config.get("atlases", []))
 
     bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
@@ -253,7 +593,7 @@ def build_remote_xcpd_command(
     command.extend(
         [
             image_path,
-            hpc_cfg.remote_fmriprep,
+            resolved_remote_fmriprep,
             remote_output,
             "participant",
             "--mode",
@@ -288,6 +628,10 @@ def build_remote_xcpd_command(
             str(xcpd_config.get("file_format", "cifti")),
             "--report-output-level",
             str(xcpd_config.get("report_output_level", "session")),
+            "--output-run-wise-correlations",
+            _bool_flag(xcpd_config.get("output_run_wise_correlations", True)),
+            "-w",
+            resolved_work_dir,
         ]
     )
 
@@ -301,6 +645,8 @@ def build_remote_xcpd_command(
             "--lower-bpf", str(xcpd_config.get("high_pass", xcpd_config.get("lower_bpf", 0.01))),
             "--upper-bpf", str(xcpd_config.get("low_pass", xcpd_config.get("upper_bpf", 0.08))),
         ])
+    if xcpd_config.get("clean_workdir"):
+        command.append("--clean-workdir")
 
     if fs_license:
         command.extend(["--fs-license-file", fs_license])
@@ -326,6 +672,8 @@ def generate_xcpd_slurm_script(
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
     remote_dataset_root: Optional[str] = None,
+    remote_fmriprep_dir: Optional[str] = None,
+    work_dir: Optional[str] = None,
 ) -> str:
     """Render the XCP-D SLURM batch script using the xcpd_slurm.j2 template.
 
@@ -350,6 +698,8 @@ def generate_xcpd_slurm_script(
         participant_labels=participant_labels,
         session_ids=session_ids,
         remote_dataset_root=remote_dataset_root,
+        remote_fmriprep_dir=remote_fmriprep_dir,
+        work_dir=work_dir,
     )
     # full_command = ["singularity", "run", "-B", "...", ..., image_path, fmriprep_dir, ...]
     # Split at the image path to get post-image args; the template handles bind mounts separately.
@@ -380,9 +730,11 @@ def generate_xcpd_slurm_script(
         time_limit=time_limit,
         remote_base=hpc_cfg.remote_base,
         remote_output=remote_output,
-        remote_fmriprep=hpc_cfg.remote_fmriprep,
+        remote_fmriprep=remote_fmriprep_dir or hpc_cfg.remote_fmriprep,
         remote_work=hpc_cfg.remote_work,
+        work_dir=work_dir or _remote_xcpd_work_dir(hpc_cfg, pipeline_name),
         singularity_image=image_path,
+        fs_license=hpc_cfg.freesurfer_license,
         bind_mounts=bind_mounts,
         xcpd_args=xcpd_args,
         participants=list(_strip_bids_prefix(participant_labels, "sub-") or []),
@@ -413,11 +765,20 @@ def start_xcpd_run(
 ) -> Dict[str, Any]:
     """Start a background XCP-D run and persist its metadata."""
     artifacts = _run_artifact_paths(config, pipeline_name)
+    preflight = run_xcpd_preflight(
+        config,
+        pipeline_name,
+        backend="local",
+        participant_labels=participant_labels,
+        session_ids=session_ids,
+    )
     command = build_xcpd_command(
         config,
         pipeline_name,
         participant_labels=participant_labels,
         session_ids=session_ids,
+        fmriprep_dir=str(preflight["fmriprep_dir"]),
+        work_dir=str(preflight["work_dir"]),
     )
 
     with open(artifacts["command_file"], "w") as f:
@@ -436,10 +797,13 @@ def start_xcpd_run(
         "pipeline": pipeline_name,
         "pid": process.pid,
         "status": "running",
+        "backend": "local",
         "command": command,
         "started_at": datetime.now().isoformat(),
         "participant_labels": list(participant_labels or []),
         "session_ids": list(session_ids or []),
+        "fmriprep_dir": str(preflight["fmriprep_dir"]),
+        "work_dir": str(preflight["work_dir"]),
         "run_dir": str(artifacts["run_dir"]),
         "log_file": str(artifacts["log_file"]),
     }
@@ -462,6 +826,13 @@ def start_remote_xcpd_run(
     """Submit an XCP-D SLURM job on the configured HPC host."""
     artifacts = _run_artifact_paths(config, pipeline_name)
     hpc_cfg = HPCConfig.from_config(config)
+    preflight = run_xcpd_preflight(
+        config,
+        pipeline_name,
+        backend="hpc",
+        participant_labels=participant_labels,
+        session_ids=session_ids,
+    )
     selected_atlases = normalize_xcpd_atlas_selection(config["xcpd"][pipeline_name].get("atlases", []))
     remote_dataset_root = _sync_remote_xcpd_atlas_dataset(config, selected_atlases, hpc_cfg)
 
@@ -472,6 +843,8 @@ def start_remote_xcpd_run(
         participant_labels=participant_labels,
         session_ids=session_ids,
         remote_dataset_root=remote_dataset_root,
+        remote_fmriprep_dir=str(preflight["fmriprep_dir"]),
+        work_dir=str(preflight["work_dir"]),
     )
 
     # Save script locally for inspection
@@ -488,7 +861,7 @@ def start_remote_xcpd_run(
     try:
         conn = HPCConnection(hpc_cfg)
         conn.connect()
-        conn.write_file(remote_script, script_content)
+        conn.write_file(script_content, remote_script)
         mkdir_cmd = f"mkdir -p {shlex.quote(f'{hpc_cfg.remote_base}/logs')}"
         conn.execute(mkdir_cmd, timeout=30)
         sbatch_cmd = f"sbatch {shlex.quote(remote_script)}"
@@ -508,11 +881,13 @@ def start_remote_xcpd_run(
         "status": "running",
         "backend": "hpc",
         "remote_script": remote_script,
-        "remote_log_out": remote_log_out,
-        "remote_log_err": remote_log_err,
+        "remote_log_out": remote_log_out.replace("${SLURM_JOB_ID}", job_id),
+        "remote_log_err": remote_log_err.replace("${SLURM_JOB_ID}", job_id),
         "started_at": datetime.now().isoformat(),
         "participant_labels": list(participant_labels or []),
         "session_ids": list(session_ids or []),
+        "fmriprep_dir": str(preflight["fmriprep_dir"]),
+        "work_dir": str(preflight["work_dir"]),
         "run_dir": str(artifacts["run_dir"]),
         "log_file": str(artifacts["log_file"]),
         "local_script": str(local_script),
@@ -559,6 +934,15 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
             slurm_state = stdout.strip().upper()
             if slurm_state in ("RUNNING", "PENDING", "COMPLETING"):
                 return state
+            if slurm_state in ("FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"):
+                run_info["status"] = "failed"
+                run_info["completed_at"] = datetime.now().isoformat()
+                run_info["slurm_state"] = slurm_state
+                state["runs"][run_key] = run_info
+                state = set_run_info(config, run_key, run_info, state=state)
+                state = set_step_status(config, f"xcpd_{pipeline_name}", "failed", f"SLURM state {slurm_state}", state=state)
+                append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} run failed on HPC ({slurm_state})", level="error", state=state)
+                return state
         except Exception:
             return state
         finally:
@@ -580,11 +964,23 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
     elif pid and is_process_running(pid):
         return state
 
+    # Process is gone — determine success vs failure from log markers
+    log_file = run_info.get("log_file")
+    progress = parse_xcpd_progress(Path(log_file) if log_file else None)
+    if progress["has_error"] and not progress["is_done"]:
+        run_info["status"] = "failed"
+        run_info["completed_at"] = datetime.now().isoformat()
+        state["runs"][run_key] = run_info
+        state = set_run_info(config, run_key, run_info, state=state)
+        state = set_step_status(config, f"xcpd_{pipeline_name}", "failed", "Error detected in log", state=state)
+        append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} run failed (error in log)", level="error", state=state)
+        return state
+
     run_info["status"] = "completed"
     run_info["completed_at"] = datetime.now().isoformat()
     state["runs"][run_key] = run_info
-    set_run_info(config, run_key, run_info, state=state)
-    set_step_status(config, f"xcpd_{pipeline_name}", "completed", "Process finished", state=state)
+    state = set_run_info(config, run_key, run_info, state=state)
+    state = set_step_status(config, f"xcpd_{pipeline_name}", "completed", "Process finished", state=state)
     append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} run finished", state=state)
     return state
 
@@ -648,9 +1044,16 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
 
 def collect_qc_reports(output_dir: Path) -> Dict[str, List[Path]]:
     """Collect QC artifacts produced by XCP-D."""
+    if not output_dir.exists():
+        return {k: [] for k in ("qc_csv", "exec_reports", "summary_reports", "motion", "outliers",
+                                "timeseries", "connectomes", "bold", "reho", "alff", "falff")}
     return {
         "qc_csv": sorted(output_dir.glob("**/*_qc.csv")),
-        "exec_reports": sorted(output_dir.glob("**/*exec_report*.html")),
+        # XCP-D produces per-run HTML reports with these patterns (not exec_report*.html)
+        "exec_reports": sorted(output_dir.glob("**/*_desc-about_bold.html")),
+        "summary_reports": sorted(output_dir.glob("**/*_desc-summary_bold.html")),
+        "motion": sorted(output_dir.glob("**/*_motion.tsv")),
+        "outliers": sorted(output_dir.glob("**/*_outliers.tsv")),
         "timeseries": sorted(output_dir.glob("**/*timeseries*.tsv")),
         "connectomes": sorted(output_dir.glob("**/*connectome*.tsv")),
         "bold": sorted(output_dir.glob("**/*desc-denoised_bold.nii.gz")),
@@ -658,6 +1061,132 @@ def collect_qc_reports(output_dir: Path) -> Dict[str, List[Path]]:
         "alff": sorted(output_dir.glob("**/*_alff.nii.gz")),
         "falff": sorted(output_dir.glob("**/*_falff.nii.gz")),
     }
+
+
+def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = None) -> Dict[str, Any]:
+    """Parse an XCP-D/nipype log file and return progress information.
+
+    Uses *stored_total* as a fallback when the "N nodes built" line has not
+    yet been written to the local log (e.g. for HPC runs whose log was
+    fetched only partially).
+    """
+    result: Dict[str, Any] = {
+        "nodes_total": stored_total,
+        "nodes_done": 0,
+        "current_node": None,
+        "last_lines": [],
+        "has_error": False,
+        "is_done": False,
+    }
+    if not log_file or not Path(log_file).exists():
+        return result
+    try:
+        content = Path(log_file).read_text(errors="ignore")
+    except OSError:
+        return result
+
+    lines = content.splitlines()
+    result["last_lines"] = lines[-50:]
+
+    for line in lines:
+        m = re.search(r"workflow graph with (\d+) nodes", line)
+        if m:
+            result["nodes_total"] = int(m.group(1))
+        if "[Node] Finished" in line:
+            result["nodes_done"] += 1
+        m = re.search(r'\[Node\] (?:Setting-up|Executing) "([^"]+)"', line)
+        if m:
+            # Show only the short node name (last dotted component)
+            result["current_node"] = m.group(1).split(".")[-1]
+        if " ERROR " in line or "Traceback (most recent" in line:
+            result["has_error"] = True
+        if "Workflow finished" in line or "XCP-D finished successfully" in line:
+            result["is_done"] = True
+
+    return result
+
+
+def fetch_hpc_xcpd_log(config: Dict[str, Any], run_info: Dict[str, Any]) -> Optional[Path]:
+    """Download the full remote XCP-D SLURM log to the local log_file path.
+
+    Returns the local Path on success, None on failure.
+    """
+    remote_log = run_info.get("remote_log_out")
+    local_log = run_info.get("log_file")
+    if not remote_log or not local_log:
+        return None
+    hpc_cfg = HPCConfig.from_config(config)
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        stdout, _, exit_code = conn.execute(
+            f"cat {shlex.quote(remote_log)} 2>/dev/null",
+            timeout=120,
+        )
+        if stdout:
+            local_path = Path(local_log)
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_text(stdout)
+            return local_path
+    except Exception:
+        pass
+    finally:
+        _safe_disconnect(conn)
+    return None
+
+
+def download_xcpd_outputs_from_hpc(
+    config: Dict[str, Any],
+    pipeline_name: str,
+    participant_labels: Optional[Iterable[str]] = None,
+) -> str:
+    """Rsync XCP-D pipeline outputs from HPC to the local output directory.
+
+    Returns the local output directory path.
+    """
+    hpc_cfg = HPCConfig.from_config(config)
+    paths = config["paths"]
+    output_dir_key = f"xcpd_{pipeline_name}_dir"
+    local_out_dir = Path(paths.get(output_dir_key) or paths.get("xcpd_dir", "") or "derivatives/preprocessing/xcpd") / pipeline_name
+    local_out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Derive the remote XCP-D output dir from the remote fMRIPrep path
+    remote_fmriprep = hpc_cfg.remote_fmriprep or ""
+    if "/fmriprep" in remote_fmriprep:
+        remote_xcpd_dir = remote_fmriprep.replace("/fmriprep", f"/xcpd/{pipeline_name}")
+    else:
+        remote_xcpd_dir = f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline_name}"
+
+    rsync_cmd = ["rsync", "-avz", "--no-perms"]
+    if hpc_cfg.ssh_key:
+        rsync_cmd.extend(["-e", f"ssh -i {Path(hpc_cfg.ssh_key).expanduser()}"])
+
+    subjects = [f"sub-{label}" if not label.startswith("sub-") else label
+                for label in (participant_labels or [])]
+    if subjects:
+        # Include only selected subjects
+        for sub in subjects:
+            rsync_cmd += [f"--include={sub}/", f"--include={sub}/**"]
+        rsync_cmd += ["--include=dataset_description.json", "--include=*.json",
+                      "--include=*.bib", "--include=*.html",
+                      "--exclude=*/"]
+    # Also always include top-level files (dataset_description, etc.)
+    rsync_cmd += [
+        "--include=dataset_description.json",
+        "--include=*.json",
+        "--include=*.bib",
+    ]
+
+    rsync_cmd += [
+        f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_xcpd_dir}/",
+        f"{local_out_dir}/",
+    ]
+
+    result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode not in (0, 24):  # 24 = partial transfer (acceptable)
+        raise RuntimeError(result.stderr or result.stdout or f"rsync exited {result.returncode}")
+    return str(local_out_dir)
 
 
 def _sync_remote_xcpd_atlas_dataset(
@@ -703,3 +1232,91 @@ def _sync_remote_xcpd_atlas_dataset(
         raise RuntimeError(result.stderr or result.stdout or "Failed to sync XCP-D atlas dataset to HPC")
 
     return remote_dataset_root
+
+
+def sync_fmriprep_to_hpc(
+    config: Dict[str, Any],
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+    progress_callback=None,
+) -> str:
+    """Upload local fMRIPrep derivatives to the configured HPC host.
+
+    Returns the remote fMRIPrep directory path on success.
+    """
+    hpc_cfg = HPCConfig.from_config(config)
+    local_fmriprep = _resolved_local_fmriprep_dir(config)
+    if not local_fmriprep or not Path(local_fmriprep).exists():
+        raise RuntimeError(f"Local fMRIPrep directory not found: {local_fmriprep}")
+
+    remote_fmriprep = hpc_cfg.remote_fmriprep
+    if not remote_fmriprep:
+        raise RuntimeError("No remote fMRIPrep path configured in HPC settings.")
+
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        conn.execute(f"mkdir -p {shlex.quote(remote_fmriprep)}", timeout=60)
+    finally:
+        _safe_disconnect(conn)
+
+    subjects = [f"sub-{label}" for label in _strip_bids_prefix(participant_labels, "sub-")]
+    sessions = [f"ses-{label}" for label in _strip_bids_prefix(session_ids, "ses-")]
+
+    rsync_cmd = [
+        "rsync", "-avz",
+        "--info=progress2",
+        "--exclude=*_space-fsnative_*",
+    ]
+    if hpc_cfg.ssh_key:
+        ssh_key = str(Path(hpc_cfg.ssh_key).expanduser())
+        rsync_cmd.extend(["-e", f"ssh -i {ssh_key}"])
+
+    if subjects:
+        for sub in subjects:
+            rsync_cmd += [f"--include={sub}/"]
+            if sessions:
+                for ses in sessions:
+                    rsync_cmd += [
+                        f"--include={sub}/{ses}/",
+                        f"--include={sub}/{ses}/**",
+                    ]
+                # Always include the subject-level anat/ dir — XCP-D requires T1w/T2w
+                # files stored there (not under session subdirs) for longitudinal data.
+                rsync_cmd += [
+                    f"--include={sub}/anat/",
+                    f"--include={sub}/anat/**",
+                    f"--include={sub}/figures/",
+                    f"--include={sub}/figures/**",
+                    f"--include={sub}/*.html",
+                    f"--include={sub}/*.json",
+                ]
+            else:
+                rsync_cmd += [f"--include={sub}/**"]
+        rsync_cmd += [
+            "--include=dataset_description.json",
+            "--include=*.json",
+            "--include=logs/",
+            "--include=logs/**",
+            "--exclude=*",
+        ]
+
+    rsync_cmd.extend([
+        f"{str(local_fmriprep)}/",
+        f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_fmriprep}/",
+    ])
+
+    if progress_callback:
+        progress_callback("Uploading fMRIPrep derivatives to HPC…")
+
+    result = subprocess.run(
+        rsync_cmd,
+        capture_output=True,
+        text=True,
+        timeout=7200,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or "rsync failed")
+
+    return remote_fmriprep

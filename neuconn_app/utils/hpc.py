@@ -66,6 +66,7 @@ class HPCConfig:
     remote_base: str = ""
     remote_bids: str = ""
     remote_fmriprep: str = ""
+    remote_legacy_fmriprep: str = ""
     remote_xcpd_fc: str = ""
     remote_xcpd_fc_gsr: str = ""
     remote_xcpd_ec: str = ""
@@ -103,6 +104,9 @@ class HPCConfig:
         xcpd_fc_gsr = remote.get('xcpd_fc_gsr', '').replace('${base}', base)
         xcpd_ec = remote.get('xcpd_ec', '').replace('${base}', base)
         work = remote.get('work', '').replace('${base}', base)
+        legacy_fmriprep = remote.get('legacy_fmriprep', '').replace('${base}', base)
+        if not legacy_fmriprep and base:
+            legacy_fmriprep = str(Path(base) / 'fmriprep')
 
         return cls(
             host=hpc.get('host', ''),
@@ -111,6 +115,7 @@ class HPCConfig:
             remote_base=base,
             remote_bids=bids,
             remote_fmriprep=fmriprep,
+            remote_legacy_fmriprep=legacy_fmriprep,
             remote_xcpd_fc=xcpd_fc,
             remote_xcpd_fc_gsr=xcpd_fc_gsr,
             remote_xcpd_ec=xcpd_ec,

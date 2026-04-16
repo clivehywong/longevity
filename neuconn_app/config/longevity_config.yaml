@@ -42,6 +42,7 @@ hpc:
     base: "/home/clivewong/proj/long"
     bids: "${base}/bids"
     fmriprep: "${base}/derivatives/preprocessing/fmriprep"
+    legacy_fmriprep: "${base}/fmriprep"
     xcpd_fc: "${base}/derivatives/preprocessing/xcpd/fc"
     xcpd_fc_gsr: "${base}/derivatives/preprocessing/xcpd/fc_gsr"
     xcpd_ec: "${base}/derivatives/preprocessing/xcpd/ec"
@@ -64,8 +65,8 @@ hpc:
     max_concurrent_jobs: 4
     batch_size: 4
     poll_interval: 300
-    xcpd_cpus: 16
-    xcpd_memory: "64GB"
+    xcpd_cpus: 8
+    xcpd_memory: "32GB"
     xcpd_time: "12:00:00"
 
 software:
@@ -111,7 +112,7 @@ xcpd:
     smoothing: 6.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
+    file_format: "nifti"
     output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
@@ -135,7 +136,7 @@ xcpd:
     smoothing: 6.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
+    file_format: "nifti"
     output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
@@ -159,7 +160,7 @@ xcpd:
     smoothing: 0.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
+    file_format: "nifti"
     output_type: "interpolated"
     output_layout: "bids"
     report_output_level: "session"

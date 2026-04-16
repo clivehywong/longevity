@@ -208,7 +208,7 @@ def ensure_xcpd_atlas_dataset(
     dataset_description = {
         "Name": "Longevity XCP-D atlas dataset",
         "BIDSVersion": "1.8.0",
-        "DatasetType": "atlas",
+        "DatasetType": "derivative",
     }
     with open(dataset_root / "dataset_description.json", "w") as f:
         json.dump(dataset_description, f, indent=2, sort_keys=True)
