@@ -159,20 +159,6 @@ def qc_report_summary(qc_reports: Dict[str, List[Path]]) -> Dict[str, int]:
     return {key: len(value) for key, value in qc_reports.items()}
 
 
-def render_exec_reports(exec_reports: List[Path]) -> None:
-    """Render download buttons for XCP-D HTML QC reports."""
-    if not exec_reports:
-        st.caption("No HTML reports found yet.")
-        return
-    for report in exec_reports[:10]:
-        st.download_button(
-            label=f"⬇ {report.name}",
-            data=report.read_bytes(),
-            file_name=report.name,
-            mime="text/html",
-            key=f"dl_report_{report.stem}",
-        )
-
 
 def collect_xcpd_motion_stats(output_dir: Path) -> Optional[pd.DataFrame]:
     """Read per-run motion.tsv and outliers.tsv files and return a summary table."""
