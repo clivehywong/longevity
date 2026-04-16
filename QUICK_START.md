@@ -60,6 +60,23 @@ Then read:
 - [`docs/user/workflows/neuconn-app.md`](docs/user/workflows/neuconn-app.md)
 - [`docs/developer/architecture/neuconn-app-architecture.md`](docs/developer/architecture/neuconn-app-architecture.md)
 
+### 5. Run XCP-D post-processing pipeline
+
+Requires the XCP-D Singularity image and FreeSurfer licence — see the prerequisites section in the app workflow doc.
+
+```bash
+# In the NeuConn app:
+# fMRI Analysis > XCP-D Pipeline
+# 1. FD Inspection tab  → generate summary, approve thresholds
+# 2. XCP-D Runs tab     → start FC (and optionally FC+GSR / EC)
+# 3. Post-XCP-D QC tab  → review QC reports, approve gate
+# 4. fMRI Analysis > Subject Level → index local measures, export seed connectivity
+```
+
+Then read:
+
+- [`docs/user/workflows/neuconn-app.md#xcpd-pipeline`](docs/user/workflows/neuconn-app.md)
+
 ## What changed
 
 - The primary docs are now organized by **audience** and **task**.
