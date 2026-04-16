@@ -1098,7 +1098,7 @@ def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = 
         if m:
             # Show only the short node name (last dotted component)
             result["current_node"] = m.group(1).split(".")[-1]
-        if " ERROR " in line or "Traceback (most recent" in line:
+        if " ERROR " in line or "Traceback (most recent" in line or line.startswith("FATAL:") or " FATAL " in line:
             result["has_error"] = True
         if "Workflow finished" in line or "XCP-D finished successfully" in line:
             result["is_done"] = True
