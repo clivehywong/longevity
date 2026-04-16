@@ -71,6 +71,7 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
         _render_pipeline_qc_column(ec_qc, qc_dirs["ec"], "ec")
         exclusions = build_ec_exclusion_table(config)
         if exclusions is not None:
+            st.caption("EC exclusion preview (mean FD threshold applied)")
             st.dataframe(exclusions, use_container_width=True, hide_index=True)
             exclusions.to_csv(qc_dirs["ec"] / "ec_exclusions.csv", index=False)
 
@@ -90,7 +91,7 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
     # QC gate — only FC is required; EC is optional
     fc_has_outputs = bool(fc_qc["exec_reports"] or fc_qc["bold"] or fc_qc["motion"])
     if fc_has_outputs:
-        if state.get("approvals", {}).get("qc_gate"):
+        if state.get("approvals", {}).get("qc_gate", {}).get("approved"):
             st.success("✅ Post-XCP-D QC approved. Subject/group analysis stages are unlocked.")
         else:
             if st.button("Approve and Proceed", type="primary"):
