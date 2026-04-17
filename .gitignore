@@ -15,3 +15,5 @@ tools
 __pycache__/
 *.py[cod]
 atlases/xcpd_project_atlases/
+.playwright-mcp/
+test_screenshots/
