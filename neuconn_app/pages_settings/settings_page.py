@@ -43,10 +43,11 @@ def render():
     config = st.session_state.settings_config
 
     # Create tabs for organization
-    tab_project, tab_paths, tab_hpc, tab_analysis, tab_roi, tab_qc, tab_actions = st.tabs([
+    tab_project, tab_paths, tab_hpc, tab_software, tab_analysis, tab_roi, tab_qc, tab_actions = st.tabs([
         "Project",
         "Paths",
         "HPC Settings",
+        "Software / Images",
         "Analysis Parameters",
         "ROI Config",
         "QC Profiles",
@@ -64,6 +65,9 @@ def render():
 
     with tab_hpc:
         changes_made |= render_hpc_settings(config)
+
+    with tab_software:
+        changes_made |= render_software_settings(config)
 
     with tab_analysis:
         changes_made |= render_analysis_settings(config)
@@ -349,38 +353,7 @@ def render_hpc_settings(config: Dict) -> bool:
                 if changes:
                     st.success("Remote paths updated")
 
-    # Singularity images
-    with st.expander("Singularity Images"):
-        if 'singularity_images' not in hpc:
-            hpc['singularity_images'] = {}
-        simg = hpc['singularity_images']
-
-        with st.form("hpc_singularity_form"):
-            simg_fields = [
-                ('fmriprep', 'fMRIPrep Image', 'Path to fMRIPrep .simg/.sif'),
-                ('xcp_d', 'XCP-D Image', 'Path to XCP-D .sif'),
-                ('fmripost_aroma', 'fMRIPost-AROMA Image', 'Path to fMRIPost-AROMA .sif'),
-                ('qsiprep', 'QSIPrep Image', 'Path to QSIPrep .sif'),
-                ('qsirecon', 'QSIRecon Image', 'Path to QSIRecon .sif'),
-                ('freesurfer_license', 'FreeSurfer License', 'Path to FreeSurfer license.txt'),
-            ]
-
-            new_simg = {}
-            for key, label, help_text in simg_fields:
-                new_simg[key] = st.text_input(
-                    label,
-                    value=simg.get(key, ''),
-                    help=help_text,
-                    key=f"simg_{key}"
-                )
-
-            if st.form_submit_button("Apply Singularity Paths"):
-                for key, _, _ in simg_fields:
-                    if new_simg[key] != simg.get(key, ''):
-                        simg[key] = new_simg[key]
-                        changes = True
-                if changes:
-                    st.success("Singularity paths updated")
+    # Singularity images are now managed in the "Software / Images" tab.
 
     # SLURM settings
     with st.expander("SLURM Settings"):
@@ -447,6 +420,42 @@ def render_hpc_settings(config: Dict) -> bool:
                 if changes:
                     st.success("SLURM settings updated")
 
+        st.markdown("**XCP-D Overrides** — leave at 0 / blank to use defaults above")
+        with st.form("hpc_slurm_xcpd_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                new_xcpd_cpus = st.number_input(
+                    "XCP-D CPUs",
+                    min_value=0,
+                    max_value=64,
+                    value=int(slurm.get('xcpd_cpus', 0)),
+                    help="CPUs for XCP-D job (0 = use default)",
+                )
+            with col2:
+                new_xcpd_mem = st.text_input(
+                    "XCP-D Memory",
+                    value=slurm.get('xcpd_memory', ''),
+                    help="Memory for XCP-D job (blank = use default, e.g. 64GB)",
+                )
+            with col3:
+                new_xcpd_time = st.text_input(
+                    "XCP-D Time Limit",
+                    value=slurm.get('xcpd_time', ''),
+                    help="Wall time for XCP-D job (blank = use default, e.g. 12:00:00)",
+                )
+            if st.form_submit_button("Apply XCP-D Overrides"):
+                xcpd_updates = {
+                    'xcpd_cpus': new_xcpd_cpus,
+                    'xcpd_memory': new_xcpd_mem,
+                    'xcpd_time': new_xcpd_time,
+                }
+                for key, val in xcpd_updates.items():
+                    if val != slurm.get(key):
+                        slurm[key] = val
+                        changes = True
+                if changes:
+                    st.success("XCP-D SLURM overrides updated")
+
     # Validation warnings
     if hpc_enabled:
         warnings = []
@@ -463,7 +472,93 @@ def render_hpc_settings(config: Dict) -> bool:
     return changes
 
 
-def test_hpc_connection(hpc_config: Dict):
+def render_software_settings(config: Dict) -> bool:
+    """Render local and HPC Singularity image path settings for all tools."""
+    st.subheader("Software / Singularity Images")
+    st.markdown(
+        "Configure Singularity image paths for local execution and for the HPC cluster. "
+        "Local paths are used when running pipelines on this machine. "
+        "HPC paths are used when submitting jobs to the configured HPC cluster."
+    )
+
+    changes = False
+
+    tool_fields = [
+        ('fmriprep', 'fMRIPrep', 'Path to fMRIPrep .simg/.sif'),
+        ('xcp_d', 'XCP-D', 'Path to XCP-D .sif'),
+        ('fmripost_aroma', 'fMRIPost-AROMA', 'Path to fMRIPost-AROMA .sif (leave blank if not used)'),
+        ('qsiprep', 'QSIPrep', 'Path to QSIPrep .sif (DWI; leave blank if not used)'),
+        ('qsirecon', 'QSIRecon', 'Path to QSIRecon .sif (DWI; leave blank if not used)'),
+        ('freesurfer_license', 'FreeSurfer License', 'Path to FreeSurfer license.txt'),
+    ]
+
+    col_local, col_hpc = st.columns(2)
+
+    with col_local:
+        with st.expander("Local Singularity Images", expanded=True):
+            if 'software' not in config:
+                config['software'] = {}
+            software = config['software']
+            simg = software.setdefault('singularity_images', {})
+
+            with st.form("local_singularity_form"):
+                new_local = {}
+                for key, label, help_text in tool_fields:
+                    new_local[key] = st.text_input(
+                        label,
+                        value=simg.get(key, ''),
+                        help=help_text,
+                        key=f"local_simg_{key}",
+                    )
+
+                bind_mounts_text = st.text_area(
+                    "Bind Mounts (one per line)",
+                    value="\n".join(software.get('singularity_bind_mounts', [])),
+                    height=80,
+                    help="Directories to bind-mount into the container",
+                    key="local_bind_mounts",
+                )
+
+                if st.form_submit_button("Apply Local Image Paths"):
+                    for key, _, _ in tool_fields:
+                        if new_local[key] != simg.get(key, ''):
+                            simg[key] = new_local[key]
+                            changes = True
+                    new_mounts = [m.strip() for m in bind_mounts_text.splitlines() if m.strip()]
+                    if new_mounts != software.get('singularity_bind_mounts', []):
+                        software['singularity_bind_mounts'] = new_mounts
+                        changes = True
+                    if changes:
+                        st.success("Local image paths updated")
+
+    with col_hpc:
+        with st.expander("HPC / Remote Singularity Images", expanded=True):
+            if 'hpc' not in config:
+                config['hpc'] = {}
+            hpc_simg = config['hpc'].setdefault('singularity_images', {})
+
+            with st.form("hpc_singularity_form"):
+                new_hpc = {}
+                for key, label, help_text in tool_fields:
+                    new_hpc[key] = st.text_input(
+                        label,
+                        value=hpc_simg.get(key, ''),
+                        help=help_text,
+                        key=f"hpc_simg_{key}",
+                    )
+
+                if st.form_submit_button("Apply HPC Image Paths"):
+                    for key, _, _ in tool_fields:
+                        if new_hpc[key] != hpc_simg.get(key, ''):
+                            hpc_simg[key] = new_hpc[key]
+                            changes = True
+                    if changes:
+                        st.success("HPC image paths updated")
+
+    return changes
+
+
+def test_hpc_connection(hpc_config: Dict) -> None:
     """Test HPC SSH connection."""
     host = hpc_config.get('host')
     user = hpc_config.get('user')
@@ -507,6 +602,17 @@ def test_hpc_connection(hpc_config: Dict):
         st.error(f"SSH error: {e}")
     except Exception as e:
         st.error(f"Connection failed: {e}")
+
+
+def _validate_auto_or_int(value: str, field_name: str) -> str:
+    """Validate that value is either 'auto' or a valid integer string."""
+    if value != "auto":
+        try:
+            int(value)
+        except ValueError:
+            st.error(f"{field_name} must be 'auto' or an integer, got: {value!r}")
+            st.stop()
+    return value
 
 
 def render_analysis_settings(config: Dict) -> bool:
@@ -584,6 +690,238 @@ def render_analysis_settings(config: Dict) -> bool:
 
                 if changes:
                     st.success("fMRIPrep settings updated")
+
+    # XCP-D pipeline settings (must run before connectivity analysis)
+    with st.expander("XCP-D Pipeline Settings"):
+        from utils.xcpd_atlases import (
+            atlas_option_ids,
+            format_xcpd_atlas_label,
+            normalize_xcpd_atlas_selection,
+            recommended_xcpd_atlases,
+        )
+
+        if 'xcpd' not in config:
+            config['xcpd'] = {}
+        xcpd = config['xcpd']
+
+        st.markdown("""
+**Confound Pipeline Reference**
+
+| Pipeline | Motion (6P) | WM | CSF | Global Signal | aCompCor | AROMA |
+|---|---|---|---|---|---|---|
+| `24P` | X, X², ΔX, ΔX² | | | | | |
+| `27P` | X, X², ΔX, ΔX² | X | X | X | | |
+| `36P` | X, X², ΔX, ΔX² | X, X², ΔX, ΔX² | X, X², ΔX, ΔX² | X, X², ΔX, ΔX² | | |
+| `acompcor` | X, ΔX | | | | 5 WM + 5 CSF | |
+| `acompcor_gsr` | X, ΔX | | | X | 5 WM + 5 CSF | |
+| `aroma` | X, ΔX | X | X | | | X |
+| `aroma_gsr` | X, ΔX | X | X | X | | X |
+| `gsr_only` | | | | X | | |
+| `none` | | | | | | |
+
+> **FC default (`fc`):** `acompcor` — no global signal regression (conservative; GSR is controversial).
+> **FC + GSR (`fc_gsr`):** `36P` — includes GSR for comparison. Use alongside `fc` to assess GSR impact.
+> **Effective Connectivity (`ec`):** `acompcor` — no smoothing, wider bandpass, stricter min-time for temporal precision.
+
+**Motion filter:** `notch` = band-stop filter (removes respiratory artifact ~12–18 BPM); `lp` = low-pass; `none` = disabled.
+**Bandpass filter:** enabled by default. Disable only if you need unfiltered residuals.
+""")
+
+        for pipeline_name in ('fc', 'fc_gsr', 'ec'):
+            pipeline = xcpd.setdefault(pipeline_name, {})
+            with st.form(f"xcpd_{pipeline_name}_form"):
+                label = {"fc": "FC (no GSR)", "fc_gsr": "FC + GSR", "ec": "Effective Connectivity"}[pipeline_name]
+                st.markdown(f"**{label} pipeline (`{pipeline_name}`)**")
+
+                _mode_options = ["linc", "abcd", "hbcd", "nichart", "none"]
+                _current_mode = pipeline.get("mode", "linc")
+                _mode_index = _mode_options.index(_current_mode) if _current_mode in _mode_options else 0
+                new_mode = st.selectbox(
+                    "Pipeline mode",
+                    options=_mode_options,
+                    index=_mode_index,
+                    help=(
+                        "**linc** = LINC/PennLINC standard QC + outputs (recommended for research). "
+                        "abcd/hbcd/nichart = study-specific presets. "
+                        "**none** = manual mode — requires many extra flags, advanced use only."
+                    ),
+                    key=f"xcpd_{pipeline_name}_mode",
+                )
+                if new_mode == "none":
+                    st.warning(
+                        "⚠️ `none` mode requires many additional flags (`--abcc-qc`, `--combine-runs`, etc.) "
+                        "that are not configured here. Use `linc` unless you know what you're doing."
+                    )
+
+                col1, col2, col3 = st.columns(3)
+
+                # --- Column 1: Motion / censoring ---
+                with col1:
+                    st.markdown("**Motion & censoring**")
+                    _nuisance_opts = ["24P", "27P", "36P", "acompcor", "acompcor_gsr", "aroma", "aroma_gsr", "gsr_only", "none"]
+                    new_nuisance = st.selectbox(
+                        "Nuisance regressors",
+                        options=_nuisance_opts,
+                        index=_nuisance_opts.index(
+                            pipeline.get("nuisance_regressors", "36P" if pipeline_name == "fc_gsr" else "acompcor")
+                        ),
+                        help=(
+                            "**No GSR**: 24P, acompcor, aroma, none  \n"
+                            "**Includes GSR**: 27P, 36P, acompcor_gsr, aroma_gsr, gsr_only  \n\n"
+                            "24P = 6 motion params + derivatives + squares (no global signal).  \n"
+                            "27P = 24P + WM + CSF + global signal.  \n"
+                            "36P = 27P + derivatives + squares of tissue/GS regressors.  \n"
+                            "acompcor = anatomical CompCor (WM/CSF) without global signal.  \n"
+                            "acompcor_gsr = aCompCor + global signal regression."
+                        ),
+                        key=f"xcpd_{pipeline_name}_nuisance",
+                    )
+                    new_fd = st.number_input(
+                        "FD threshold (mm)",
+                        min_value=0.0, max_value=2.0,
+                        value=float(pipeline.get("fd_thresh", 0.3 if pipeline_name in ("fc", "fc_gsr") else 0.5)),
+                        step=0.05,
+                        key=f"xcpd_{pipeline_name}_fd",
+                    )
+                    new_filter_type = st.selectbox(
+                        "Motion filter type",
+                        options=["notch", "lp", "none"],
+                        index=["notch", "lp", "none"].index(pipeline.get("motion_filter_type", "notch") if pipeline.get("motion_filter_type", "notch") in ["notch", "lp", "none"] else "notch"),
+                        help="notch = band-stop (respiratory); lp = low-pass; none = disabled",
+                        key=f"xcpd_{pipeline_name}_filter_type",
+                    )
+                    new_band_min = st.number_input(
+                        "Band-stop min (BPM)",
+                        min_value=0, max_value=60,
+                        value=int(pipeline.get("band_stop_min", 12)),
+                        step=1,
+                        key=f"xcpd_{pipeline_name}_band_min",
+                    )
+                    new_band_max = st.number_input(
+                        "Band-stop max (BPM)",
+                        min_value=0, max_value=60,
+                        value=int(pipeline.get("band_stop_max", 18)),
+                        step=1,
+                        key=f"xcpd_{pipeline_name}_band_max",
+                    )
+
+                # --- Column 2: Denoising / signal ---
+                with col2:
+                    st.markdown("**Denoising & signal**")
+                    new_dummy = st.text_input(
+                        "Dummy scans",
+                        value=str(pipeline.get("dummy_scans", "auto")),
+                        help="Number of initial volumes to discard, or 'auto'",
+                        key=f"xcpd_{pipeline_name}_dummy",
+                    )
+                    new_despike = st.checkbox(
+                        "Despike",
+                        value=bool(pipeline.get("despike", True)),
+                        key=f"xcpd_{pipeline_name}_despike",
+                    )
+                    new_smoothing = st.number_input(
+                        "Smoothing FWHM (mm)",
+                        min_value=0.0, max_value=20.0,
+                        value=float(pipeline.get("smoothing", 0.0 if pipeline_name == "ec" else 6.0)),
+                        step=0.5,
+                        key=f"xcpd_{pipeline_name}_smoothing",
+                    )
+                    new_bpf = st.checkbox(
+                        "Bandpass filter",
+                        value=bool(pipeline.get("bandpass_filter", True)),
+                        key=f"xcpd_{pipeline_name}_bpf",
+                    )
+                    new_high_pass = st.number_input(
+                        "High-pass (Hz)",
+                        min_value=0.0, max_value=1.0,
+                        value=float(pipeline.get("high_pass", pipeline.get("lower_bpf", 0.01))),
+                        step=0.005, format="%.3f",
+                        key=f"xcpd_{pipeline_name}_high_pass",
+                    )
+                    new_low_pass = st.number_input(
+                        "Low-pass (Hz)",
+                        min_value=0.0, max_value=1.0,
+                        value=float(pipeline.get("low_pass", pipeline.get("upper_bpf", 0.1 if pipeline_name == "ec" else 0.08))),
+                        step=0.005, format="%.3f",
+                        key=f"xcpd_{pipeline_name}_low_pass",
+                    )
+
+                # --- Column 3: Quality / output ---
+                with col3:
+                    st.markdown("**Quality & output**")
+                    new_head_radius = st.text_input(
+                        "Head radius",
+                        value=str(pipeline.get("head_radius", "auto")),
+                        help="Head radius in mm for FD computation, or 'auto'",
+                        key=f"xcpd_{pipeline_name}_head_radius",
+                    )
+                    new_min_coverage = st.number_input(
+                        "Min parcel coverage",
+                        min_value=0.0, max_value=1.0,
+                        value=float(pipeline.get("min_coverage", 0.5)),
+                        step=0.05, format="%.2f",
+                        key=f"xcpd_{pipeline_name}_min_coverage",
+                    )
+                    new_min_time = st.number_input(
+                        "Minimum time (s)",
+                        min_value=0, max_value=2000,
+                        value=int(pipeline.get("min_time", 300 if pipeline_name == "ec" else 240)),
+                        step=10,
+                        key=f"xcpd_{pipeline_name}_min_time",
+                    )
+                    new_output_type = st.selectbox(
+                        "Output type",
+                        options=["censored", "interpolated", "auto"],
+                        index=["censored", "interpolated", "auto"].index(pipeline.get("output_type", "censored")),
+                        key=f"xcpd_{pipeline_name}_output_type",
+                    )
+                    new_file_format = st.selectbox(
+                        "File format",
+                        options=["cifti", "nifti"],
+                        index=["cifti", "nifti"].index(pipeline.get("file_format", "cifti")),
+                        key=f"xcpd_{pipeline_name}_file_format",
+                    )
+
+                current_atlases = normalize_xcpd_atlas_selection(pipeline.get('atlases', [])) or recommended_xcpd_atlases()
+                atlas_options = atlas_option_ids(config, current_atlases)
+                new_atlases = st.multiselect(
+                    f"Atlases",
+                    options=atlas_options,
+                    default=[atlas for atlas in current_atlases if atlas in atlas_options],
+                    format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
+                    key=f"xcpd_{pipeline_name}_atlases",
+                )
+
+                if st.form_submit_button(f"Apply {label} XCP-D Settings"):
+                    new_dummy = _validate_auto_or_int(new_dummy, "Dummy scans")
+                    new_head_radius = _validate_auto_or_int(new_head_radius, "Head radius")
+                    updates = {
+                        'mode': new_mode,
+                        'nuisance_regressors': new_nuisance,
+                        'fd_thresh': new_fd,
+                        'motion_filter_type': new_filter_type,
+                        'band_stop_min': new_band_min,
+                        'band_stop_max': new_band_max,
+                        'dummy_scans': new_dummy,
+                        'despike': new_despike,
+                        'smoothing': new_smoothing,
+                        'bandpass_filter': new_bpf,
+                        'high_pass': new_high_pass,
+                        'low_pass': new_low_pass,
+                        'head_radius': new_head_radius,
+                        'min_coverage': new_min_coverage,
+                        'min_time': new_min_time,
+                        'output_type': new_output_type,
+                        'file_format': new_file_format,
+                        'atlases': normalize_xcpd_atlas_selection(new_atlases),
+                    }
+                    for key, value in updates.items():
+                        if value != pipeline.get(key):
+                            pipeline[key] = value
+                            changes = True
+                    if changes:
+                        st.warning("Changing this parameter will require re-running XCP-D. Proceed?")
+                        st.success(f"{label} XCP-D settings updated")
 
     # Connectivity settings
     with st.expander("Connectivity Analysis Settings"):
@@ -724,104 +1062,6 @@ def render_analysis_settings(config: Dict) -> bool:
 
                 if changes:
                     st.success("Group analysis settings updated")
-
-    with st.expander("XCP-D Pipeline Settings"):
-        from utils.xcpd_atlases import (
-            atlas_option_ids,
-            format_xcpd_atlas_label,
-            normalize_xcpd_atlas_selection,
-            recommended_xcpd_atlases,
-        )
-
-        if 'xcpd' not in config:
-            config['xcpd'] = {}
-        xcpd = config['xcpd']
-
-        for pipeline_name in ('fc', 'ec'):
-            pipeline = xcpd.setdefault(pipeline_name, {})
-            with st.form(f"xcpd_{pipeline_name}_form"):
-                st.markdown(f"**{pipeline_name.upper()} pipeline**")
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    new_fd = st.number_input(
-                        f"{pipeline_name.upper()} FD threshold",
-                        min_value=0.0,
-                        max_value=2.0,
-                        value=float(pipeline.get('fd_thresh', 0.5 if pipeline_name == 'fc' else 0.0)),
-                        step=0.05,
-                        key=f"xcpd_{pipeline_name}_fd",
-                    )
-                    new_min_time = st.number_input(
-                        f"{pipeline_name.upper()} minimum time (s)",
-                        min_value=0,
-                        max_value=2000,
-                        value=int(pipeline.get('min_time', 100 if pipeline_name == 'fc' else 0)),
-                        step=10,
-                        key=f"xcpd_{pipeline_name}_min_time",
-                    )
-                    new_output_type = st.selectbox(
-                        f"{pipeline_name.upper()} output type",
-                        options=["censored", "interpolated", "auto"],
-                        index=["censored", "interpolated", "auto"].index(pipeline.get('output_type', 'censored' if pipeline_name == 'fc' else 'interpolated')),
-                        key=f"xcpd_{pipeline_name}_output_type",
-                    )
-
-                with col2:
-                    new_smoothing = st.number_input(
-                        f"{pipeline_name.upper()} smoothing (mm)",
-                        min_value=0.0,
-                        max_value=20.0,
-                        value=float(pipeline.get('smoothing', 6.0)),
-                        step=0.5,
-                        key=f"xcpd_{pipeline_name}_smoothing",
-                    )
-                    new_low = st.number_input(
-                        f"{pipeline_name.upper()} lower BPF",
-                        min_value=0.0,
-                        max_value=1.0,
-                        value=float(pipeline.get('lower_bpf', 0.01)),
-                        step=0.01,
-                        format="%.2f",
-                        key=f"xcpd_{pipeline_name}_low",
-                    )
-                    new_high = st.number_input(
-                        f"{pipeline_name.upper()} upper BPF",
-                        min_value=0.0,
-                        max_value=1.0,
-                        value=float(pipeline.get('upper_bpf', 0.10)),
-                        step=0.01,
-                        format="%.2f",
-                        key=f"xcpd_{pipeline_name}_high",
-                    )
-
-                current_atlases = normalize_xcpd_atlas_selection(pipeline.get('atlases', [])) or recommended_xcpd_atlases()
-                atlas_options = atlas_option_ids(config, current_atlases)
-                new_atlases = st.multiselect(
-                    f"{pipeline_name.upper()} atlases",
-                    options=atlas_options,
-                    default=[atlas for atlas in current_atlases if atlas in atlas_options],
-                    format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
-                    key=f"xcpd_{pipeline_name}_atlases",
-                )
-
-                if st.form_submit_button(f"Apply {pipeline_name.upper()} XCP-D Settings"):
-                    updates = {
-                        'fd_thresh': new_fd,
-                        'min_time': new_min_time,
-                        'output_type': new_output_type,
-                        'smoothing': new_smoothing,
-                        'lower_bpf': new_low,
-                        'upper_bpf': new_high,
-                        'atlases': normalize_xcpd_atlas_selection(new_atlases),
-                    }
-                    for key, value in updates.items():
-                        if value != pipeline.get(key):
-                            pipeline[key] = value
-                            changes = True
-                    if changes:
-                        st.warning("Changing this parameter will require re-running XCP-D. Proceed?")
-                        st.success(f"{pipeline_name.upper()} XCP-D settings updated")
 
     with st.expander("External Tools"):
         tools = config.setdefault('external_tools', {})

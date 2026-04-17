@@ -16,6 +16,7 @@ STEP_ORDER = [
     "fd_inspection",
     "fd_gate",
     "xcpd_fc",
+    "xcpd_fc_gsr",
     "xcpd_ec",
     "post_xcpd_qc",
     "qc_gate",

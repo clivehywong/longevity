@@ -27,10 +27,27 @@ RERUN_REQUIRED_KEYS = {
     "xcpd.fc.motion_filter_type",
     "xcpd.fc.band_stop_min",
     "xcpd.fc.band_stop_max",
-    "xcpd.fc.lower_bpf",
-    "xcpd.fc.upper_bpf",
+    "xcpd.fc.high_pass",
+    "xcpd.fc.low_pass",
     "xcpd.fc.smoothing",
     "xcpd.fc.atlases",
+    "xcpd.fc.nuisance_regressors",
+    "xcpd.fc.despike",
+    "xcpd.fc.bandpass_filter",
+    "xcpd.fc_gsr.fd_thresh",
+    "xcpd.fc_gsr.min_time",
+    "xcpd.fc_gsr.output_type",
+    "xcpd.fc_gsr.output_layout",
+    "xcpd.fc_gsr.motion_filter_type",
+    "xcpd.fc_gsr.band_stop_min",
+    "xcpd.fc_gsr.band_stop_max",
+    "xcpd.fc_gsr.high_pass",
+    "xcpd.fc_gsr.low_pass",
+    "xcpd.fc_gsr.smoothing",
+    "xcpd.fc_gsr.atlases",
+    "xcpd.fc_gsr.nuisance_regressors",
+    "xcpd.fc_gsr.despike",
+    "xcpd.fc_gsr.bandpass_filter",
     "xcpd.ec.fd_thresh",
     "xcpd.ec.min_time",
     "xcpd.ec.output_type",
@@ -38,10 +55,13 @@ RERUN_REQUIRED_KEYS = {
     "xcpd.ec.motion_filter_type",
     "xcpd.ec.band_stop_min",
     "xcpd.ec.band_stop_max",
-    "xcpd.ec.lower_bpf",
-    "xcpd.ec.upper_bpf",
+    "xcpd.ec.high_pass",
+    "xcpd.ec.low_pass",
     "xcpd.ec.smoothing",
     "xcpd.ec.atlases",
+    "xcpd.ec.nuisance_regressors",
+    "xcpd.ec.despike",
+    "xcpd.ec.bandpass_filter",
     "roi_config.path",
     "subject_exclusion.mean_fd_threshold",
     "subject_exclusion.min_scan_time",
@@ -79,14 +99,14 @@ def get_project_root(config: Optional[Dict[str, Any]] = None) -> Path:
 
         bids_dir = config.get("paths", {}).get("bids_dir")
         bids_parent: Optional[Path] = None
-        if bids_dir:
+        if bids_dir and "${" not in str(bids_dir):
             bids_path = Path(os.path.expanduser(str(bids_dir))).resolve()
             if bids_path.name == "bids":
                 bids_parent = bids_path.parent
 
         derivatives_dir = config.get("paths", {}).get("derivatives_dir")
         derivatives_parent: Optional[Path] = None
-        if derivatives_dir:
+        if derivatives_dir and "${" not in str(derivatives_dir):
             derivatives_path = Path(os.path.expanduser(str(derivatives_dir))).resolve()
             derivatives_parent = _infer_root_from_derivatives_path(derivatives_path)
 
@@ -128,16 +148,20 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
         "legacy_fmriprep_dir": str(project_root / "fmriprep"),
         "xcpd_dir": str(xcpd),
         "xcpd_fc_dir": str(xcpd / "fc"),
+        "xcpd_fc_gsr_dir": str(xcpd / "fc_gsr"),
         "xcpd_ec_dir": str(xcpd / "ec"),
         "subject_level_dir": str(subject_level),
         "subject_level_fc_dir": str(subject_level / "fc"),
+        "subject_level_fc_gsr_dir": str(subject_level / "fc_gsr"),
         "subject_level_ec_dir": str(subject_level / "ec"),
         "group_level_dir": str(group_level),
         "group_level_fc_dir": str(group_level / "fc"),
+        "group_level_fc_gsr_dir": str(group_level / "fc_gsr"),
         "group_level_ec_dir": str(group_level / "ec"),
         "qc_dir": str(qc),
         "fd_inspection_dir": str(qc / "fd_inspection"),
         "xcpd_fc_qc_dir": str(qc / "xcpd_fc"),
+        "xcpd_fc_gsr_qc_dir": str(qc / "xcpd_fc_gsr"),
         "xcpd_ec_qc_dir": str(qc / "xcpd_ec"),
         "excluded_dir": str(project_root / "bids_excluded"),
         "atlases_dir": str(project_root / "atlases"),
@@ -170,35 +194,48 @@ def _resolve_template_value(value: str, derived_paths: Dict[str, str]) -> str:
 
 def _default_xcpd_section() -> Dict[str, Any]:
     common = {
-        "mode": "none",
-        "nuisance_regressors": "36P",
+        "mode": "linc",
         "motion_filter_type": "notch",
         "band_stop_min": 12,
-        "band_stop_max": 20,
-        "lower_bpf": 0.01,
-        "upper_bpf": 0.10,
+        "band_stop_max": 18,
+        "high_pass": 0.01,
         "smoothing": 6.0,
         "atlases": ["LongevitySchaefer200", "Tian"],
         "input_type": "fmriprep",
-        "file_format": "nifti",
+        "file_format": "cifti",
         "report_output_level": "session",
         "output_layout": "bids",
         "clean_workdir": False,
         "output_run_wise_correlations": True,
+        "dummy_scans": "auto",
+        "despike": True,
+        "bandpass_filter": True,
+        "head_radius": "auto",
+        "min_coverage": 0.5,
+    }
+    fc_common = {
+        **common,
+        "nuisance_regressors": "acompcor",
+        "fd_thresh": 0.3,
+        "min_time": 240,
+        "low_pass": 0.08,
+        "output_type": "censored",
     }
     return {
         "singularity_image_path": DEFAULT_XCPD_IMAGE,
         "singularity_bind_mounts": [],
-        "fc": {
-            **common,
-            "fd_thresh": 0.5,
-            "min_time": 100,
-            "output_type": "censored",
-        },
+        # FC: no GSR (conservative default)
+        "fc": fc_common,
+        # FC-GSR: same parameters with global signal regression for comparison
+        "fc_gsr": {**fc_common, "nuisance_regressors": "36P"},
+        # EC: no GSR, no smoothing, wider bandpass, longer minimum scan time
         "ec": {
             **common,
-            "fd_thresh": 0.0,
-            "min_time": 0,
+            "nuisance_regressors": "acompcor",
+            "fd_thresh": 0.5,
+            "min_time": 300,
+            "low_pass": 0.10,
+            "smoothing": 0.0,
             "output_type": "interpolated",
         },
     }
@@ -276,6 +313,15 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
         else:
             xcpd.setdefault(key, value)
 
+    # Heal None mode values: YAML `mode: none` (unquoted) is parsed as Python None,
+    # which str(None)="None" causes XCP-D to fall into "none" mode unexpectedly.
+    _VALID_XCPD_MODES = {"linc", "abcd", "hbcd", "nichart", "none"}
+    for _pipeline_key in ("fc", "fc_gsr", "ec"):
+        if _pipeline_key in xcpd and isinstance(xcpd[_pipeline_key], dict):
+            _current_mode = xcpd[_pipeline_key].get("mode")
+            if not _current_mode or _current_mode not in _VALID_XCPD_MODES:
+                xcpd[_pipeline_key]["mode"] = "linc"
+
     if not xcpd.get("singularity_bind_mounts"):
         xcpd["singularity_bind_mounts"] = default_bind_mounts(project_root)
     else:
@@ -300,6 +346,7 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
             "fmriprep",
             "fd_inspection",
             "xcpd_fc",
+            "xcpd_fc_gsr",
             "xcpd_ec",
             "post_xcpd_qc",
             "subject_level",
@@ -315,6 +362,38 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
         ["hpc", "singularity_images", "xcp_d"],
         os.path.expanduser(DEFAULT_XCPD_IMAGE),
     )
+    _setdefault_nested(hydrated, ["hpc", "singularity_images", "fmripost_aroma"], "")
+    _setdefault_nested(hydrated, ["hpc", "singularity_images", "qsiprep"], "")
+    _setdefault_nested(hydrated, ["hpc", "singularity_images", "qsirecon"], "")
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_cpus"], 16)
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_memory"], "64GB")
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_time"], "12:00:00")
+
+    # software.singularity_images: local image paths for all tools
+    software = hydrated.setdefault("software", {})
+    simg = software.setdefault("singularity_images", {})
+    simg.setdefault("fmriprep", os.path.expanduser("~/software/fmriprep-25.1.4.simg"))
+    simg.setdefault("xcp_d", os.path.expanduser(DEFAULT_XCPD_IMAGE))
+    simg.setdefault("fmripost_aroma", "")
+    simg.setdefault("qsiprep", "")
+    simg.setdefault("qsirecon", "")
+    simg.setdefault("freesurfer_license", os.path.expanduser("~/freesurfer/license.txt"))
+    if not software.get("singularity_bind_mounts"):
+        software["singularity_bind_mounts"] = default_bind_mounts(project_root)
+    else:
+        bind_mounts = [
+            _resolve_template_value(str(m), derived_paths)
+            for m in software["singularity_bind_mounts"]
+        ]
+        for required in default_bind_mounts(project_root):
+            if required not in bind_mounts:
+                bind_mounts.append(required)
+        software["singularity_bind_mounts"] = list(dict.fromkeys(bind_mounts))
+    # Expand ~ in local image paths
+    for key in ("fmriprep", "xcp_d", "fmripost_aroma", "qsiprep", "qsirecon", "freesurfer_license"):
+        val = simg.get(key, "")
+        if val:
+            simg[key] = os.path.expanduser(str(val))
 
     return hydrated
 

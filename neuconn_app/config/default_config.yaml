@@ -17,16 +17,20 @@ paths:
   legacy_fmriprep_dir: "${project_root}/fmriprep"
   xcpd_dir: "${preprocessing_dir}/xcpd"
   xcpd_fc_dir: "${xcpd_dir}/fc"
+  xcpd_fc_gsr_dir: "${xcpd_dir}/fc_gsr"
   xcpd_ec_dir: "${xcpd_dir}/ec"
   subject_level_dir: "${derivatives_dir}/subject_level"
   subject_level_fc_dir: "${subject_level_dir}/fc"
+  subject_level_fc_gsr_dir: "${subject_level_dir}/fc_gsr"
   subject_level_ec_dir: "${subject_level_dir}/ec"
   group_level_dir: "${derivatives_dir}/group_level"
   group_level_fc_dir: "${group_level_dir}/fc"
+  group_level_fc_gsr_dir: "${group_level_dir}/fc_gsr"
   group_level_ec_dir: "${group_level_dir}/ec"
   qc_dir: "${derivatives_dir}/qc"
   fd_inspection_dir: "${qc_dir}/fd_inspection"
   xcpd_fc_qc_dir: "${qc_dir}/xcpd_fc"
+  xcpd_fc_gsr_qc_dir: "${qc_dir}/xcpd_fc_gsr"
   xcpd_ec_qc_dir: "${qc_dir}/xcpd_ec"
   excluded_dir: "${project_root}/bids_excluded"
   atlases_dir: "${project_root}/atlases"
@@ -47,15 +51,16 @@ hpc:
     bids: "${base}/bids"
     fmriprep: "${base}/derivatives/preprocessing/fmriprep"
     xcpd_fc: "${base}/derivatives/preprocessing/xcpd/fc"
+    xcpd_fc_gsr: "${base}/derivatives/preprocessing/xcpd/fc_gsr"
     xcpd_ec: "${base}/derivatives/preprocessing/xcpd/ec"
     work: "${base}/work"
 
   singularity_images:
     fmriprep: "/path/to/fmriprep.sif"
     xcp_d: "~/software/xcp-d-26.0.2.sif"
-    fmripost_aroma: "/path/to/fmripost-aroma.sif"
-    qsiprep: "/path/to/qsiprep.sif"
-    qsirecon: "/path/to/qsirecon.sif"
+    fmripost_aroma: ""
+    qsiprep: ""
+    qsirecon: ""
     freesurfer_license: "/path/to/license.txt"
 
   transfer:
@@ -70,6 +75,23 @@ hpc:
     max_concurrent_jobs: 4
     batch_size: 4
     poll_interval: 300
+    xcpd_cpus: 16
+    xcpd_memory: "64GB"
+    xcpd_time: "12:00:00"
+
+software:
+  singularity_images:
+    fmriprep: "~/software/fmriprep-25.1.4.simg"
+    xcp_d: "~/software/xcp-d-26.0.2.sif"
+    fmripost_aroma: ""
+    qsiprep: ""
+    qsirecon: ""
+    freesurfer_license: "~/freesurfer/license.txt"
+  singularity_bind_mounts:
+    - "${project_root}"
+    - "${bids_dir}"
+    - "${derivatives_dir}"
+    - "~/software"
 
 fmriprep:
   version: "25.2.5"
@@ -91,42 +113,78 @@ xcpd:
     - "${bids_dir}"
     - "${derivatives_dir}"
     - "~/software"
+  # FC: functional connectivity, conservative (no GSR)
   fc:
-    mode: "none"
-    nuisance_regressors: "36P"
-    fd_thresh: 0.5
-    min_time: 100
+    mode: "linc"
+    nuisance_regressors: "acompcor"
+    fd_thresh: 0.3
+    min_time: 240
     motion_filter_type: "notch"
     band_stop_min: 12
-    band_stop_max: 20
-    lower_bpf: 0.01
-    upper_bpf: 0.10
+    band_stop_max: 18
+    high_pass: 0.01
+    low_pass: 0.08
     smoothing: 6.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "nifti"
+    file_format: "cifti"
     output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
     output_run_wise_correlations: true
-  ec:
-    mode: "none"
+    dummy_scans: "auto"
+    despike: true
+    bandpass_filter: true
+    head_radius: "auto"
+    min_coverage: 0.5
+  # FC-GSR: same as FC but with global signal regression (36P) for comparison
+  fc_gsr:
+    mode: "linc"
     nuisance_regressors: "36P"
-    fd_thresh: 0.0
-    min_time: 0
+    fd_thresh: 0.3
+    min_time: 240
     motion_filter_type: "notch"
     band_stop_min: 12
-    band_stop_max: 20
-    lower_bpf: 0.01
-    upper_bpf: 0.10
+    band_stop_max: 18
+    high_pass: 0.01
+    low_pass: 0.08
     smoothing: 6.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "nifti"
+    file_format: "cifti"
+    output_type: "censored"
+    output_layout: "bids"
+    report_output_level: "session"
+    output_run_wise_correlations: true
+    dummy_scans: "auto"
+    despike: true
+    bandpass_filter: true
+    head_radius: "auto"
+    min_coverage: 0.5
+  # EC: effective connectivity (no GSR, no smoothing, longer min_time)
+  ec:
+    mode: "linc"
+    nuisance_regressors: "acompcor"
+    fd_thresh: 0.5
+    min_time: 300
+    motion_filter_type: "notch"
+    band_stop_min: 12
+    band_stop_max: 18
+    high_pass: 0.01
+    low_pass: 0.10
+    smoothing: 0.0
+    atlases: ["LongevitySchaefer200", "Tian"]
+    input_type: "fmriprep"
+    file_format: "cifti"
     output_type: "interpolated"
     output_layout: "bids"
     report_output_level: "session"
     output_run_wise_correlations: true
+    dummy_scans: "auto"
+    despike: true
+    bandpass_filter: true
+    head_radius: "auto"
+    min_coverage: 0.5
 
 subject_exclusion:
   mean_fd_threshold: 0.5

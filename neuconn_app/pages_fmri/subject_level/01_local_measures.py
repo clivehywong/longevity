@@ -45,7 +45,10 @@ def render() -> None:
 
     state = load_pipeline_state(config)
     if not state["approvals"].get("qc_gate", {}).get("approved"):
-        st.warning("Post-XCP-D QC has not been approved yet. Review is recommended before using these outputs.")
+        st.warning(
+            "⚠️ Post-XCP-D QC has not been approved yet. "
+            "Review and approve QC in the **XCP-D Pipeline → Post-XCP-D QC** tab before using these outputs."
+        )
 
     inventory = load_manifest_table(config, "artifact_inventory.csv")
     local_measures = load_manifest_table(config, "local_measures_manifest.csv")
