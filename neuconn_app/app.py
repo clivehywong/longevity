@@ -101,7 +101,7 @@ def render_data_qc():
     # Level 2: Modality selection
     modality = st.sidebar.radio(
         "Select Modality:",
-        ["📊 Dataset Overview", "🧠 Anatomical", "🎯 Functional",
+        ["📊 Dataset Overview", "📋 Subject Data", "🧠 Anatomical", "🎯 Functional",
          "🔗 Diffusion", "🗺️ Field Maps"],
         key="qc_modality"
     )
@@ -127,6 +127,16 @@ def render_data_qc():
             st.write(f"App dir: {Path(__file__).parent}")
             st.write(f"Page path: {Path(__file__).parent / 'pages_general_qc' / '00_dataset_overview.py'}")
             st.write(f"Exists: {(Path(__file__).parent / 'pages_general_qc' / '00_dataset_overview.py').exists()}")
+
+    elif modality == "📋 Subject Data":
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "subject_data",
+            Path(__file__).parent / "pages_general_qc" / "08_subject_data.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.render()
 
     elif modality == "🧠 Anatomical":
         # Level 3: QC tool
@@ -236,6 +246,7 @@ def render_fmri_analysis():
         tool = st.sidebar.selectbox(
             "Preprocessing:",
             [
+                "📊 fMRI Dashboard",
                 "fMRIPrep Submit",
                 "fMRIPrep QC Reports",
                 "XCP-D Pipeline",
@@ -246,7 +257,16 @@ def render_fmri_analysis():
             ]
         )
 
-        if tool == "fMRIPrep Submit":
+        if tool == "📊 fMRI Dashboard":
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "fmri_dashboard",
+                Path(__file__).parent / "pages_fmri" / "preprocessing" / "00_fmri_dashboard.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.render()
+        elif tool == "fMRIPrep Submit":
             import importlib.util
             spec = importlib.util.spec_from_file_location(
                 "hpc_submit",
@@ -366,7 +386,7 @@ def render_settings():
 
 
 def render_pipeline_gate_summary(config):
-    """Show compact pipeline gate state in the sidebar."""
+    """Show compact fMRI and dMRI pipeline gate state in the sidebar."""
     if not config:
         return
 
@@ -375,10 +395,19 @@ def render_pipeline_gate_summary(config):
     qc_gate = state.get("approvals", {}).get("qc_gate", {}).get("approved")
     subject_status = state.get("steps", {}).get("subject_level", {}).get("status", "not_started")
 
-    st.sidebar.markdown("**Pipeline gates**")
+    # Probe dMRI preprocessing dirs for basic gate indicators
+    paths = config.get("paths", {})
+    qsiprep_dir = paths.get("qsiprep_dir", "")
+    dmri_ready = bool(qsiprep_dir and Path(qsiprep_dir).exists())
+
+    st.sidebar.markdown("**fMRI gates**")
     st.sidebar.caption(f"{'🟢' if fd_gate else '🟠'} FD approval")
-    st.sidebar.caption(f"{'🟢' if qc_gate else '🟠'} QC approval")
+    st.sidebar.caption(f"{'🟢' if qc_gate else '🟠'} XCP-D QC approval")
     st.sidebar.caption(f"{'🟢' if subject_status == 'completed' else '⚪'} Subject-level outputs")
+
+    st.sidebar.markdown("**dMRI gates**")
+    st.sidebar.caption(f"{'🟢' if dmri_ready else '⚪'} QSIPrep outputs")
+    st.sidebar.caption("⚪ Tractography QC")
     st.sidebar.markdown("---")
 
 

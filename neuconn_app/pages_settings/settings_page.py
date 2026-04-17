@@ -186,12 +186,22 @@ def render_path_settings(config: Dict) -> bool:
         derived_keys = [
             ('bids_dir', 'BIDS Directory'),
             ('derivatives_dir', 'Derivatives Directory'),
+            # fMRI preprocessing
+            ('func_preprocessing_dir', 'fMRI Preprocessing Root'),
             ('fmriprep_dir', 'fMRIPrep Directory'),
             ('xcpd_fc_dir', 'XCP-D FC Directory'),
+            ('xcpd_fc_gsr_dir', 'XCP-D FC+GSR Directory'),
             ('xcpd_ec_dir', 'XCP-D EC Directory'),
+            # dMRI preprocessing
+            ('dwi_preprocessing_dir', 'dMRI Preprocessing Root'),
+            ('qsiprep_dir', 'QSIPrep Directory'),
+            ('qsirecon_dir', 'QSIRecon Directory'),
+            # Downstream
             ('subject_level_dir', 'Subject-Level Derivatives'),
             ('group_level_dir', 'Group-Level Derivatives'),
-            ('qc_dir', 'QC Directory'),
+            # Reports & run artifacts
+            ('qc_dir', 'QC Reports Directory'),
+            ('pipeline_runs_dir', 'Pipeline Run Artifacts Directory'),
             ('excluded_dir', 'Excluded Scans Directory'),
             ('atlases_dir', 'Atlases Directory'),
             ('roi_config_path', 'ROI Config'),
@@ -289,7 +299,7 @@ def render_hpc_settings(config: Dict) -> bool:
                 new_host = st.text_input(
                     "HPC Host",
                     value=hpc.get('host', ''),
-                    help="SSH hostname (e.g., hpclogin1.eduhk.hk)"
+                    help="SSH hostname or IP (e.g., hpclogin1.eduhk.hk). Use **localhost** when connecting via an SSH tunnel."
                 )
                 new_user = st.text_input(
                     "Username",
@@ -298,6 +308,14 @@ def render_hpc_settings(config: Dict) -> bool:
                 )
 
             with col2:
+                new_port = st.number_input(
+                    "Port",
+                    min_value=1,
+                    max_value=65535,
+                    value=int(hpc.get('port', 22)),
+                    step=1,
+                    help="SSH port (default 22). Use **2222** when tunnelling via `ssh -p 2222 localhost`."
+                )
                 new_ssh_key = st.text_input(
                     "SSH Key Path (optional)",
                     value=hpc.get('ssh_key') or '',
@@ -310,6 +328,9 @@ def render_hpc_settings(config: Dict) -> bool:
                     changes = True
                 if new_user != hpc.get('user'):
                     hpc['user'] = new_user
+                    changes = True
+                if int(new_port) != int(hpc.get('port', 22)):
+                    hpc['port'] = int(new_port)
                     changes = True
                 ssh_key_val = new_ssh_key if new_ssh_key else None
                 if ssh_key_val != hpc.get('ssh_key'):

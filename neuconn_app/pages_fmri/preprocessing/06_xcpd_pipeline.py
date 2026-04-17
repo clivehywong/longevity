@@ -45,7 +45,7 @@ from utils.xcpd_atlases import (
     normalize_xcpd_atlas_selection,
     recommended_xcpd_atlases,
 )
-from utils.xcpd_qc import render_xcpd_qc_reports
+from utils.xcpd_qc import render_xcpd_qc_reports, get_xcpd_subject_status
 
 
 def render() -> None:
@@ -101,7 +101,7 @@ def render_pipeline_progress(state: Dict) -> None:
         "subject_level": "Subject",
         "group_level": "Group",
     }
-    st.subheader("Pipeline Progress")
+    st.subheader("fMRI Pipeline Status")
     cols = st.columns(len(STEP_ORDER))
     for col, step in zip(cols, STEP_ORDER):
         info = state["steps"].get(step, {})
@@ -314,17 +314,22 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         "Participant labels",
         options=subjects,
         default=subjects[: min(8, len(subjects))],
-        help="Leave empty to run all available subjects.",
+        help=(
+            "Subjects to include in this XCP-D run, sourced from the local BIDS directory. "
+            "Leave empty to run all available subjects. "
+            "New subjects appear here automatically after adding them to the BIDS folder."
+        ),
     )
     sessions = st.multiselect(
         "Sessions",
         options=["ses-01", "ses-02"],
         default=["ses-01", "ses-02"],
+        help="Select which sessions to process. Both sessions are selected by default.",
     )
     run_on_hpc = st.checkbox(
         "Run on HPC",
         value=bool(config.get("hpc", {}).get("enabled", False)),
-        help="Use the configured HPC SSH connection for long-running XCP-D jobs.",
+        help="Submit the XCP-D job to the configured HPC cluster via SSH instead of running locally.",
     )
 
     if run_on_hpc:
@@ -410,6 +415,35 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
             extra_note="No scrubbing; interpolated output; no smoothing; wider bandpass.",
         )
 
+    # --- Per-subject completion status ---
+    st.markdown("---")
+    with st.expander("📋 Subject Completion Status", expanded=False):
+        st.caption(
+            "Scans the local XCP-D output directories for each pipeline. "
+            "Status is read from a `status` sentinel file written when the run finishes, "
+            "or detected from the presence of XCP-D HTML output reports."
+        )
+        refresh_col, _ = st.columns([1, 3])
+        with refresh_col:
+            rescan = st.button("🔄 Rescan", key="rescan_subject_status", help="Re-read the output directories from disk")
+
+        bids_subjects = available_subjects(Path(config["paths"]["bids_dir"]))
+        tab_fc_s, tab_gsr_s, tab_ec_s = st.tabs(["FC", "FC+GSR", "EC"])
+        for tab, pname, dir_key in [
+            (tab_fc_s, "fc", "xcpd_fc_dir"),
+            (tab_gsr_s, "fc_gsr", "xcpd_fc_gsr_dir"),
+            (tab_ec_s, "ec", "xcpd_ec_dir"),
+        ]:
+            with tab:
+                out_dir = Path(config["paths"].get(dir_key, ""))
+                if not out_dir.exists():
+                    st.info(f"Output directory not found: `{out_dir}`")
+                else:
+                    df = get_xcpd_subject_status(out_dir, bids_subjects)
+                    n_done = (df["status"].str.startswith("✅")).sum()
+                    st.caption(f"**{n_done}/{len(df)}** subjects completed — `{out_dir}`")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 def _render_pipeline_panel(
     config: Dict,
@@ -458,9 +492,14 @@ def _render_pipeline_panel(
                 st.info(f"ℹ️ {label} outputs already exist. Re-running will overwrite them.")
 
         confirm_key = f"confirm_rerun_{pipeline_name}"
-        btn_label = f"↺ Re-run {label} XCP-D" if already_completed else f"Start {label} XCP-D"
+        btn_label = f"↺ Re-run {label} XCP-D" if already_completed else f"▶ Start {label} XCP-D"
+        btn_help = (
+            f"Re-run the {label} pipeline from scratch, overwriting existing outputs."
+            if already_completed
+            else f"Launch the {label} XCP-D denoising pipeline for the selected subjects and sessions."
+        )
         btn_type = "secondary" if already_completed else "primary"
-        if st.button(btn_label, key=f"start_{pipeline_name}", width="stretch", type=btn_type):
+        if st.button(btn_label, key=f"start_{pipeline_name}", width="stretch", type=btn_type, help=btn_help):
             missing = missing_xcpd_atlas_resources(config, selected_atlases)
             if missing:
                 st.error("Missing atlas resources: " + ", ".join(str(p) for p in missing))
@@ -534,7 +573,14 @@ def _render_pipeline_panel(
 
         if progress["nodes_total"]:
             pct = min(progress["nodes_done"] / progress["nodes_total"], 1.0)
-            st.progress(pct, text=f"{progress['nodes_done']}/{progress['nodes_total']} nodes")
+            st.progress(
+                pct,
+                text=(
+                    f"{progress['nodes_done']}/{progress['nodes_total']} nodes — "
+                    "each *node* is one processing step (e.g. denoising, atlasing) "
+                    "applied to one subject/run by the Nipype workflow engine"
+                ),
+            )
         elif current_status == "running":
             st.progress(0.0, text="Waiting for workflow to initialise…")
 

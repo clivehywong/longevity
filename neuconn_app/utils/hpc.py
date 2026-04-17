@@ -63,6 +63,7 @@ class HPCConfig:
     host: str
     user: str
     ssh_key: Optional[str] = None
+    port: int = 22
     remote_base: str = ""
     remote_bids: str = ""
     remote_fmriprep: str = ""
@@ -112,6 +113,7 @@ class HPCConfig:
             host=hpc.get('host', ''),
             user=hpc.get('user', ''),
             ssh_key=hpc.get('ssh_key'),
+            port=int(hpc.get('port', 22)),
             remote_base=base,
             remote_bids=bids,
             remote_fmriprep=fmriprep,
@@ -256,6 +258,7 @@ class HPCConnection:
             connect_kwargs = {
                 'hostname': self.config.host,
                 'username': self.config.user,
+                'port': self.config.port,
                 'timeout': 30,
             }
 

@@ -12,13 +12,22 @@ paths:
   bids_dir: "${project_root}/bids"
   neuconn_app_dir: "${project_root}/neuconn_app"
   derivatives_dir: "${project_root}/derivatives"
-  preprocessing_dir: "${derivatives_dir}/preprocessing"
-  fmriprep_dir: "${preprocessing_dir}/fmriprep"
+
+  # fMRI preprocessing (func modality)
+  func_preprocessing_dir: "${derivatives_dir}/func/preprocessing"
+  fmriprep_dir: "${func_preprocessing_dir}/fmriprep"
   legacy_fmriprep_dir: "${project_root}/fmriprep"
-  xcpd_dir: "${preprocessing_dir}/xcpd"
+  xcpd_dir: "${func_preprocessing_dir}/xcpd"
   xcpd_fc_dir: "${xcpd_dir}/fc"
   xcpd_fc_gsr_dir: "${xcpd_dir}/fc_gsr"
   xcpd_ec_dir: "${xcpd_dir}/ec"
+
+  # dMRI preprocessing (dwi modality)
+  dwi_preprocessing_dir: "${derivatives_dir}/dwi/preprocessing"
+  qsiprep_dir: "${dwi_preprocessing_dir}/qsiprep"
+  qsirecon_dir: "${dwi_preprocessing_dir}/qsirecon"
+
+  # Subject- and group-level outputs
   subject_level_dir: "${derivatives_dir}/subject_level"
   subject_level_fc_dir: "${subject_level_dir}/fc"
   subject_level_fc_gsr_dir: "${subject_level_dir}/fc_gsr"
@@ -27,11 +36,17 @@ paths:
   group_level_fc_dir: "${group_level_dir}/fc"
   group_level_fc_gsr_dir: "${group_level_dir}/fc_gsr"
   group_level_ec_dir: "${group_level_dir}/ec"
+
+  # QC reports (visual inspection outputs)
   qc_dir: "${derivatives_dir}/qc"
   fd_inspection_dir: "${qc_dir}/fd_inspection"
   xcpd_fc_qc_dir: "${qc_dir}/xcpd_fc"
   xcpd_fc_gsr_qc_dir: "${qc_dir}/xcpd_fc_gsr"
   xcpd_ec_qc_dir: "${qc_dir}/xcpd_ec"
+
+  # Pipeline run artifacts (logs, SLURM scripts, manifests)
+  pipeline_runs_dir: "${derivatives_dir}/pipeline_runs"
+
   excluded_dir: "${project_root}/bids_excluded"
   atlases_dir: "${project_root}/atlases"
   atlas_resources_dir: "${project_root}/neuconn_app/resources"
@@ -44,6 +59,7 @@ hpc:
   enabled: false
   host: "your-hpc-cluster.edu"
   user: "username"
+  port: 22
   ssh_key: null
 
   remote_paths:

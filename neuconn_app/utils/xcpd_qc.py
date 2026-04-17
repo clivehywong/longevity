@@ -16,6 +16,40 @@ from utils.subject_level_fc import load_connectome_table
 from utils.xcpd import collect_qc_reports, download_xcpd_outputs_from_hpc
 
 
+def get_xcpd_subject_status(xcpd_output_dir: Path, subjects: List[str]) -> pd.DataFrame:
+    """Scan xcpd_output_dir for per-subject completion status.
+
+    For each subject the function checks for:
+    1. A ``status`` sentinel file written by NeuConn after a run completes.
+    2. Presence of the XCP-D HTML report (``sub-*/figures/*.html``) as a
+       fallback indicator that XCP-D itself finished successfully.
+
+    Returns a DataFrame with columns: subject, status, details.
+    """
+    rows = []
+    for sub in subjects:
+        sub_dir = xcpd_output_dir / sub
+        status_file = sub_dir / "status"
+        if status_file.exists():
+            content = status_file.read_text().strip()
+            if content.startswith("completed"):
+                rows.append({"subject": sub, "status": "✅ completed", "details": content})
+            elif content.startswith("failed"):
+                rows.append({"subject": sub, "status": "❌ failed", "details": content})
+            else:
+                rows.append({"subject": sub, "status": "⚠️ unknown", "details": content})
+        elif sub_dir.exists():
+            # Fallback: check for any XCP-D output HTML report
+            html_files = list(sub_dir.rglob("*.html"))
+            if html_files:
+                rows.append({"subject": sub, "status": "✅ completed (no status file)", "details": str(html_files[0])})
+            else:
+                rows.append({"subject": sub, "status": "🔄 in progress / incomplete", "details": "Output dir exists but no HTML found"})
+        else:
+            rows.append({"subject": sub, "status": "⚪ not started", "details": "No output directory"})
+    return pd.DataFrame(rows, columns=["subject", "status", "details"])
+
+
 def ensure_xcpd_qc_dirs(config: Dict) -> Dict[str, Path]:
     paths = config["paths"]
     fc_dir = Path(paths["xcpd_fc_qc_dir"])
