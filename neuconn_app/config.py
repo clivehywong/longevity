@@ -220,7 +220,6 @@ def _default_xcpd_section() -> Dict[str, Any]:
         "min_time": 240,
         "low_pass": 0.08,
         "output_type": "censored",
-        "file_format": "nifti",
     }
     return {
         "singularity_image_path": DEFAULT_XCPD_IMAGE,
@@ -238,7 +237,6 @@ def _default_xcpd_section() -> Dict[str, Any]:
             "low_pass": 0.10,
             "smoothing": 0.0,
             "output_type": "interpolated",
-            "file_format": "nifti",
         },
     }
 

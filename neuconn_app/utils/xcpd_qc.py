@@ -80,13 +80,13 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
     col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("FC Pipeline QC")
-        _render_pipeline_qc_column(fc_qc, qc_dirs["fc"], "fc")
+        _render_pipeline_qc_column(fc_qc, "fc")
     with col2:
         st.subheader("FC+GSR Pipeline QC")
-        _render_pipeline_qc_column(fc_gsr_qc, qc_dirs["fc_gsr"], "fc_gsr")
+        _render_pipeline_qc_column(fc_gsr_qc, "fc_gsr")
     with col3:
         st.subheader("EC Pipeline QC")
-        _render_pipeline_qc_column(ec_qc, qc_dirs["ec"], "ec")
+        _render_pipeline_qc_column(ec_qc, "ec")
         exclusions = build_ec_exclusion_table(config)
         if exclusions is not None:
             st.caption("EC exclusion preview (mean FD threshold applied)")
@@ -126,7 +126,7 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
         st.info("Run FC XCP-D first to populate QC artifacts.")
 
 
-def _render_pipeline_qc_column(qc_reports: Dict[str, List[Path]], qc_dir: Path, pipeline_key: str) -> None:
+def _render_pipeline_qc_column(qc_reports: Dict[str, List[Path]], pipeline_key: str) -> None:
     """Render QC summary for one pipeline (FC or EC)."""
     counts = {k: len(v) for k, v in qc_reports.items()}
     non_empty = {k: v for k, v in counts.items() if v > 0}

@@ -25,7 +25,7 @@ Before using **fMRI Analysis → XCP-D Pipeline**, you need:
 | Item | Default path | Notes |
 |---|---|---|
 | XCP-D Singularity image | `~/software/xcp-d-*.sif` | Set in **Settings → Software / Images** |
-| FreeSurfer licence | `~/software/license.txt` | Set in **Settings → Software / Images** |
+| FreeSurfer license | `~/freesurfer/license.txt` | Set in **Settings → Software / Images** |
 | fMRIPrep derivatives | `derivatives/preprocessing/fmriprep/` | Must contain `dataset_description.json` |
 | Custom atlas datasets | `atlases/LongevitySchaefer200/`, `atlases/tian/` | Packaged as BIDS derivative datasets |
 
@@ -52,7 +52,7 @@ Open **fMRI Analysis → XCP-D Pipeline → FD Inspection tab**.
 
 Open **fMRI Analysis → XCP-D Pipeline → XCP-D Runs tab**.
 
-Three pipelines are available; all share the same atlas selection:
+Three pipelines are available; each has its own atlas selection (configured in Settings):
 
 | Pipeline | Nuisance strategy | Key feature |
 |---|---|---|

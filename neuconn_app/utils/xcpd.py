@@ -935,10 +935,17 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
             conn = HPCConnection(hpc_cfg)
             conn.connect()
             stdout, _, _ = conn.execute(
-                f"squeue -j {shlex.quote(str(job_id))} -h -o %T 2>/dev/null || sacct -j {shlex.quote(str(job_id))} -n -o State 2>/dev/null | head -1",
+                f"squeue -j {shlex.quote(str(job_id))} -h -o %T 2>/dev/null",
                 timeout=30,
             )
             slurm_state = stdout.strip().upper()
+            if not slurm_state:
+                # Job has left the queue; query sacct for final state
+                stdout, _, _ = conn.execute(
+                    f"sacct -j {shlex.quote(str(job_id))} -n -o State 2>/dev/null | head -1",
+                    timeout=30,
+                )
+                slurm_state = stdout.strip().upper()
             if slurm_state in ("RUNNING", "PENDING", "COMPLETING"):
                 return state
             if slurm_state in ("FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"):

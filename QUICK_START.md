@@ -62,7 +62,7 @@ Then read:
 
 ### 5. Run XCP-D post-processing pipeline
 
-Requires the XCP-D Singularity image and FreeSurfer licence — see the prerequisites section in the app workflow doc.
+Requires the XCP-D Singularity image and FreeSurfer license — see the prerequisites section in the app workflow doc.
 
 ```bash
 # In the NeuConn app:
