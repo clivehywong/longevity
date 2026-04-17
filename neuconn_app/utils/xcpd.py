@@ -541,6 +541,8 @@ def build_xcpd_command(
         command.append("--clean-workdir")
 
     if fs_license:
+        if not Path(fs_license).exists():
+            raise FileNotFoundError(f"FreeSurfer license file not found: {fs_license}")
         command.extend(["--fs-license-file", fs_license])
 
     command.extend(atlas_cli_dataset_args(config, selected_atlases, str(dataset_root) if dataset_root else None))
@@ -703,7 +705,7 @@ def generate_xcpd_slurm_script(
     )
     # full_command = ["singularity", "run", "-B", "...", ..., image_path, fmriprep_dir, ...]
     # Split at the image path to get post-image args; the template handles bind mounts separately.
-    image_path = hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"]
+    image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
     try:
         img_idx = full_command.index(image_path)
         xcpd_args = " ".join(shlex.quote(p) for p in full_command[img_idx + 1:])
@@ -712,6 +714,11 @@ def generate_xcpd_slurm_script(
         xcpd_args = " ".join(shlex.quote(p) for p in full_command[2:])
 
     bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
+    fs_license = os.path.expanduser(hpc_cfg.freesurfer_license or "")
+    if fs_license:
+        bind_mounts = list(bind_mounts)
+        if fs_license not in bind_mounts:
+            bind_mounts.append(fs_license)
 
     cpus = hpc_cfg.xcpd_cpus if hpc_cfg.xcpd_cpus else hpc_cfg.cpus
     memory = hpc_cfg.xcpd_memory if hpc_cfg.xcpd_memory else hpc_cfg.memory
@@ -854,8 +861,6 @@ def start_remote_xcpd_run(
 
     # Upload script to HPC and submit
     remote_script = f"{hpc_cfg.remote_base}/xcpd_{pipeline_name}_job.sh"
-    remote_log_out = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_${{SLURM_JOB_ID}}.out"
-    remote_log_err = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_${{SLURM_JOB_ID}}.err"
 
     conn = None
     try:
@@ -874,6 +879,8 @@ def start_remote_xcpd_run(
 
     # sbatch stdout: "Submitted batch job 12345"
     job_id = stdout.strip().split()[-1]
+    remote_log_out = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_{job_id}.out"
+    remote_log_err = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_{job_id}.err"
 
     run_info = {
         "pipeline": pipeline_name,
@@ -881,8 +888,8 @@ def start_remote_xcpd_run(
         "status": "running",
         "backend": "hpc",
         "remote_script": remote_script,
-        "remote_log_out": remote_log_out.replace("${SLURM_JOB_ID}", job_id),
-        "remote_log_err": remote_log_err.replace("${SLURM_JOB_ID}", job_id),
+        "remote_log_out": remote_log_out,
+        "remote_log_err": remote_log_err,
         "started_at": datetime.now().isoformat(),
         "participant_labels": list(participant_labels or []),
         "session_ids": list(session_ids or []),
@@ -1148,14 +1155,20 @@ def download_xcpd_outputs_from_hpc(
     hpc_cfg = HPCConfig.from_config(config)
     paths = config["paths"]
     output_dir_key = f"xcpd_{pipeline_name}_dir"
-    local_out_dir = Path(paths.get(output_dir_key) or paths.get("xcpd_dir", "") or "derivatives/preprocessing/xcpd") / pipeline_name
+    if paths.get(output_dir_key):
+        local_out_dir = Path(paths[output_dir_key])
+    else:
+        local_out_dir = Path(paths.get("xcpd_dir", "derivatives/preprocessing/xcpd")) / pipeline_name
     local_out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Derive the remote XCP-D output dir from the remote fMRIPrep path
-    remote_fmriprep = hpc_cfg.remote_fmriprep or ""
-    if "/fmriprep" in remote_fmriprep:
-        remote_xcpd_dir = remote_fmriprep.replace("/fmriprep", f"/xcpd/{pipeline_name}")
+    # Use the same pipeline → remote path mapping as build_remote_xcpd_command
+    if pipeline_name == "fc":
+        remote_xcpd_dir = hpc_cfg.remote_xcpd_fc
+    elif pipeline_name == "fc_gsr":
+        remote_xcpd_dir = hpc_cfg.remote_xcpd_fc_gsr
     else:
+        remote_xcpd_dir = hpc_cfg.remote_xcpd_ec
+    if not remote_xcpd_dir:
         remote_xcpd_dir = f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline_name}"
 
     rsync_cmd = ["rsync", "-avz", "--no-perms"]

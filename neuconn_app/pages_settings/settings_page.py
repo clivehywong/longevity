@@ -558,7 +558,7 @@ def render_software_settings(config: Dict) -> bool:
     return changes
 
 
-
+def test_hpc_connection(hpc_config: Dict) -> None:
     """Test HPC SSH connection."""
     host = hpc_config.get('host')
     user = hpc_config.get('user')
@@ -602,6 +602,17 @@ def render_software_settings(config: Dict) -> bool:
         st.error(f"SSH error: {e}")
     except Exception as e:
         st.error(f"Connection failed: {e}")
+
+
+def _validate_auto_or_int(value: str, field_name: str) -> str:
+    """Validate that value is either 'auto' or a valid integer string."""
+    if value != "auto":
+        try:
+            int(value)
+        except ValueError:
+            st.error(f"{field_name} must be 'auto' or an integer, got: {value!r}")
+            st.stop()
+    return value
 
 
 def render_analysis_settings(config: Dict) -> bool:
@@ -882,6 +893,8 @@ def render_analysis_settings(config: Dict) -> bool:
                 )
 
                 if st.form_submit_button(f"Apply {label} XCP-D Settings"):
+                    new_dummy = _validate_auto_or_int(new_dummy, "Dummy scans")
+                    new_head_radius = _validate_auto_or_int(new_head_radius, "Head radius")
                     updates = {
                         'mode': new_mode,
                         'nuisance_regressors': new_nuisance,

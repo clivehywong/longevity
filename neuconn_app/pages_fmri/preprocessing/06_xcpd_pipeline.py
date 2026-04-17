@@ -26,7 +26,6 @@ from utils.pipeline_state import (
     set_step_status,
 )
 from utils.xcpd import (
-    build_remote_xcpd_command,
     build_xcpd_command,
     download_xcpd_outputs_from_hpc,
     fetch_hpc_xcpd_log,
