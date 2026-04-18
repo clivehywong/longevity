@@ -81,18 +81,20 @@ def get_xcpd_atlas_catalog(config: Dict) -> Dict[str, XCPDAtlasSpec]:
         "LongevitySchaeferTian200S2": XCPDAtlasSpec(
             atlas_id="LongevitySchaeferTian200S2",
             label="Schaefer-Tian S2 200 / 7 networks (project atlas)",
-            description="Combined Schaefer-Tian S2 atlas downloaded from the Tian subcortex release.",
+            description="Combined Schaefer-Tian S2 atlas in MNI152NLin6Asym (FSL MNI152) space.",
             source_type="custom",
-            source_relpath="tian/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_3T_MNI152NLin2009cAsym_2mm.nii.gz",
+            source_relpath="tian/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_MNI152NLin6Asym_2mm.nii.gz",
             label_relpath="tian/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_label.txt",
+            template="MNI152NLin6Asym",
         ),
         "LongevitySchaeferTian400S2": XCPDAtlasSpec(
             atlas_id="LongevitySchaeferTian400S2",
             label="Schaefer-Tian S2 400 / 7 networks (project atlas)",
-            description="Combined Schaefer-Tian S2 atlas downloaded from the Tian subcortex release.",
+            description="Combined Schaefer-Tian S2 atlas in MNI152NLin6Asym (FSL MNI152) space.",
             source_type="custom",
-            source_relpath="tian/Schaefer2018_400Parcels_7Networks_order_Tian_Subcortex_S2_3T_MNI152NLin2009cAsym_2mm.nii.gz",
+            source_relpath="tian/Schaefer2018_400Parcels_7Networks_order_Tian_Subcortex_S2_MNI152NLin6Asym_2mm.nii.gz",
             label_relpath="tian/Schaefer2018_400Parcels_7Networks_order_Tian_Subcortex_S2_label.txt",
+            template="MNI152NLin6Asym",
         ),
     }
 

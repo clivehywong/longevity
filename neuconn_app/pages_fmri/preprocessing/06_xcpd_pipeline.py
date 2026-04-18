@@ -62,8 +62,6 @@ def render() -> None:
     state = refresh_xcpd_run(config, "ec", state)
     save_pipeline_state(config, state)
 
-    render_pipeline_progress(state)
-
     tab_fd, tab_run, tab_qc, tab_logs = st.tabs(
         ["FD Inspection", "XCP-D Runs", "Post-XCP-D QC", "Pipeline Logs"]
     )
@@ -303,6 +301,17 @@ def build_threshold_preview(
     return preview[columns].sort_values(["subject_id", "session"])
 
 
+def _get_incomplete_xcpd_subjects(config: Dict, pipeline: str) -> List[str]:
+    """Return subjects that have not completed the given XCP-D pipeline."""
+    dir_key = f"xcpd_{pipeline}_dir"
+    out_dir = Path(config["paths"].get(dir_key, ""))
+    subjects = available_subjects(Path(config["paths"]["bids_dir"]))
+    if not out_dir.exists():
+        return subjects
+    df = get_xcpd_subject_status(out_dir, subjects)
+    return df[~df["status"].str.startswith("✅")]["subject"].tolist()
+
+
 def render_xcpd_runs(config: Dict, state: Dict) -> None:
     if not state["approvals"].get("fd_gate", {}).get("approved"):
         st.warning("Approve the FD thresholds first.")
@@ -310,14 +319,39 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         return
 
     subjects = available_subjects(Path(config["paths"]["bids_dir"]))
+
+    # Initialise the multiselect state on first load
+    if "xcpd_selected_subjects" not in st.session_state:
+        st.session_state["xcpd_selected_subjects"] = subjects[: min(8, len(subjects))]
+
+    # Auto-select buttons — each sets session_state then reruns so the multiselect updates
+    auto_cols = st.columns(4)
+    with auto_cols[0]:
+        if st.button("🎯 FC incomplete", help="Select subjects that have not completed the FC (no-GSR) pipeline"):
+            st.session_state["xcpd_selected_subjects"] = _get_incomplete_xcpd_subjects(config, "fc")
+            st.rerun()
+    with auto_cols[1]:
+        if st.button("🎯 FC+GSR incomplete", help="Select subjects that have not completed the FC+GSR pipeline"):
+            st.session_state["xcpd_selected_subjects"] = _get_incomplete_xcpd_subjects(config, "fc_gsr")
+            st.rerun()
+    with auto_cols[2]:
+        if st.button("🎯 EC incomplete", help="Select subjects that have not completed the EC pipeline"):
+            st.session_state["xcpd_selected_subjects"] = _get_incomplete_xcpd_subjects(config, "ec")
+            st.rerun()
+    with auto_cols[3]:
+        if st.button("↩ Reset", help="Reset subject selection to the first 8 subjects"):
+            st.session_state["xcpd_selected_subjects"] = subjects[: min(8, len(subjects))]
+            st.rerun()
+
     selected_subjects = st.multiselect(
         "Participant labels",
         options=subjects,
-        default=subjects[: min(8, len(subjects))],
+        key="xcpd_selected_subjects",
         help=(
             "Subjects to include in this XCP-D run, sourced from the local BIDS directory. "
             "Leave empty to run all available subjects. "
-            "New subjects appear here automatically after adding them to the BIDS folder."
+            "New subjects appear here automatically after adding them to the BIDS folder. "
+            "Use the 🎯 buttons above to auto-select subjects that are incomplete for a given pipeline."
         ),
     )
     sessions = st.multiselect(
