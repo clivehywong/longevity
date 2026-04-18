@@ -41,10 +41,10 @@ The sidebar has two levels:
 | Page | Purpose |
 |---|---|
 | 📊 fMRI Dashboard | At-a-glance preprocessing status per subject |
-| fMRIPrep Submit | HPC submission and status monitoring |
-| fMRIPrep QC Reports | Browse HTML QC reports |
+| fMRIPrep Submit | HPC submission and status monitoring; includes "Select incomplete" to auto-select unprocessed subjects |
+| fMRIPrep QC Reports | Inline HTML viewer for fMRIPrep reports with dropdown + prev/next navigation |
 | XCP-D Pipeline | FD gating, XCP-D runs, post-QC, per-subject status |
-| XCP-D QC Reports | Browse XCP-D QC reports |
+| XCP-D QC Reports | QC metrics table + inline HTML viewer for per-session XCP-D reports (FC / FC+GSR / EC tabs) |
 
 ## Subject Data page
 
@@ -85,7 +85,9 @@ Before using **fMRI Analysis → XCP-D Pipeline**, you need:
 | XCP-D Singularity image | `~/software/xcp-d-*.sif` | Set in **Settings → Software / Images** |
 | FreeSurfer license | `~/freesurfer/license.txt` | Set in **Settings → Software / Images** |
 | fMRIPrep derivatives | `derivatives/func/preprocessing/fmriprep/` | Must contain `dataset_description.json` |
-| Custom atlas datasets | `atlases/LongevitySchaefer200/`, `atlases/tian/` | Packaged as BIDS derivative datasets |
+| Custom atlas datasets | `atlases/LongevitySchaefer200/`, `atlases/tian/` | Packaged as BIDS derivative datasets in **MNI152NLin6Asym** space |
+
+> **Atlas space**: all project atlases (Schaefer 200/400 + Tian subcortex) use **MNI152NLin6Asym** (identical to FSL's `MNI152_T1_2mm`). Files are at `atlases/tian/Schaefer2018_*_Tian_Subcortex_S2_MNI152NLin6Asym_2mm.nii.gz`.
 
 For HPC runs, configure SSH host, **Port**, remote project root, and HPC Singularity image path in **Settings → HPC**.
 
@@ -133,6 +135,7 @@ Three pipelines are available; each has its own atlas selection (configured in S
 For each pipeline:
 
 1. Select subjects and sessions.
+   - Use **🎯 FC incomplete / FC+GSR incomplete / EC incomplete** buttons to auto-select only subjects that have not yet successfully completed that pipeline. Use **↩ Reset** to restore the full subject list.
 2. Toggle **Run on HPC** if needed; use the **Upload fMRIPrep to HPC** expander if the derivatives are not yet on the cluster.
 3. Click **Start … XCP-D**. A SLURM job ID (HPC) or PID (local) is shown.
 4. Monitor progress with the inline progress bar and **🔄 Refresh status** button.
