@@ -139,7 +139,7 @@ def render() -> None:
         status_cols = ["fMRIPrep", "XCP-D FC", "XCP-D FC+GSR", "XCP-D EC"]
         view = view[(view[status_cols] != "✅").any(axis=1)]
 
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.dataframe(view, width="stretch", hide_index=True)
 
     # ── Path info ────────────────────────────────────────────────────────────
     with st.expander("🗂️ Scanned directories", expanded=False):

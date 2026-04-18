@@ -114,7 +114,7 @@ def render() -> None:
         df,
         column_config=col_config,
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         key="subject_data_editor",
     )
@@ -145,7 +145,7 @@ def render() -> None:
                 new_df = pd.read_csv(io.BytesIO(uploaded.read()))
                 new_df.columns = [c.strip().lower().replace(" ", "_") for c in new_df.columns]
                 st.success(f"Loaded {len(new_df)} rows from `{uploaded.name}`")
-                st.dataframe(new_df.head(10), use_container_width=True, hide_index=True)
+                st.dataframe(new_df.head(10), width="stretch", hide_index=True)
                 if st.button("✅ Apply uploaded CSV", type="primary"):
                     st.session_state.subject_data_df = new_df
                     st.rerun()
@@ -156,7 +156,7 @@ def render() -> None:
     st.markdown("---")
     save_col, _ = st.columns([1, 3])
     with save_col:
-        if st.button("💾 Save to group.csv", type="primary", use_container_width=True):
+        if st.button("💾 Save to group.csv", type="primary", width="stretch"):
             try:
                 final = st.session_state.subject_data_df
                 final.to_csv(csv_path, index=False)

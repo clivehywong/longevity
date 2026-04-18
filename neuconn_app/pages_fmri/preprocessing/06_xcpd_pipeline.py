@@ -442,7 +442,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                     df = get_xcpd_subject_status(out_dir, bids_subjects)
                     n_done = (df["status"].str.startswith("✅")).sum()
                     st.caption(f"**{n_done}/{len(df)}** subjects completed — `{out_dir}`")
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.dataframe(df, width="stretch", hide_index=True)
 
 
 def _render_pipeline_panel(
