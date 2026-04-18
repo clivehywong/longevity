@@ -37,15 +37,15 @@ paths:
   group_level_fc_gsr_dir: "${group_level_dir}/fc_gsr"
   group_level_ec_dir: "${group_level_dir}/ec"
 
-  # QC reports (visual inspection outputs)
+  # QC reports (visual inspection outputs — FD plots, etc.)
   qc_dir: "${derivatives_dir}/qc"
   fd_inspection_dir: "${qc_dir}/fd_inspection"
-  xcpd_fc_qc_dir: "${qc_dir}/xcpd_fc"
-  xcpd_fc_gsr_qc_dir: "${qc_dir}/xcpd_fc_gsr"
-  xcpd_ec_qc_dir: "${qc_dir}/xcpd_ec"
 
-  # Pipeline run artifacts (logs, SLURM scripts, manifests)
+  # Pipeline run artifacts (logs, SLURM scripts, manifests per pipeline run)
   pipeline_runs_dir: "${derivatives_dir}/pipeline_runs"
+  xcpd_fc_runs_dir: "${pipeline_runs_dir}/xcpd_fc"
+  xcpd_fc_gsr_runs_dir: "${pipeline_runs_dir}/xcpd_fc_gsr"
+  xcpd_ec_runs_dir: "${pipeline_runs_dir}/xcpd_ec"
 
   excluded_dir: "${project_root}/bids_excluded"
   atlases_dir: "${project_root}/atlases"
@@ -143,7 +143,7 @@ xcpd:
     smoothing: 6.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
+    file_format: "nifti"
     output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
@@ -167,7 +167,7 @@ xcpd:
     smoothing: 6.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
+    file_format: "nifti"
     output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
@@ -191,8 +191,8 @@ xcpd:
     smoothing: 0.0
     atlases: ["LongevitySchaefer200", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
-    output_type: "interpolated"
+    file_format: "nifti"
+    output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
     output_run_wise_correlations: true

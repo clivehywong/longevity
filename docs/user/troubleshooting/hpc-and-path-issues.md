@@ -22,6 +22,24 @@ Many scripts in this repository intentionally assume a specific local and remote
 - Confirm `rsync` is available locally.
 - Re-run a single manual subcommand such as `upload` or `status` before restarting the full batch.
 
+## SSH rate limits and port tunnels
+
+If direct SSH to the HPC is rate-limited, create a local tunnel:
+
+```bash
+ssh -L 2222:<hpc-host>:22 <gateway-host>   # or simply:
+ssh -p 2222 localhost                       # if tunnel already established
+```
+
+Then configure the app so all SSH and rsync traffic goes through the tunnel:
+
+| Setting | Value |
+|---|---|
+| **Settings → HPC → Host** | `localhost` |
+| **Settings → HPC → Port** | `2222` |
+
+The `hpc.port` config key is passed directly to `paramiko.SSHClient.connect()` and to the `-e "ssh -p PORT"` flag in all `rsync` calls.
+
 ## App config path handling
 
 The app configuration supports both `${var}` substitution and `~` expansion. Prefer updating config values rather than hardcoding fully expanded paths into docs or settings.

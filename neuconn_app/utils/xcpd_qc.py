@@ -50,15 +50,36 @@ def get_xcpd_subject_status(xcpd_output_dir: Path, subjects: List[str]) -> pd.Da
     return pd.DataFrame(rows, columns=["subject", "status", "details"])
 
 
-def ensure_xcpd_qc_dirs(config: Dict) -> Dict[str, Path]:
+def ensure_xcpd_run_dirs(config: Dict) -> Dict[str, Path]:
+    """Return (and create) per-pipeline run-artifact directories.
+
+    Keys ``xcpd_fc_runs_dir`` / ``xcpd_fc_gsr_runs_dir`` / ``xcpd_ec_runs_dir``
+    are preferred; legacy ``xcpd_fc_qc_dir`` keys are accepted as a fallback so
+    existing user configs keep working without modification.
+    """
     paths = config["paths"]
-    fc_dir = Path(paths["xcpd_fc_qc_dir"])
-    fc_gsr_dir = Path(paths.get("xcpd_fc_gsr_qc_dir", str(Path(paths["xcpd_fc_qc_dir"]).parent / "xcpd_fc_gsr")))
-    ec_dir = Path(paths["xcpd_ec_qc_dir"])
-    fc_dir.mkdir(parents=True, exist_ok=True)
-    fc_gsr_dir.mkdir(parents=True, exist_ok=True)
-    ec_dir.mkdir(parents=True, exist_ok=True)
+    pipeline_runs = Path(
+        paths.get("pipeline_runs_dir")
+        or (Path(paths["derivatives_dir"]) / "pipeline_runs")
+    )
+
+    def _resolve(new_key: str, legacy_key: str, sub: str) -> Path:
+        if new_key in paths:
+            return Path(paths[new_key])
+        if legacy_key in paths:
+            return Path(paths[legacy_key])
+        return pipeline_runs / sub
+
+    fc_dir = _resolve("xcpd_fc_runs_dir", "xcpd_fc_qc_dir", "xcpd_fc")
+    fc_gsr_dir = _resolve("xcpd_fc_gsr_runs_dir", "xcpd_fc_gsr_qc_dir", "xcpd_fc_gsr")
+    ec_dir = _resolve("xcpd_ec_runs_dir", "xcpd_ec_qc_dir", "xcpd_ec")
+    for d in (fc_dir, fc_gsr_dir, ec_dir):
+        d.mkdir(parents=True, exist_ok=True)
     return {"fc": fc_dir, "fc_gsr": fc_gsr_dir, "ec": ec_dir}
+
+
+# Keep legacy alias for any callers that haven't been updated yet.
+ensure_xcpd_qc_dirs = ensure_xcpd_run_dirs
 
 
 def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = None) -> None:

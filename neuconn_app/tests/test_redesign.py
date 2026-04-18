@@ -20,7 +20,7 @@ except ImportError:
     print("ERROR: playwright not installed. Run: pip install playwright && playwright install chromium")
     sys.exit(1)
 
-APP_URL = "http://localhost:8501"
+APP_URL = "http://localhost:8500"
 VIEWPORT = {"width": 1920, "height": 1080}
 SCREENSHOT_DIR = Path(__file__).parent.parent.parent / "test_screenshots"
 SCREENSHOT_DIR.mkdir(exist_ok=True)

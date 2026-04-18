@@ -1217,8 +1217,13 @@ def download_xcpd_outputs_from_hpc(
         remote_xcpd_dir = f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline_name}"
 
     rsync_cmd = ["rsync", "-avz", "--no-perms"]
+    _ssh_opts = []
+    if hpc_cfg.port and hpc_cfg.port != 22:
+        _ssh_opts += ["-p", str(hpc_cfg.port)]
     if hpc_cfg.ssh_key:
-        rsync_cmd.extend(["-e", f"ssh -i {Path(hpc_cfg.ssh_key).expanduser()}"])
+        _ssh_opts += ["-i", str(Path(hpc_cfg.ssh_key).expanduser())]
+    if _ssh_opts:
+        rsync_cmd.extend(["-e", "ssh " + " ".join(_ssh_opts)])
 
     subjects = [f"sub-{label}" if not label.startswith("sub-") else label
                 for label in (participant_labels or [])]
@@ -1273,9 +1278,13 @@ def _sync_remote_xcpd_atlas_dataset(
         "rsync",
         "-avz",
     ]
+    _ssh_opts = []
+    if hpc_cfg.port and hpc_cfg.port != 22:
+        _ssh_opts += ["-p", str(hpc_cfg.port)]
     if hpc_cfg.ssh_key:
-        ssh_key = str(Path(hpc_cfg.ssh_key).expanduser())
-        rsync_cmd.extend(["-e", f"ssh -i {ssh_key}"])
+        _ssh_opts += ["-i", str(Path(hpc_cfg.ssh_key).expanduser())]
+    if _ssh_opts:
+        rsync_cmd.extend(["-e", "ssh " + " ".join(_ssh_opts)])
     rsync_cmd.extend([
         f"{str(local_dataset)}/",
         f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_dataset_root}/",
@@ -1327,9 +1336,14 @@ def sync_fmriprep_to_hpc(
         "--info=progress2",
         "--exclude=*_space-fsnative_*",
     ]
+    # Build ssh command with port and optional key
+    ssh_opts = []
+    if hpc_cfg.port and hpc_cfg.port != 22:
+        ssh_opts += ["-p", str(hpc_cfg.port)]
     if hpc_cfg.ssh_key:
-        ssh_key = str(Path(hpc_cfg.ssh_key).expanduser())
-        rsync_cmd.extend(["-e", f"ssh -i {ssh_key}"])
+        ssh_opts += ["-i", str(Path(hpc_cfg.ssh_key).expanduser())]
+    if ssh_opts:
+        rsync_cmd.extend(["-e", "ssh " + " ".join(ssh_opts)])
 
     if subjects:
         for sub in subjects:

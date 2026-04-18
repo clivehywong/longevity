@@ -135,6 +135,7 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
     subject_level = derivatives / "subject_level"
     group_level = derivatives / "group_level"
     qc = derivatives / "qc"
+    pipeline_runs = derivatives / "pipeline_runs"
     app_root = project_root / "neuconn_app"
     atlas_resources = app_root / "resources"
 
@@ -160,9 +161,10 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
         "group_level_ec_dir": str(group_level / "ec"),
         "qc_dir": str(qc),
         "fd_inspection_dir": str(qc / "fd_inspection"),
-        "xcpd_fc_qc_dir": str(qc / "xcpd_fc"),
-        "xcpd_fc_gsr_qc_dir": str(qc / "xcpd_fc_gsr"),
-        "xcpd_ec_qc_dir": str(qc / "xcpd_ec"),
+        "pipeline_runs_dir": str(pipeline_runs),
+        "xcpd_fc_runs_dir": str(pipeline_runs / "xcpd_fc"),
+        "xcpd_fc_gsr_runs_dir": str(pipeline_runs / "xcpd_fc_gsr"),
+        "xcpd_ec_runs_dir": str(pipeline_runs / "xcpd_ec"),
         "excluded_dir": str(project_root / "bids_excluded"),
         "atlases_dir": str(project_root / "atlases"),
         "atlas_resources_dir": str(atlas_resources),

@@ -301,11 +301,69 @@ def build_threshold_preview(
     return preview[columns].sort_values(["subject_id", "session"])
 
 
+def _has_complete_fmriprep(fmriprep_dir: Path, subject: str) -> bool:
+    """Check that the fMRIPrep output for a subject is complete enough for XCP-D.
+
+    XCP-D (NIfTI mode) requires a MNI152NLin6Asym brain mask in the top-level
+    anat/ directory.  Subjects that only have partial fMRIPrep outputs (e.g. the
+    HTML report was generated but MNI normalisation failed) must be excluded.
+    """
+    mask_pattern = f"{subject}_space-MNI152NLin6Asym_*_desc-brain_mask.nii.gz"
+    return any((fmriprep_dir / subject / "anat").glob(mask_pattern))
+
+
+def _has_sufficient_low_motion_data(
+    fmriprep_dir: Path, subject: str, fd_threshold: float, min_seconds: float = 100.0, tr: float = 0.8
+) -> bool:
+    """Return True if at least one session has enough low-motion volumes.
+
+    XCP-D will abort the entire workflow (RuntimeError) when no runs survive
+    scrubbing for a subject.  This pre-check mirrors XCP-D's criterion so we
+    can exclude such subjects before submission.
+    """
+    import pandas as pd  # local import to avoid slow startup
+
+    sub_dir = fmriprep_dir / subject
+    found_any = False
+    for tsv in sub_dir.glob("ses-*/func/*desc-confounds_timeseries.tsv"):
+        found_any = True
+        try:
+            df = pd.read_csv(tsv, sep="\t")
+            fd = df.get("framewise_displacement", pd.Series(dtype=float)).dropna()
+            remaining_sec = (fd <= fd_threshold).sum() * tr
+            if remaining_sec >= min_seconds:
+                return True
+        except Exception:
+            continue
+    # If no confound files were found locally, assume the subject is fine
+    # (data may only exist on HPC).
+    return not found_any
+
+
 def _get_incomplete_xcpd_subjects(config: Dict, pipeline: str) -> List[str]:
-    """Return subjects that have not completed the given XCP-D pipeline."""
+    """Return subjects that have fMRIPrep output but have not completed the given XCP-D pipeline."""
     dir_key = f"xcpd_{pipeline}_dir"
     out_dir = Path(config["paths"].get(dir_key, ""))
-    subjects = available_subjects(Path(config["paths"]["bids_dir"]))
+    # Only consider subjects that have a complete fMRIPrep output (HTML report +
+    # required MNI152NLin6Asym anat mask for XCP-D NIfTI mode).
+    fmriprep_dir = Path(config["paths"].get("fmriprep_dir", ""))
+    all_bids = available_subjects(Path(config["paths"]["bids_dir"]))
+
+    # Determine FD threshold and min_time for this pipeline
+    pipeline_cfg = config.get("xcpd", {}).get(pipeline, {})
+    fd_threshold = float(pipeline_cfg.get("fd_thresh", 0.5))
+    min_seconds = float(pipeline_cfg.get("min_time", 240.0))
+
+    if fmriprep_dir.exists():
+        fmriprep_subjects = {p.stem for p in fmriprep_dir.glob("sub-*.html")}
+        subjects = [
+            s for s in all_bids
+            if s in fmriprep_subjects
+            and _has_complete_fmriprep(fmriprep_dir, s)
+            and _has_sufficient_low_motion_data(fmriprep_dir, s, fd_threshold, min_seconds)
+        ]
+    else:
+        subjects = all_bids
     if not out_dir.exists():
         return subjects
     df = get_xcpd_subject_status(out_dir, subjects)
@@ -446,7 +504,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         _render_pipeline_panel(
             config, state, "ec", "Effective Connectivity", selected_ec_atlases,
             ec_info, run_on_hpc, selected_subjects, sessions,
-            extra_note="No scrubbing; interpolated output; no smoothing; wider bandpass.",
+            extra_note="Censored timeseries; no smoothing; wider bandpass (0.008–0.09 Hz). For effective connectivity estimation.",
         )
 
     # --- Per-subject completion status ---
