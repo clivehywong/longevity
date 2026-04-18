@@ -85,7 +85,9 @@ The legacy `xcpd.singularity_image_path` key is kept for backward compatibility;
 
 ### SLURM resource config
 
-XCP-D SLURM job resources can be overridden separately from the fMRIPrep defaults:
+XCP-D SLURM job CPUs are computed at submit time from `nprocs × omp_nthreads`, which the user sets
+in the **⚙️ SLURM Resources** expander on the XCP-D Runs tab. The `xcpd_max_cpus` guard prevents
+accidentally requesting more CPUs than the cluster QOS allows:
 
 ```yaml
 hpc:
@@ -95,10 +97,30 @@ hpc:
     default_memory: "32GB"
     default_time: "24:00:00"
     # XCP-D-specific overrides (0/"" = fall back to defaults above)
-    xcpd_cpus: 16
+    xcpd_cpus: 0          # 0 = use nprocs × omp_nthreads (set at submit time)
+    xcpd_max_cpus: 15     # UI warning threshold; does not block submission
     xcpd_memory: "64GB"
     xcpd_time: "12:00:00"
 ```
+
+`nprocs` and `omp_nthreads` are saved to `config["xcpd"][pipeline_name]` on each submit so that
+the values persist in the YAML config for future submissions.
+
+### XCP-D pipeline status values
+
+`run_info["status"]` (stored in `.neuconn/xcpd_pipeline_state.json`) can be:
+
+| Value | Set by | Meaning |
+|---|---|---|
+| `not_started` | init / cancel (queued) | No active SLURM job |
+| `queued` | `start_remote_xcpd_run` | SLURM job submitted; PENDING in queue |
+| `running` | `refresh_xcpd_run` | SLURM job state is RUNNING |
+| `completed` | `refresh_xcpd_run` | SLURM job state is COMPLETED |
+| `failed` | `refresh_xcpd_run` | SLURM FAILED / DependencyNeverSatisfied |
+| `cancelled` | `stop_xcpd_run` (running) | User called scancel on a RUNNING job |
+
+`refresh_xcpd_run()` queries `squeue -j {job_id} -h -o '%T|%r'`. The pipeline cascades cancel
+downstream: cancelling FC also scancels FC+GSR and EC if they are queued.
 
 ### SSH Port config
 
@@ -126,13 +148,13 @@ hpc:
 ### XCP-D (single job)
 `utils/xcpd.py` `generate_xcpd_slurm_script()` renders `templates/xcpd_slurm.j2` into a **single** SLURM job (XCP-D processes all subjects in one `singularity run` invocation). Submission flow:
 
-1. `generate_xcpd_slurm_script()` — Jinja2 renders template with bind mounts and xcpd_args
+1. `generate_xcpd_slurm_script()` — Jinja2 renders template with bind mounts and xcpd_args; CPUs = `nprocs × omp_nthreads`
 2. Script is saved locally to `pipeline_runs_dir/xcpd_{pipeline}/run_TIMESTAMP/xcpd_{pipeline}_job.sh`
 3. Script is uploaded to the HPC via `HPCConnection.write_file()`
-4. `sbatch xcpd_{pipeline}_job.sh` is executed over SSH
-5. The returned SLURM job ID is stored in run_info as `job_id`
-6. `refresh_xcpd_run()` polls `squeue`/`sacct` to update status
-7. `stop_xcpd_run()` calls `scancel {job_id}`
+4. `sbatch xcpd_{pipeline}_job.sh` is executed over SSH; all three pipelines may be chained with `--dependency=afterok`
+5. The returned SLURM job ID is stored in run_info as `job_id`; initial status is **`queued`**
+6. `refresh_xcpd_run()` polls `squeue -j {job_id} -h -o '%T|%r'` and transitions: PENDING→`queued`, RUNNING→`running`, COMPLETED→`completed`, FAILED/DependencyNeverSatisfied→`failed`
+7. `stop_xcpd_run()` calls `scancel {job_id}` and cascades to downstream pipelines
 
 ### Per-subject status files
 

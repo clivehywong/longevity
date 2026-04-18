@@ -27,12 +27,15 @@ from utils.pipeline_state import (
 )
 from utils.xcpd import (
     build_xcpd_command,
+    check_fmriprep_on_hpc,
+    cleanup_xcpd_hpc_files,
     download_xcpd_outputs_from_hpc,
     fetch_hpc_xcpd_log,
     generate_xcpd_slurm_script,
     parse_xcpd_progress,
     refresh_xcpd_run,
     start_remote_xcpd_run,
+    start_xcpd_chain,
     start_xcpd_run,
     stop_xcpd_run,
     sync_fmriprep_to_hpc,
@@ -82,9 +85,12 @@ def render() -> None:
 def render_pipeline_progress(state: Dict) -> None:
     status_colors = {
         "not_started": "⚪",
+        "queued": "🕐",
         "running": "🟡",
         "completed": "🟢",
         "failed": "🔴",
+        "cancelled": "⛔",
+        "stopped": "🔴",
         "awaiting_approval": "🟠",
     }
     step_labels = {
@@ -424,6 +430,41 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         help="Submit the XCP-D job to the configured HPC cluster via SSH instead of running locally.",
     )
 
+    # --- SLURM Resources (shared across pipelines) ---
+    hpc_cfg_dict = config.get("hpc", {}).get("slurm", {})
+    xcpd_max_cpus = int(hpc_cfg_dict.get("xcpd_max_cpus", 15))
+    with st.expander("⚙️ SLURM Resources", expanded=False):
+        st.caption("Controls the parallelism of the XCP-D workflow. Applies to all three pipelines.")
+        res_col1, res_col2 = st.columns(2)
+        with res_col1:
+            nprocs = st.slider(
+                "nprocs",
+                min_value=1, max_value=xcpd_max_cpus,
+                value=int(config.get("xcpd", {}).get("fc", {}).get("nprocs", 8)),
+                help=(
+                    "Number of parallel Nipype processes per XCP-D job. "
+                    "Higher values speed up the workflow but consume more CPU on the compute node."
+                ),
+            )
+        with res_col2:
+            omp_nthreads = st.slider(
+                "omp_nthreads",
+                min_value=1, max_value=4,
+                value=int(config.get("xcpd", {}).get("fc", {}).get("omp_nthreads", 1)),
+                help=(
+                    "OpenMP threads per process. "
+                    "Total CPUs = nprocs × omp_nthreads. "
+                    "Leave at 1 unless your compute node has many cores."
+                ),
+            )
+        total_cpus = nprocs * omp_nthreads
+        st.caption(f"Total CPUs requested per SLURM job: **{total_cpus}**")
+        if total_cpus > xcpd_max_cpus:
+            st.warning(
+                f"⚠️ {total_cpus} CPUs exceeds the recommended maximum of {xcpd_max_cpus}. "
+                "Check your cluster QOS limits before submitting."
+            )
+
     if run_on_hpc:
         with st.expander("📤 Upload fMRIPrep to HPC", expanded=False):
             st.caption(
@@ -487,24 +528,75 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
     fc_gsr_info = state.get("runs", {}).get("xcpd_fc_gsr", {})
     ec_info = state.get("runs", {}).get("xcpd_ec", {})
 
+    # --- Master "Submit all incomplete" chain button ---
+    if run_on_hpc:
+        any_active = any(
+            info.get("status") in ("running", "queued")
+            for info in (fc_info, fc_gsr_info, ec_info)
+        )
+        chain_help = (
+            "Submit FC → FC+GSR → EC as a SLURM dependency chain for subjects that are "
+            "incomplete in *any* of the three pipelines. Each pipeline starts automatically "
+            "after the previous one succeeds."
+            if not any_active
+            else "Cannot submit — one or more pipelines are currently running or queued."
+        )
+        if st.button(
+            "🚀 Submit all incomplete (FC → FC+GSR → EC chain)",
+            disabled=any_active,
+            help=chain_help,
+            key="submit_xcpd_chain_btn",
+        ):
+            # Union of subjects incomplete in any pipeline
+            incomplete: set = set()
+            for pipeline in ("fc", "fc_gsr", "ec"):
+                incomplete |= set(_get_incomplete_xcpd_subjects(config, pipeline))
+            if not incomplete:
+                st.info("All subjects are complete across all pipelines — nothing to submit.")
+            else:
+                labels = sorted(incomplete)
+                st.info(f"Submitting chain for {len(labels)} subjects: {', '.join(labels)}")
+                try:
+                    with st.spinner("Submitting SLURM chain (FC → FC+GSR → EC)…"):
+                        chain_result = start_xcpd_chain(
+                            config,
+                            participant_labels=labels,
+                            session_ids=sessions or None,
+                            nprocs=nprocs,
+                            omp_nthreads=omp_nthreads,
+                        )
+                    job_ids = {p: info["job_id"] for p, info in chain_result.items()}
+                    st.success(
+                        f"✅ SLURM chain submitted — "
+                        f"FC: {job_ids.get('fc')} → "
+                        f"FC+GSR: {job_ids.get('fc_gsr')} (dep) → "
+                        f"EC: {job_ids.get('ec')} (dep)"
+                    )
+                    st.rerun()
+                except Exception as chain_err:
+                    st.error(f"Chain submission failed: {chain_err}")
+
     col1, col2, col3 = st.columns(3)
     with col1:
         _render_pipeline_panel(
             config, state, "fc", "FC (no GSR)", selected_fc_atlases,
             fc_info, run_on_hpc, selected_subjects, sessions,
             extra_note="aCompCor nuisance regression without global signal removal. Primary FC pipeline.",
+            nprocs=nprocs, omp_nthreads=omp_nthreads,
         )
     with col2:
         _render_pipeline_panel(
             config, state, "fc_gsr", "FC + GSR", selected_fc_gsr_atlases,
             fc_gsr_info, run_on_hpc, selected_subjects, sessions,
             extra_note="36P regressors including global signal regression. Run alongside FC to compare.",
+            nprocs=nprocs, omp_nthreads=omp_nthreads,
         )
     with col3:
         _render_pipeline_panel(
             config, state, "ec", "Effective Connectivity", selected_ec_atlases,
             ec_info, run_on_hpc, selected_subjects, sessions,
             extra_note="Censored timeseries; no smoothing; wider bandpass (0.008–0.09 Hz). For effective connectivity estimation.",
+            nprocs=nprocs, omp_nthreads=omp_nthreads,
         )
 
     # --- Per-subject completion status ---
@@ -548,6 +640,8 @@ def _render_pipeline_panel(
     selected_subjects: List[str],
     sessions: List[str],
     extra_note: str = "",
+    nprocs: int = 8,
+    omp_nthreads: int = 1,
 ) -> None:
     """Render the run/status panel for a single XCP-D pipeline."""
     step_key = f"xcpd_{pipeline_name}"
@@ -558,18 +652,31 @@ def _render_pipeline_panel(
         st.info(extra_note)
 
     step_status = state["steps"].get(step_key, {}).get("status", "not_started")
-    st.caption(f"Status: {run_info.get('status', step_status)}")
+    current_status = run_info.get("status", step_status)
+    st.caption(f"Status: {current_status}")
     if run_info.get("job_id"):
         st.caption(f"SLURM job ID: {run_info['job_id']}")
     elif run_info.get("pid"):
         st.caption(f"PID: {run_info['pid']}")
-    if run_info.get("local_script") and Path(run_info["local_script"]).exists():
-        with st.expander("View SLURM Script"):
-            st.code(Path(run_info["local_script"]).read_text(), language="bash")
     if run_info.get("remote_log_out"):
         st.caption(f"Remote log: {run_info['remote_log_out']}")
 
-    is_running = run_info.get("status") == "running" or step_status == "running"
+    # Show last-submitted script (separate from live preview below)
+    if run_info.get("local_script") and Path(run_info["local_script"]).exists():
+        with st.expander("📂 Last submitted script (read-only)", expanded=False):
+            st.code(Path(run_info["local_script"]).read_text(), language="bash")
+
+    is_running = current_status in ("running", "queued")
+
+    # --- Queued state: show cancel button ---
+    if current_status == "queued":
+        slurm_reason = run_info.get("slurm_reason", "")
+        reason_note = f" — {slurm_reason}" if slurm_reason and slurm_reason.upper() not in ("NONE", "") else ""
+        st.info(f"⏳ Queued — SLURM job {run_info.get('job_id')}{reason_note}")
+        if st.button(f"🚫 Cancel queued job", key=f"cancel_{pipeline_name}", width="stretch"):
+            state = stop_xcpd_run(config, pipeline_name, state)
+            st.rerun()
+
     if not is_running:
         # Safety: warn when re-running a completed pipeline
         already_completed = step_status == "completed"
@@ -598,6 +705,8 @@ def _render_pipeline_panel(
             else:
                 try:
                     config["xcpd"][pipeline_name]["atlases"] = normalize_xcpd_atlas_selection(selected_atlases)
+                    config["xcpd"][pipeline_name]["nprocs"] = nprocs
+                    config["xcpd"][pipeline_name]["omp_nthreads"] = omp_nthreads
                     save_runtime_config(config)
                     if run_on_hpc:
                         info = start_remote_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
@@ -642,13 +751,13 @@ def _render_pipeline_panel(
                         st.error(f"Failed to start {label} XCP-D: {e}")
                 except Exception as e:
                     st.error(f"Failed to start {label} XCP-D: {e}")
-    if run_info.get("status") == "running":
+
+    if current_status == "running":
         if st.button(f"Stop {label} XCP-D", key=f"stop_{pipeline_name}", width="stretch"):
             stop_xcpd_run(config, pipeline_name, state)
             st.rerun()
 
-    # --- Live monitoring (shown when running or recently completed) ---
-    current_status = run_info.get("status", "not_started")
+    # --- Live monitoring (shown when running or recently completed/failed) ---
     if current_status in ("running", "completed", "failed"):
         log_file = run_info.get("log_file")
         stored_total = run_info.get("nodes_total")
@@ -663,15 +772,47 @@ def _render_pipeline_panel(
             from utils.pipeline_state import set_run_info as _set_run_info
             _set_run_info(config, f"xcpd_{pipeline_name}", run_info)
 
+        # HPC log fetch — shown prominently when running so user knows to refresh
+        is_hpc = run_info.get("backend") == "hpc"
+        if is_hpc and run_info.get("remote_log_out"):
+            log_is_empty = not log_file or not Path(log_file).exists() or Path(log_file).stat().st_size == 0 if log_file else True
+            if log_is_empty and current_status == "running":
+                st.info("ℹ️ HPC log is stored remotely — click **Fetch HPC log** to see latest progress.")
+            fetch_col, refresh_col = st.columns(2)
+            with fetch_col:
+                if st.button("📥 Fetch HPC log", key=f"fetch_log_{pipeline_name}"):
+                    with st.spinner("Fetching remote log…"):
+                        fetched = fetch_hpc_xcpd_log(config, run_info)
+                    if fetched:
+                        st.success(f"Log saved to {fetched.name}")
+                    else:
+                        st.warning("Could not fetch remote log.")
+                    st.rerun()
+            with refresh_col:
+                if st.button("🔄 Refresh status", key=f"refresh_{pipeline_name}"):
+                    # Auto-fetch log then refresh for HPC runs
+                    if is_hpc and run_info.get("remote_log_out"):
+                        fetch_hpc_xcpd_log(config, run_info)
+                    st.rerun()
+        else:
+            if st.button("🔄 Refresh status", key=f"refresh_{pipeline_name}"):
+                st.rerun()
+
         if progress["nodes_total"]:
             pct = min(progress["nodes_done"] / progress["nodes_total"], 1.0)
+            n_subjects = len(run_info.get("participant_labels") or [])
+            if n_subjects > 0:
+                nodes_per_subject = progress["nodes_total"] / n_subjects
+                est_done = min(int(progress["nodes_done"] / nodes_per_subject), n_subjects)
+                progress_text = (
+                    f"~{est_done}/{n_subjects} subjects completed "
+                    f"({progress['nodes_done']}/{progress['nodes_total']} processing steps)"
+                )
+            else:
+                progress_text = f"{progress['nodes_done']}/{progress['nodes_total']} processing steps"
             st.progress(
                 pct,
-                text=(
-                    f"{progress['nodes_done']}/{progress['nodes_total']} nodes — "
-                    "each *node* is one processing step (e.g. denoising, atlasing) "
-                    "applied to one subject/run by the Nipype workflow engine"
-                ),
+                text=progress_text,
             )
         elif current_status == "running":
             st.progress(0.0, text="Waiting for workflow to initialise…")
@@ -688,46 +829,43 @@ def _render_pipeline_panel(
             tail = "\n".join(progress["last_lines"][-25:]) if progress["last_lines"] else "(no log content)"
             st.code(tail, language="text")
 
-        # Refresh controls
-        col_r1, col_r2 = st.columns(2)
-        with col_r1:
-            if st.button("🔄 Refresh status", key=f"refresh_{pipeline_name}"):
-                st.rerun()
-        with col_r2:
-            if run_info.get("backend") == "hpc" and run_info.get("remote_log_out"):
-                if st.button("📥 Fetch HPC log", key=f"fetch_log_{pipeline_name}"):
-                    with st.spinner("Fetching remote log…"):
-                        fetched = fetch_hpc_xcpd_log(config, run_info)
-                    if fetched:
-                        st.success(f"Log saved to {fetched.name}")
-                    else:
-                        st.warning("Could not fetch remote log.")
-                    st.rerun()
-
         # Download outputs from HPC when job completed
-        if run_info.get("backend") == "hpc" and current_status == "completed":
+        if is_hpc and current_status == "completed":
             with st.expander("📥 Download XCP-D outputs from HPC", expanded=False):
                 st.caption("Rsync XCP-D outputs from HPC to local machine.")
                 dl_subjects = run_info.get("participant_labels") or []
-                if st.button(
-                    f"⬇️ Download {label} outputs",
-                    key=f"download_{pipeline_name}",
-                ):
-                    with st.spinner("Downloading XCP-D outputs from HPC (this may take a while)…"):
-                        try:
-                            local_dir = download_xcpd_outputs_from_hpc(
-                                config, pipeline_name, dl_subjects or None
-                            )
-                            st.success(f"Downloaded to `{local_dir}`")
-                        except Exception as dl_err:
-                            st.error(f"Download failed: {dl_err}")
+                dl_col, cleanup_col = st.columns(2)
+                with dl_col:
+                    if st.button(
+                        f"⬇️ Download {label} outputs",
+                        key=f"download_{pipeline_name}",
+                    ):
+                        with st.spinner("Downloading XCP-D outputs from HPC (this may take a while)…"):
+                            try:
+                                local_dir = download_xcpd_outputs_from_hpc(
+                                    config, pipeline_name, dl_subjects or None
+                                )
+                                st.success(f"Downloaded to `{local_dir}`")
+                            except Exception as dl_err:
+                                st.error(f"Download failed: {dl_err}")
+                with cleanup_col:
+                    if st.button(
+                        "🗑️ Clean up HPC files",
+                        key=f"cleanup_hpc_{pipeline_name}",
+                        help="Remove the XCP-D work directory and SLURM logs from the HPC after a successful download.",
+                    ):
+                        with st.spinner("Removing HPC files…"):
+                            try:
+                                cleanup_xcpd_hpc_files(config, pipeline_name)
+                                st.success("HPC files removed.")
+                            except Exception as cl_err:
+                                st.error(f"Cleanup failed: {cl_err}")
 
     if run_info.get("log_file"):
         st.caption(run_info["log_file"])
 
-    # Script / command preview — shown after the action buttons so the user can
-    # verify exactly what will be (or was) submitted without cluttering the flow.
-    expander_label = "Preview SLURM script" if run_on_hpc else "Preview command"
+    # Script preview — always shown so user can verify what will be submitted
+    expander_label = "🔍 Preview script with current settings" if run_on_hpc else "🔍 Preview command (current settings)"
     with st.expander(expander_label, expanded=False):
         try:
             if run_on_hpc:

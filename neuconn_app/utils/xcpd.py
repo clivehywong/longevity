@@ -738,7 +738,10 @@ def generate_xcpd_slurm_script(
         if fs_license not in bind_mounts:
             bind_mounts.append(fs_license)
 
-    cpus = hpc_cfg.xcpd_cpus if hpc_cfg.xcpd_cpus else hpc_cfg.cpus
+    xcpd_cfg = config.get("xcpd", {}).get(pipeline_name, {})
+    nprocs = int(xcpd_cfg.get("nprocs") or 8)
+    omp_nthreads = int(xcpd_cfg.get("omp_nthreads") or 1)
+    cpus = nprocs * omp_nthreads or hpc_cfg.cpus
     memory = hpc_cfg.xcpd_memory if hpc_cfg.xcpd_memory else hpc_cfg.memory
     time_limit = hpc_cfg.xcpd_time_limit if hpc_cfg.xcpd_time_limit else hpc_cfg.time_limit
 
@@ -854,8 +857,14 @@ def start_remote_xcpd_run(
     pipeline_name: str,
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
+    dep_job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Submit an XCP-D SLURM job on the configured HPC host."""
+    """Submit an XCP-D SLURM job on the configured HPC host.
+
+    Args:
+        dep_job_id: If provided, submits with ``--dependency=afterok:{dep_job_id}``
+            so this job only starts after that predecessor succeeds.
+    """
     artifacts = _run_artifact_paths(config, pipeline_name)
     hpc_cfg = HPCConfig.from_config(config)
     preflight = run_xcpd_preflight(
@@ -894,7 +903,11 @@ def start_remote_xcpd_run(
         conn.write_file(script_content, remote_script)
         mkdir_cmd = f"mkdir -p {shlex.quote(f'{hpc_cfg.remote_base}/logs')}"
         conn.execute(mkdir_cmd, timeout=30)
-        sbatch_cmd = f"sbatch {shlex.quote(remote_script)}"
+        sbatch_cmd = (
+            f"sbatch --dependency=afterok:{dep_job_id} {shlex.quote(remote_script)}"
+            if dep_job_id
+            else f"sbatch {shlex.quote(remote_script)}"
+        )
         stdout, stderr, exit_code = conn.execute(sbatch_cmd, timeout=60)
     finally:
         _safe_disconnect(conn)
@@ -910,12 +923,12 @@ def start_remote_xcpd_run(
     run_info = {
         "pipeline": pipeline_name,
         "job_id": job_id,
-        "status": "running",
+        "status": "queued",
         "backend": "hpc",
         "remote_script": remote_script,
         "remote_log_out": remote_log_out,
         "remote_log_err": remote_log_err,
-        "started_at": datetime.now().isoformat(),
+        "submitted_at": datetime.now().isoformat(),
         "participant_labels": list(participant_labels or []),
         "session_ids": list(session_ids or []),
         "fmriprep_dir": str(preflight["fmriprep_dir"]),
@@ -928,9 +941,45 @@ def start_remote_xcpd_run(
         json.dump(run_info, f, indent=2)
 
     set_run_info(config, f"xcpd_{pipeline_name}", run_info)
-    set_step_status(config, f"xcpd_{pipeline_name}", "running", f"SLURM job {job_id}")
+    set_step_status(config, f"xcpd_{pipeline_name}", "queued", f"SLURM job {job_id}")
     append_pipeline_log(config, f"Submitted XCP-D {pipeline_name.upper()} SLURM job {job_id}")
     return run_info
+
+
+def start_xcpd_chain(
+    config: Dict[str, Any],
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+    nprocs: Optional[int] = None,
+    omp_nthreads: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Submit FC → FC+GSR → EC as a SLURM dependency chain.
+
+    Each pipeline is submitted with ``--dependency=afterok:{prev_job_id}`` so
+    they run sequentially on the HPC.  Returns a mapping of pipeline name to
+    ``run_info`` dict (as returned by :func:`start_remote_xcpd_run`).
+    """
+    if nprocs is not None:
+        config = dict(config)
+        config.setdefault("xcpd", {})
+        config["xcpd"] = dict(config.get("xcpd", {}))
+        config["xcpd"]["nprocs"] = nprocs
+        if omp_nthreads is not None:
+            config["xcpd"]["omp_nthreads"] = omp_nthreads
+
+    results: Dict[str, Dict[str, Any]] = {}
+    prev_job_id: Optional[str] = None
+    for pipeline in _PIPELINE_ORDER:
+        run_info = start_remote_xcpd_run(
+            config,
+            pipeline,
+            participant_labels=participant_labels,
+            session_ids=session_ids,
+            dep_job_id=prev_job_id,
+        )
+        results[pipeline] = run_info
+        prev_job_id = run_info["job_id"]
+    return results
 
 
 def is_process_running(pid: int) -> bool:
@@ -959,11 +1008,18 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
             hpc_cfg = HPCConfig.from_config(config)
             conn = HPCConnection(hpc_cfg)
             conn.connect()
+            # Query both state and reason so we can distinguish pending types
             stdout, _, _ = conn.execute(
-                f"squeue -j {shlex.quote(str(job_id))} -h -o %T 2>/dev/null",
+                f"squeue -j {shlex.quote(str(job_id))} -h -o '%T|%r' 2>/dev/null",
                 timeout=30,
             )
-            slurm_state = stdout.strip().upper()
+            raw = stdout.strip()
+            if "|" in raw:
+                slurm_state, slurm_reason = raw.upper().split("|", 1)
+            else:
+                slurm_state = raw.upper()
+                slurm_reason = ""
+
             if not slurm_state:
                 # Job has left the queue; query sacct for final state
                 stdout, _, _ = conn.execute(
@@ -971,8 +1027,39 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
                     timeout=30,
                 )
                 slurm_state = stdout.strip().upper()
-            if slurm_state in ("RUNNING", "PENDING", "COMPLETING"):
+                slurm_reason = ""
+
+            if slurm_state == "PENDING":
+                # Detect unsatisfiable dependency early
+                if "DEPENDENCYNEVERSATISFIED" in slurm_reason.replace(" ", ""):
+                    run_info["status"] = "failed"
+                    run_info["completed_at"] = datetime.now().isoformat()
+                    run_info["slurm_state"] = slurm_state
+                    run_info["slurm_reason"] = slurm_reason
+                    state["runs"][run_key] = run_info
+                    state = set_run_info(config, run_key, run_info, state=state)
+                    state = set_step_status(config, f"xcpd_{pipeline_name}", "failed", "SLURM dependency never satisfied", state=state)
+                    append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} dependency never satisfied (upstream job failed/cancelled)", level="error", state=state)
+                    return state
+                # Update to queued state (heals old "running" status set at submission time)
+                if run_info.get("status") != "queued":
+                    run_info["status"] = "queued"
+                    run_info["slurm_reason"] = slurm_reason
+                    state["runs"][run_key] = run_info
+                    state = set_run_info(config, run_key, run_info, state=state)
+                    state = set_step_status(config, f"xcpd_{pipeline_name}", "queued", f"SLURM job {job_id} pending ({slurm_reason})", state=state)
                 return state
+
+            if slurm_state in ("RUNNING", "COMPLETING"):
+                # Promote from queued → running when SLURM confirms execution started
+                if run_info.get("status") == "queued":
+                    run_info["status"] = "running"
+                    run_info["started_at"] = run_info.get("started_at") or datetime.now().isoformat()
+                    state["runs"][run_key] = run_info
+                    state = set_run_info(config, run_key, run_info, state=state)
+                    state = set_step_status(config, f"xcpd_{pipeline_name}", "running", f"SLURM job {job_id} running", state=state)
+                return state
+
             if slurm_state in ("FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"):
                 run_info["status"] = "failed"
                 run_info["completed_at"] = datetime.now().isoformat()
@@ -1055,8 +1142,18 @@ def _write_subject_status_files(
                 pass
 
 
+_PIPELINE_ORDER = ["fc", "fc_gsr", "ec"]
+
+
 def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, Any]) -> Dict[str, Any]:
-    """Terminate a running XCP-D process or cancel a SLURM job."""
+    """Terminate a running XCP-D process, or cancel a queued/running SLURM job.
+
+    For queued jobs: sets step status back to ``not_started`` so re-submission
+    is possible.  For running jobs: marks as ``failed``.
+    When cancelling a SLURM job that has downstream queued dependents, those
+    are automatically cancelled too (SLURM does not clean them up automatically
+    when a dependency is unsatisfied).
+    """
     run_key = f"xcpd_{pipeline_name}"
     run_info = state.get("runs", {}).get(run_key)
     if not run_info:
@@ -1065,6 +1162,7 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
     backend = run_info.get("backend", "local")
     job_id = run_info.get("job_id")
     pid = run_info.get("pid")
+    was_queued = run_info.get("status") == "queued"
 
     try:
         if backend == "hpc":
@@ -1080,6 +1178,25 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
                 stdout, stderr, exit_code = conn.execute(cancel_cmd, timeout=30)
                 if exit_code != 0:
                     raise RuntimeError(stderr or stdout or f"Cancel exited with status {exit_code}")
+
+                # Cascade: cancel any downstream pipelines that are queued
+                # (SLURM PENDING jobs with unsatisfied deps stay in queue forever)
+                try:
+                    pipeline_idx = _PIPELINE_ORDER.index(pipeline_name)
+                except ValueError:
+                    pipeline_idx = -1
+                if pipeline_idx >= 0:
+                    for downstream in _PIPELINE_ORDER[pipeline_idx + 1:]:
+                        ds_key = f"xcpd_{downstream}"
+                        ds_run = state.get("runs", {}).get(ds_key, {})
+                        if ds_run.get("status") in ("queued", "running") and ds_run.get("job_id"):
+                            conn.execute(f"scancel {shlex.quote(str(ds_run['job_id']))}", timeout=30)
+                            ds_run["status"] = "cancelled"
+                            ds_run["stopped_at"] = datetime.now().isoformat()
+                            state["runs"][ds_key] = ds_run
+                            set_run_info(config, ds_key, ds_run, state=state)
+                            set_step_status(config, ds_key, "not_started", "Cancelled — upstream pipeline stopped", state=state)
+                            append_pipeline_log(config, f"Cancelled downstream XCP-D {downstream.upper()} (dependency cancelled)", level="warning", state=state)
             except Exception as exc:
                 _safe_disconnect(conn)
                 set_step_status(
@@ -1101,11 +1218,15 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
         elif pid:
             os.killpg(int(pid), signal.SIGTERM)
 
-        run_info["status"] = "stopped"
+        run_info["status"] = "cancelled" if was_queued else "stopped"
         run_info["stopped_at"] = datetime.now().isoformat()
         state["runs"][run_key] = run_info
         set_run_info(config, run_key, run_info, state=state)
-        set_step_status(config, f"xcpd_{pipeline_name}", "failed", "Stopped by user", state=state)
+        if was_queued:
+            # Allow re-submission by resetting the step gate
+            set_step_status(config, f"xcpd_{pipeline_name}", "not_started", "Cancelled by user", state=state)
+        else:
+            set_step_status(config, f"xcpd_{pipeline_name}", "failed", "Stopped by user", state=state)
         append_pipeline_log(config, f"Stopped XCP-D {pipeline_name.upper()} run", level="warning", state=state)
     except ProcessLookupError:
         pass
@@ -1268,6 +1389,77 @@ def download_xcpd_outputs_from_hpc(
     if result.returncode not in (0, 24):  # 24 = partial transfer (acceptable)
         raise RuntimeError(result.stderr or result.stdout or f"rsync exited {result.returncode}")
     return str(local_out_dir)
+
+
+def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
+    """Remove XCP-D work directory and SLURM script from HPC after a successful download.
+
+    This is safe to call after ``download_xcpd_outputs_from_hpc`` has completed.
+    Raises ``RuntimeError`` if the HPC connection fails.
+    """
+    from utils.pipeline_state import load_pipeline_state
+
+    state = load_pipeline_state(config)
+    run_key = f"xcpd_{pipeline_name}"
+    run_info = state.get("runs", {}).get(run_key, {})
+    hpc_cfg = HPCConfig.from_config(config)
+
+    work_dir = run_info.get("work_dir") or _remote_xcpd_work_dir(hpc_cfg, pipeline_name)
+    remote_script = run_info.get("remote_script")
+    remote_log_out = run_info.get("remote_log_out")
+    remote_log_err = run_info.get("remote_log_err")
+
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        if work_dir:
+            conn.execute(f"rm -rf {shlex.quote(work_dir)}", timeout=120)
+        for remote_file in (remote_script, remote_log_out, remote_log_err):
+            if remote_file:
+                conn.execute(f"rm -f {shlex.quote(remote_file)}", timeout=30)
+        append_pipeline_log(config, f"Cleaned up HPC files for XCP-D {pipeline_name.upper()}")
+    finally:
+        _safe_disconnect(conn)
+
+
+def check_fmriprep_on_hpc(
+    config: Dict[str, Any],
+    participant_labels: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    """Lightweight check: are fMRIPrep outputs present on HPC for the given subjects?
+
+    Returns a dict with:
+      - ``available``: True if the remote fMRIPrep directory exists
+      - ``remote_dir``: the remote path found (or None)
+      - ``missing_subjects``: list of ``sub-*`` labels not found remotely
+      - ``error``: error message string if the connection failed
+    """
+    hpc_cfg = HPCConfig.from_config(config)
+    labels = list(_strip_bids_prefix(participant_labels or [], "sub-"))
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        candidates = _deduplicate_paths([hpc_cfg.remote_fmriprep, hpc_cfg.remote_legacy_fmriprep])
+        fmriprep_dir: Optional[str] = None
+        for candidate in candidates:
+            if candidate and _remote_dir_exists(conn, candidate):
+                if _remote_file_exists(conn, str(Path(candidate) / "dataset_description.json")):
+                    fmriprep_dir = candidate
+                    break
+        if not fmriprep_dir:
+            return {"available": False, "remote_dir": None, "missing_subjects": [f"sub-{l}" for l in labels]}
+        missing = []
+        for label in labels:
+            sub_dir = f"{fmriprep_dir}/sub-{label}"
+            if not _remote_dir_exists(conn, sub_dir):
+                missing.append(f"sub-{label}")
+        return {"available": True, "remote_dir": fmriprep_dir, "missing_subjects": missing}
+    except Exception as exc:
+        return {"available": False, "remote_dir": None, "missing_subjects": [f"sub-{l}" for l in labels], "error": str(exc)}
+    finally:
+        _safe_disconnect(conn)
 
 
 def _sync_remote_xcpd_atlas_dataset(

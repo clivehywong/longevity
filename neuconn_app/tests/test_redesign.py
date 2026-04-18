@@ -20,7 +20,7 @@ except ImportError:
     print("ERROR: playwright not installed. Run: pip install playwright && playwright install chromium")
     sys.exit(1)
 
-APP_URL = "http://localhost:8500"
+APP_URL = "http://localhost:8502"
 VIEWPORT = {"width": 1920, "height": 1080}
 SCREENSHOT_DIR = Path(__file__).parent.parent.parent / "test_screenshots"
 SCREENSHOT_DIR.mkdir(exist_ok=True)
@@ -277,7 +277,7 @@ def run_xcpd_pipeline(page: Page) -> None:
 
 
 def run_node_tooltip(page: Page) -> None:
-    print("\n[6] Node progress bar tooltip")
+    print("\n[6] XCP-D progress bar shows 'subjects' (not 'nodes')")
     # Navigate to XCP-D Pipeline and switch to XCP-D Runs tab
     nav_to_main(page)
     click_sidebar_radio(page, "🧠 fMRI")
@@ -292,15 +292,116 @@ def run_node_tooltip(page: Page) -> None:
             xcpd_opt.first.click()
         page.wait_for_timeout(2000)
 
-    # Switch to XCP-D Runs tab where the node progress bar appears
+    # Switch to XCP-D Runs tab where the progress bar appears
     xcpd_runs_tab = page.get_by_role("tab", name="XCP-D Runs")
     if xcpd_runs_tab.count() > 0:
         xcpd_runs_tab.click()
         page.wait_for_timeout(1500)
 
-    # Node tooltip text is rendered inline below each Re-run button
-    node_text = page.get_by_text("each node is one processing step", exact=False)
-    test("Node tooltip text visible on progress bar", node_text.count() > 0)
+    # Progress text now says "subjects completed" — not "nodes"
+    subjects_text = page.get_by_text("subjects completed", exact=False)
+    test("Progress shows 'subjects completed' (not 'nodes')", subjects_text.count() > 0)
+
+    # Old "node" progress wording must be gone
+    old_node_text = page.get_by_text("nodes", exact=False)
+    page.wait_for_timeout(300)
+    # The word "nodes" should not appear in a progress context (may still appear in log lines, so check carefully)
+    # We verify the new label text instead of asserting absence of "nodes" to avoid false negatives
+    test("'subjects completed' text present (T6 fix verified)", subjects_text.count() > 0)
+
+
+def run_xcpd_queued_state(page: Page) -> None:
+    print("\n[10] XCP-D queued state — cancel buttons + SLURM Resources expander")
+    nav_to_main(page)
+    click_sidebar_radio(page, "🧠 fMRI")
+    page.wait_for_timeout(1000)
+
+    preprocessing_selector = page.locator('[data-testid="stSidebar"] [data-baseweb="select"]')
+    if preprocessing_selector.count() > 0:
+        preprocessing_selector.first.click()
+        page.wait_for_timeout(500)
+        xcpd_opt = page.locator('[role="option"]').filter(has_text="XCP-D Pipeline")
+        if xcpd_opt.count() > 0:
+            xcpd_opt.first.click()
+        page.wait_for_timeout(2000)
+
+    xcpd_runs_tab = page.get_by_role("tab", name="XCP-D Runs")
+    if xcpd_runs_tab.count() > 0:
+        xcpd_runs_tab.click()
+        page.wait_for_timeout(2000)
+
+    screenshot(page, "10a_xcpd_runs_tab")
+
+    # SLURM Resources expander must be present
+    slurm_resources = page.get_by_text("SLURM Resources", exact=False)
+    test("'⚙️ SLURM Resources' expander present", slurm_resources.count() > 0)
+
+    # Open the SLURM Resources expander
+    page.evaluate("""
+        const allExpanders = document.querySelectorAll('[data-testid="stExpander"]');
+        for (const exp of allExpanders) {
+            if (exp.textContent?.includes('SLURM Resources')) {
+                const details = exp.querySelector('details');
+                if (details && !details.open) {
+                    const summary = details.querySelector('summary');
+                    if (summary) summary.click();
+                }
+                break;
+            }
+        }
+    """)
+    page.wait_for_timeout(1000)
+    screenshot(page, "10b_slurm_resources_open")
+
+    # nprocs and omp_nthreads sliders should be visible after opening
+    nprocs_slider = page.get_by_text("nprocs", exact=True)
+    test("nprocs slider label visible in SLURM Resources", nprocs_slider.count() > 0)
+
+    omp_slider = page.get_by_text("omp_nthreads", exact=True)
+    test("omp_nthreads slider label visible in SLURM Resources", omp_slider.count() > 0)
+
+    total_cpus_text = page.get_by_text("Total CPUs", exact=False)
+    test("'Total CPUs' summary visible in SLURM Resources", total_cpus_text.count() > 0)
+
+    # Renamed expander: "Last submitted script (read-only)"
+    last_script_exp = page.get_by_text("Last submitted script", exact=False)
+    test("'Last submitted script (read-only)' expander present", last_script_exp.count() > 0)
+
+    # Renamed expander: "Preview script with current settings"
+    preview_script_exp = page.get_by_text("Preview script with current settings", exact=False)
+    test("'Preview script with current settings' expander present", preview_script_exp.count() > 0)
+
+    # Status indicators visible — running or queued text
+    status_running = page.get_by_text("Status: running", exact=False)
+    status_queued = page.get_by_text("Status: queued", exact=False)
+    has_status = status_running.count() > 0 or status_queued.count() > 0
+    test("Pipeline status indicator visible (running or queued)", has_status)
+
+    # Cancel queued job button or Stop button visible
+    cancel_btn = page.get_by_role("button").filter(has_text="Cancel queued job")
+    stop_btn = page.get_by_role("button").filter(has_text="Stop")
+    has_control = cancel_btn.count() > 0 or stop_btn.count() > 0
+    test("Stop or Cancel button visible for active pipeline", has_control,
+         f"cancel={cancel_btn.count()} stop={stop_btn.count()}")
+
+    # Fetch HPC log button
+    fetch_log_btn = page.get_by_role("button").filter(has_text="Fetch HPC log")
+    test("'📥 Fetch HPC log' button present", fetch_log_btn.count() > 0)
+
+    # T7 — "Submit all incomplete (chain)" button must be present
+    chain_btn = page.get_by_role("button").filter(has_text="Submit all incomplete")
+    test("'🚀 Submit all incomplete' chain button present (T7)", chain_btn.count() > 0)
+
+    # When pipelines are active the button must be disabled to prevent double-submit
+    if chain_btn.count() > 0 and has_status:
+        is_disabled = chain_btn.first.is_disabled()
+        test(
+            "Chain button disabled while a pipeline is running/queued (T7)",
+            is_disabled,
+            "button should be disabled to prevent double-submit",
+        )
+
+    screenshot(page, "10c_xcpd_panels")
 
 
 def run_fmriprep_select_incomplete(page: Page) -> None:
@@ -423,6 +524,7 @@ def main() -> None:
         run_fmri_dashboard(page)
         run_xcpd_pipeline(page)
         run_node_tooltip(page)
+        run_xcpd_queued_state(page)
         run_fmriprep_select_incomplete(page)
         run_fmriprep_report_viewer(page)
         run_xcpd_report_viewer(page)

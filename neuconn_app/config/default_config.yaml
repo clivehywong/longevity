@@ -91,7 +91,8 @@ hpc:
     max_concurrent_jobs: 4
     batch_size: 4
     poll_interval: 300
-    xcpd_cpus: 16
+    xcpd_cpus: 0
+    xcpd_max_cpus: 15
     xcpd_memory: "64GB"
     xcpd_time: "12:00:00"
 

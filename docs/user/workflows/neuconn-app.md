@@ -132,15 +132,41 @@ Three pipelines are available; each has its own atlas selection (configured in S
 | **FC + GSR** | `36P` (default) | Comparison pipeline; includes global signal |
 | **Effective Connectivity** | `acompcor` | No scrubbing; interpolated; wider bandpass |
 
+#### Parallelism (SLURM Resources)
+
+Open the **⚙️ SLURM Resources** expander (shared by all three pipelines) before submitting:
+
+| Setting | Description | Default |
+|---|---|---|
+| `nprocs` | Parallel Nipype workers per job | 8 |
+| `omp_nthreads` | OpenMP threads per worker | 1 |
+| Total CPUs | `nprocs × omp_nthreads` — must not exceed cluster QOS limit | ≤15 |
+
+Increasing `nprocs` speeds up each pipeline at the cost of more CPU hours. Leave `omp_nthreads` at 1 unless your node has idle hyperthreads.
+
+#### Submitting pipelines
+
 For each pipeline:
 
 1. Select subjects and sessions.
    - Use **🎯 FC incomplete / FC+GSR incomplete / EC incomplete** buttons to auto-select only subjects that have not yet successfully completed that pipeline. Use **↩ Reset** to restore the full subject list.
 2. Toggle **Run on HPC** if needed; use the **Upload fMRIPrep to HPC** expander if the derivatives are not yet on the cluster.
-3. Click **Start … XCP-D**. A SLURM job ID (HPC) or PID (local) is shown.
-4. Monitor progress with the inline progress bar and **🔄 Refresh status** button.
-   - The bar shows `N/total nodes` — a *node* is one Nipype processing step (e.g. denoising, atlasing) for one subject/run.
-5. After HPC completion, use **📥 Download XCP-D outputs from HPC** to rsync results locally.
+3. Click **▶ Start … XCP-D**. A SLURM job ID (HPC) or PID (local) is shown.
+4. Monitor progress with **🔄 Refresh status**. The progress bar shows `~N/total subjects estimated` (derived from Nipype processing steps).
+5. After HPC completion, use **📥 Download XCP-D outputs from HPC** to rsync results locally; then use **🗑️ Clean up HPC files** to free remote disk space.
+
+#### Pipeline status values
+
+| Status | Meaning |
+|---|---|
+| `not_started` | No run has been submitted |
+| `queued` | SLURM job submitted; waiting in queue or on a SLURM dependency |
+| `running` | SLURM job is actively executing on a compute node |
+| `completed` | All subjects finished successfully |
+| `failed` | Job exited with an error or dependency was never satisfied |
+| `cancelled` | User cancelled the queued job |
+
+When a pipeline is **queued** (e.g. FC+GSR waiting for FC to finish), the panel shows `⏳ Queued — SLURM job N — DEPENDENCY` and a **🚫 Cancel queued job** button. Cancelling also cascades to any downstream pipelines that depend on it.
 
 > **Re-run safety**: if a pipeline is already completed and the QC gate has been approved, re-running automatically invalidates the QC approval and you must re-review QC.
 
