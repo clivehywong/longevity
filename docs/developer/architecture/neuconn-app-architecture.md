@@ -18,12 +18,21 @@ The app uses a custom navigation model rather than relying on Streamlit's defaul
 | Path | Role |
 |---|---|
 | `pages/` | top-level section entrypoints |
-| `pages_general_qc/` | QC tools |
+| `pages_general_qc/` | QC tools and subject data management |
 | `pages_fmri/` | fMRI preprocessing and analysis pages |
 | `pages_dmri/` | dMRI pages |
 | `pages_settings/` | settings UI |
 | `utils/` | shared behavior and state helpers |
 | `templates/` | SLURM Jinja2 templates (`fmriprep_slurm.j2`, `xcpd_slurm.j2`) |
+| `tests/` | Playwright smoke tests (`test_redesign.py`) |
+
+### Key pages
+
+| File | Purpose |
+|---|---|
+| `pages_general_qc/08_subject_data.py` | Subject Data — editable group.csv, BIDS conflict detection |
+| `pages_fmri/preprocessing/00_fmri_dashboard.py` | fMRI Dashboard — per-subject preprocessing status table |
+| `pages_fmri/preprocessing/06_xcpd_pipeline.py` | XCP-D Pipeline — FD gating, runs, QC, per-subject status |
 
 ## Config model
 
@@ -31,6 +40,32 @@ The app uses a custom navigation model rather than relying on Streamlit's defaul
 - User/project overrides come from `~/neuconn_projects/<project>.yaml`.
 - `utils/config.py` expands `${var}` references and `~`, merges configs, and hydrates derived defaults.
 - `config.py` (the project facade) adds higher-level derived defaults on top of the raw YAML.
+
+### Output path conventions
+
+All derivatives are split by modality under the derivatives directory:
+
+```
+derivatives/
+  func/
+    preprocessing/
+      fmriprep/          # fMRIPrep outputs
+      xcpd_fc/           # XCP-D FC (no GSR)
+      xcpd_fc_gsr/       # XCP-D FC+GSR
+      xcpd_ec/           # XCP-D EC (effective connectivity)
+    subject_level/
+      fc/                # subject-level FC manifests
+  dwi/
+    preprocessing/
+      qsiprep/           # QSIPrep (future)
+      qsirecon/          # QSIRecon (future)
+  pipeline_runs/
+    xcpd_fc/run_YYYYMMDD_HHMMSS/   # SLURM scripts, manifests, log refs
+    xcpd_fc_gsr/...
+    xcpd_ec/...
+```
+
+The `pipeline_runs_dir` config key controls where run artifacts (SLURM scripts, manifests) are written. Previous versions wrote these into the XCP-D QC directory, which was misleading.
 
 ### Software / Singularity image config
 
@@ -46,8 +81,6 @@ Both sections cover: `fmriprep`, `xcp_d`, `fmripost_aroma`, `qsiprep`, `qsirecon
 `software.singularity_bind_mounts` lists local directories to bind-mount into the container.
 
 The legacy `xcpd.singularity_image_path` key is kept for backward compatibility; `software.singularity_images.xcp_d` takes precedence when set.
-
-`qsiprep` and `qsirecon` are present as empty placeholders ready for future DWI/structural connectivity pages.
 
 ### SLURM resource config
 
@@ -66,6 +99,24 @@ hpc:
     xcpd_time: "12:00:00"
 ```
 
+### SSH Port config
+
+`hpc.port` (default `22`) controls the SSH port passed to `paramiko.SSHClient.connect()`.
+For SSH tunnels (e.g. `ssh -p 2222 localhost`), set host to `localhost` and port to `2222` in **Settings → HPC Connection Settings**.
+
+```yaml
+hpc:
+  host: localhost
+  port: 2222
+```
+
+## Pipeline gates
+
+`app.py:render_pipeline_gate_summary()` shows two independent groups in the sidebar:
+
+- **fMRI gates** — FD approval, XCP-D QC approval, Subject-level outputs
+- **dMRI gates** — QSIPrep outputs, Tractography QC (placeholder; full dMRI gate logic planned)
+
 ## HPC submission model
 
 ### fMRIPrep (array job)
@@ -75,12 +126,18 @@ hpc:
 `utils/xcpd.py` `generate_xcpd_slurm_script()` renders `templates/xcpd_slurm.j2` into a **single** SLURM job (XCP-D processes all subjects in one `singularity run` invocation). Submission flow:
 
 1. `generate_xcpd_slurm_script()` — Jinja2 renders template with bind mounts and xcpd_args
-2. Script is saved locally to `run_dir/xcpd_{pipeline}_job.sh` for inspection
+2. Script is saved locally to `pipeline_runs_dir/xcpd_{pipeline}/run_TIMESTAMP/xcpd_{pipeline}_job.sh`
 3. Script is uploaded to the HPC via `HPCConnection.write_file()`
 4. `sbatch xcpd_{pipeline}_job.sh` is executed over SSH
 5. The returned SLURM job ID is stored in run_info as `job_id`
 6. `refresh_xcpd_run()` polls `squeue`/`sacct` to update status
 7. `stop_xcpd_run()` calls `scancel {job_id}`
+
+### Per-subject status files
+
+After each XCP-D run, `_write_subject_status_files()` writes
+`<xcpd_output_dir>/<sub>/status` with content `completed <ISO>` or `failed <ISO>`.
+`get_xcpd_subject_status()` (in `utils/xcpd_qc.py`) reads these files first, with a fallback to detecting HTML reports.
 
 Both templates initialize the module system identically (`/etc/profile.d/modules.sh`, then `module load singularity`).
 
@@ -90,7 +147,7 @@ The Settings page tabs are ordered to match the analysis workflow:
 
 1. **Project** — name, description
 2. **Paths** — local filesystem paths
-3. **HPC Settings** — SSH connection, remote paths, SLURM defaults, XCP-D SLURM overrides
+3. **HPC Settings** — SSH connection (host + **port**), remote paths, SLURM defaults, XCP-D SLURM overrides
 4. **Software / Images** — local and HPC Singularity image paths for all tools (side-by-side)
 5. **Analysis Parameters** — sections ordered to match the pipeline:
    - fMRIPrep Settings
@@ -111,8 +168,9 @@ The "Software / Images" tab was separated from HPC Settings so local execution p
 | Module | Responsibility |
 |---|---|
 | `utils/bids.py` | dataset scanning, parameter detection, exclusion support |
-| `utils/hpc.py` | SSH and SLURM workflow objects; `HPCConfig` dataclass |
-| `utils/xcpd.py` | XCP-D local and HPC execution; SLURM script generation |
+| `utils/hpc.py` | SSH and SLURM workflow objects; `HPCConfig` dataclass (includes `port` field) |
+| `utils/xcpd.py` | XCP-D local and HPC execution; SLURM script generation; status file writing |
+| `utils/xcpd_qc.py` | XCP-D QC rendering helpers; `get_xcpd_subject_status()` |
 | `utils/qc_database.py` | QC persistence helpers |
 | `utils/image_cache.py` | cached QC-image lifecycle |
 | `utils/qa_image_generator.py` | image generation used by both app and CLI-style workflows |
@@ -141,8 +199,9 @@ Three pipelines run through XCP-D to support both functional connectivity (FC) a
 - `motion_filter_type=notch` is the correct XCP-D value for a band-stop (respiratory) filter. The old value `bandstop` is not recognised by XCP-D; valid choices are `notch`, `lp`, `none`.
 - `--create-matrices` (the XCP-D flag for per-subject equal-length correlation windows) is only valid in `abcd`/`hbcd` modes, not `linc`. There is no equivalent for `linc` mode; the `correlation_lengths` config key is therefore unused and has been removed.
 
+## Current state notes
 
 - The app is strongest today in QC, configuration, and workflow support.
 - Several pages still represent scaffolding or future work.
-- DWI/structural connectivity pages (QSIPrep, QSIRecon) are planned; image path config placeholders are already in place.
+- DWI/structural connectivity pages (QSIPrep, QSIRecon) are planned; image path config placeholders and dMRI gate stubs are already in place.
 - The README should stay honest about what is currently working versus planned.

@@ -299,13 +299,27 @@ def render_subject_selection(config: Dict) -> Optional[List[str]]:
     # Selection method
     selection_method = st.radio(
         "Selection method:",
-        ["Select all", "Select specific subjects", "Select range"],
-        horizontal=True
+        ["Select all", "Select incomplete", "Select specific subjects", "Select range"],
+        horizontal=True,
+        help="'Select incomplete' picks all subjects that have not yet been processed by fMRIPrep.",
     )
 
     if selection_method == "Select all":
         selected = selectable
         st.info(f"All {len(selected)} subjects selected")
+
+    elif selection_method == "Select incomplete":
+        # All available subjects that have no fMRIPrep output, regardless of the exclude_processed checkbox
+        incomplete = [s for s in available if s not in processed]
+        selected = incomplete
+        if selected:
+            st.info(
+                f"**{len(selected)} incomplete** subject(s) selected (not yet processed by fMRIPrep): "
+                + ", ".join(selected)
+            )
+        else:
+            st.success("All available subjects have already been processed by fMRIPrep.")
+            return None
 
     elif selection_method == "Select specific subjects":
         selected = st.multiselect(

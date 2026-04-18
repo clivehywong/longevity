@@ -346,3 +346,82 @@ Implementation by Claude Code (2026-04-06)
 - Original QA script: `/home/clivewong/proj/longevity/script/qa_check_images.py`
 - BIDS Specification: https://bids-specification.readthedocs.io/
 - Derivatives Extension: BIDS Extension Proposal 16
+
+---
+
+# Workflow Redesign v2 — Feature Changes
+
+## Date: 2026-04-18
+
+## Summary
+
+Major UI improvements: SSH port support for tunnels, pipeline gate split (fMRI vs dMRI), Subject Data page, fMRI preprocessing dashboard, XCP-D per-subject completion tracking, tooltip improvements, inline HTML report viewers, auto-select incomplete subjects, and MNI152NLin6Asym atlas upgrade.
+
+## New Features
+
+### 1. SSH Port support (`utils/hpc.py`, `pages_settings/settings_page.py`, `config/default_config.yaml`)
+- `HPCConfig.port` field (default 22) passed to paramiko connect
+- Port number input in **Settings → HPC** tab (help text: "use 2222 for local tunnel")
+- Supports SSH tunnel shortcut: `ssh -p 2222 localhost`
+
+### 2. Pipeline Gates split (`app.py`)
+- Sidebar now shows **fMRI gates** (FD approval, XCP-D QC, subject outputs) and **dMRI gates** (QSIPrep outputs, Tractography QC) as independent groups
+
+### 3. Subject Data page (`pages_general_qc/08_subject_data.py`)
+- Editable `group.csv` in the UI (inline table editor)
+- CSV upload/merge
+- Subjects in BIDS but missing from group.csv flagged as "unlabeled"
+- Save writes back to group.csv in project root
+
+### 4. fMRI Preprocessing Dashboard (`pages_fmri/preprocessing/00_fmri_dashboard.py`)
+- Per-subject table: fMRIPrep, XCP-D FC, XCP-D FC+GSR, XCP-D EC status
+- **🔄 Rescan** button re-reads disk; metric cards summarize completion counts
+- Status legend: ⚪ not started · 🔄 incomplete · ✅ completed · ❌ failed
+
+### 5. XCP-D per-subject completion status (`utils/xcpd_qc.py`, `06_xcpd_pipeline.py`)
+- `get_xcpd_subject_status(xcpd_dir, subjects)` reads `status` sentinel files or HTML report presence
+- "📋 Subject Completion Status" expander below XCP-D run panels
+
+### 6. XCP-D tooltips (`06_xcpd_pipeline.py`)
+- Progress bar tooltip explains Nipype nodes
+- Help text added for ambiguous parameters
+
+### 7. Auto-select incomplete subjects
+- **XCP-D Runs tab**: four buttons (🎯 FC incomplete / 🎯 FC+GSR incomplete / 🎯 EC incomplete / ↩ Reset) set multiselect via `st.session_state`
+- **fMRIPrep Submit**: "Select incomplete" radio option auto-selects unprocessed subjects
+
+### 8. Inline HTML report viewers
+- **fMRIPrep QC Reports** (`02_qc_reports.py`): scans `fmriprep_dir` and `legacy_fmriprep_dir` for `sub-*.html`; dropdown + ⬅/➡ navigation; embedded via `st.components.v1.html()`
+- **XCP-D QC Reports** (`07_xcpd_qc_reports.py`): two-tab layout — "📈 QC Metrics" (existing) + "📄 HTML Reports" (per-pipeline tabs FC/FC+GSR/EC, per-session navigation)
+
+### 9. MNI152NLin6Asym atlas upgrade (`utils/xcpd_atlases.py`, `atlases/tian/`)
+- Downloaded correct Tian atlas files in MNI152NLin6Asym space (identical to FSL MNI152_T1_2mm)
+- `LongevitySchaeferTian200S2` and `LongevitySchaeferTian400S2` updated to reference new files
+- Atlas space confirmed in XCP-D HTML reports: `BOLD volume space: MNI152NLin6Asym`
+
+### 10. Output path conventions
+- All derivatives now under `derivatives/func/preprocessing/` and `derivatives/dwi/preprocessing/`
+- Config keys updated; legacy `fmriprep/` root path still accepted via `legacy_fmriprep_dir`
+- Pipeline artifacts moved from QC directory to `derivatives/pipeline_runs/`
+
+## Modified Files
+
+| File | Changes |
+|---|---|
+| `utils/hpc.py` | `HPCConfig.port` field, paramiko port kwarg |
+| `pages_settings/settings_page.py` | Port number input in HPC tab |
+| `config/default_config.yaml` | `hpc.port: 22`, updated derivative paths |
+| `app.py` | fMRI/dMRI pipeline gate split, new pages registered |
+| `pages_general_qc/08_subject_data.py` | **NEW** Subject Data page |
+| `pages_fmri/preprocessing/00_fmri_dashboard.py` | **NEW** fMRI Dashboard |
+| `pages_fmri/preprocessing/01_hpc_submit.py` | "Select incomplete" radio option |
+| `pages_fmri/preprocessing/02_qc_reports.py` | Reimplemented as inline HTML viewer |
+| `pages_fmri/preprocessing/06_xcpd_pipeline.py` | Auto-select buttons, tooltips, no pipeline status header |
+| `pages_fmri/preprocessing/07_xcpd_qc_reports.py` | Two-tab layout with HTML report viewer |
+| `utils/xcpd_atlases.py` | MNI152NLin6Asym atlas file references |
+| `utils/xcpd_qc.py` | `get_xcpd_subject_status()` helper |
+
+## Added Files
+
+- `atlases/tian/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_MNI152NLin6Asym_2mm.nii.gz`
+- `atlases/tian/Schaefer2018_400Parcels_7Networks_order_Tian_Subcortex_S2_MNI152NLin6Asym_2mm.nii.gz`

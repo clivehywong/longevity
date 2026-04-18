@@ -750,11 +750,18 @@ def generate_xcpd_slurm_script(
 
 
 def _run_artifact_paths(config: Dict[str, Any], pipeline_name: str) -> Dict[str, Any]:
-    """Create and return local run artifact paths for this pipeline."""
-    qc_dir_key = f"xcpd_{pipeline_name}_qc_dir"
-    qc_root = Path(config["paths"].get(qc_dir_key) or config["paths"]["xcpd_fc_qc_dir"])
-    qc_root.mkdir(parents=True, exist_ok=True)
-    run_dir = qc_root / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    """Create and return local run artifact paths for this pipeline.
+
+    Run artifacts (logs, SLURM scripts, manifests) are stored under
+    ``pipeline_runs_dir`` — separate from QC reports — so the naming
+    is not misleading.
+    """
+    runs_root = Path(
+        config["paths"].get("pipeline_runs_dir")
+        or (Path(config["paths"]["derivatives_dir"]) / "pipeline_runs")
+    ) / f"xcpd_{pipeline_name}"
+    runs_root.mkdir(parents=True, exist_ok=True)
+    run_dir = runs_root / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return {
         "run_dir": run_dir,
@@ -988,6 +995,7 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
         state = set_run_info(config, run_key, run_info, state=state)
         state = set_step_status(config, f"xcpd_{pipeline_name}", "failed", "Error detected in log", state=state)
         append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} run failed (error in log)", level="error", state=state)
+        _write_subject_status_files(config, pipeline_name, run_info, success=False)
         return state
 
     run_info["status"] = "completed"
@@ -996,7 +1004,37 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
     state = set_run_info(config, run_key, run_info, state=state)
     state = set_step_status(config, f"xcpd_{pipeline_name}", "completed", "Process finished", state=state)
     append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} run finished", state=state)
+    _write_subject_status_files(config, pipeline_name, run_info, success=True)
     return state
+
+
+def _write_subject_status_files(
+    config: Dict[str, Any], pipeline_name: str, run_info: Dict[str, Any], success: bool
+) -> None:
+    """Write a ``status`` sentinel file inside each subject's XCP-D output dir.
+
+    These files let the UI quickly report per-subject completion without
+    parsing the full log.  The file contains ``completed <timestamp>`` or
+    ``failed <timestamp>``.
+    """
+    xcpd_dir_key = f"xcpd_{pipeline_name}_dir"
+    xcpd_output_dir = Path(
+        config["paths"].get(xcpd_dir_key)
+        or config["paths"].get("xcpd_fc_dir", "")
+    )
+    if not xcpd_output_dir or not xcpd_output_dir.exists():
+        return
+    timestamp = run_info.get("completed_at", datetime.now().isoformat())
+    status_text = f"completed {timestamp}" if success else f"failed {timestamp}"
+    labels = run_info.get("participant_labels") or []
+    for sub in labels:
+        sub_id = sub if sub.startswith("sub-") else f"sub-{sub}"
+        sub_dir = xcpd_output_dir / sub_id
+        if sub_dir.exists():
+            try:
+                (sub_dir / "status").write_text(status_text)
+            except OSError:
+                pass
 
 
 def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, Any]) -> Dict[str, Any]:
