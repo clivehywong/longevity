@@ -20,7 +20,7 @@ except ImportError:
     print("ERROR: playwright not installed. Run: pip install playwright && playwright install chromium")
     sys.exit(1)
 
-APP_URL = "http://localhost:8502"
+APP_URL = "http://localhost:8501"
 VIEWPORT = {"width": 1920, "height": 1080}
 SCREENSHOT_DIR = Path(__file__).parent.parent.parent / "test_screenshots"
 SCREENSHOT_DIR.mkdir(exist_ok=True)
@@ -209,18 +209,29 @@ def run_xcpd_pipeline(page: Page) -> None:
 
     screenshot(page, "05_xcpd_pipeline")
 
-    # Renamed heading: "fMRI Pipeline Status" (not "Pipeline Progress")
+    # "Pipeline Progress" heading should be gone
     old_heading = page.get_by_text("Pipeline Progress", exact=True)
     test("Old heading 'Pipeline Progress' NOT present", old_heading.count() == 0)
 
-    new_heading = page.get_by_text("fMRI Pipeline Status", exact=False)
-    test("New heading 'fMRI Pipeline Status' visible", new_heading.count() > 0)
+    # "fMRI Pipeline Status" subheader was also removed — should not appear
+    pipeline_status = page.get_by_text("fMRI Pipeline Status", exact=True)
+    test("'fMRI Pipeline Status' subheader NOT present (removed)", pipeline_status.count() == 0)
 
-    # Click XCP-D Runs tab to see all tooltip icons
+    # Click XCP-D Runs tab to see auto-select buttons
     xcpd_runs_tab = page.get_by_role("tab", name="XCP-D Runs")
     if xcpd_runs_tab.count() > 0:
         xcpd_runs_tab.click()
         page.wait_for_timeout(2000)
+
+    # Auto-select incomplete buttons should be present
+    fc_incomplete_btn = page.get_by_role("button").filter(has_text="FC incomplete")
+    test("'FC incomplete' auto-select button present", fc_incomplete_btn.count() > 0)
+
+    ec_incomplete_btn = page.get_by_role("button").filter(has_text="EC incomplete")
+    test("'EC incomplete' auto-select button present", ec_incomplete_btn.count() > 0)
+
+    reset_btn = page.get_by_role("button").filter(has_text="Reset")
+    test("'Reset' button present", reset_btn.count() > 0)
 
     # Tooltip icons (ⓘ) present on controls — need XCP-D Runs tab to be active
     tooltip_icons = page.locator('[data-testid="stTooltipIcon"]')
@@ -292,6 +303,105 @@ def run_node_tooltip(page: Page) -> None:
     test("Node tooltip text visible on progress bar", node_text.count() > 0)
 
 
+def run_fmriprep_select_incomplete(page: Page) -> None:
+    print("\n[7] fMRIPrep Submit — 'Select incomplete' option")
+    nav_to_main(page)
+
+    click_sidebar_radio(page, "🧠 fMRI")
+    page.wait_for_timeout(1000)
+
+    preprocessing_selector = page.locator('[data-testid="stSidebar"] [data-baseweb="select"]')
+    if preprocessing_selector.count() > 0:
+        preprocessing_selector.first.click()
+        page.wait_for_timeout(500)
+        submit_opt = page.locator('[role="option"]').filter(has_text="fMRIPrep Submit")
+        if submit_opt.count() > 0:
+            submit_opt.first.click()
+        page.wait_for_timeout(2000)
+
+    screenshot(page, "07_fmriprep_submit")
+
+    incomplete_radio = page.get_by_text("Select incomplete", exact=True)
+    test("'Select incomplete' radio option visible in fMRIPrep Submit", incomplete_radio.count() > 0)
+
+
+def run_fmriprep_report_viewer(page: Page) -> None:
+    print("\n[8] fMRIPrep QC Reports — inline HTML viewer")
+    nav_to_main(page)
+
+    click_sidebar_radio(page, "🧠 fMRI")
+    page.wait_for_timeout(1000)
+
+    preprocessing_selector = page.locator('[data-testid="stSidebar"] [data-baseweb="select"]')
+    if preprocessing_selector.count() > 0:
+        preprocessing_selector.first.click()
+        page.wait_for_timeout(500)
+        reports_opt = page.locator('[role="option"]').filter(has_text="fMRIPrep QC Reports")
+        if reports_opt.count() > 0:
+            reports_opt.first.click()
+        page.wait_for_timeout(3000)
+
+    screenshot(page, "08_fmriprep_reports")
+
+    # Reports found heading
+    reports_found = page.get_by_text("report", exact=False).filter(has_text="Found")
+    test("Reports-found message visible in fMRIPrep viewer", reports_found.count() > 0)
+
+    # Prev/Next buttons
+    prev_btn = page.get_by_role("button").filter(has_text="Prev")
+    next_btn = page.get_by_role("button").filter(has_text="Next")
+    test("Prev navigation button present", prev_btn.count() > 0)
+    test("Next navigation button present", next_btn.count() > 0)
+
+    # Embedded iframe (HTML component)
+    iframe = page.locator('iframe')
+    test("Embedded report iframe present", iframe.count() > 0)
+
+
+def run_xcpd_report_viewer(page: Page) -> None:
+    print("\n[9] XCP-D QC Reports — two tabs + HTML report viewer")
+    nav_to_main(page)
+
+    click_sidebar_radio(page, "🧠 fMRI")
+    page.wait_for_timeout(1000)
+
+    preprocessing_selector = page.locator('[data-testid="stSidebar"] [data-baseweb="select"]')
+    if preprocessing_selector.count() > 0:
+        preprocessing_selector.first.click()
+        page.wait_for_timeout(500)
+        xcpdqc_opt = page.locator('[role="option"]').filter(has_text="XCP-D QC Reports")
+        if xcpdqc_opt.count() > 0:
+            xcpdqc_opt.first.click()
+        page.wait_for_timeout(3000)
+
+    screenshot(page, "09_xcpd_qc_reports")
+
+    # Two tabs: QC Metrics and HTML Reports
+    qc_metrics_tab = page.get_by_role("tab", name="QC Metrics")
+    test("'QC Metrics' tab visible", qc_metrics_tab.count() > 0)
+
+    html_reports_tab = page.get_by_role("tab", name="HTML Reports")
+    test("'HTML Reports' tab visible", html_reports_tab.count() > 0)
+
+    # Switch to HTML Reports tab
+    if html_reports_tab.count() > 0:
+        html_reports_tab.click()
+        page.wait_for_timeout(2000)
+    screenshot(page, "09b_xcpd_html_reports")
+
+    # FC / FC+GSR / EC pipeline sub-tabs
+    fc_tab = page.get_by_role("tab", name="FC")
+    test("FC sub-tab visible in XCP-D HTML Reports", fc_tab.count() > 0)
+
+    # Prev / Next navigation
+    prev_btn = page.get_by_role("button").filter(has_text="Prev")
+    test("Prev navigation button in XCP-D report viewer", prev_btn.count() > 0)
+
+    # Should show sessions found
+    sessions_text = page.get_by_text("sessions found", exact=False)
+    test("Sessions-found message visible in XCP-D HTML viewer", sessions_text.count() > 0)
+
+
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
@@ -313,6 +423,9 @@ def main() -> None:
         run_fmri_dashboard(page)
         run_xcpd_pipeline(page)
         run_node_tooltip(page)
+        run_fmriprep_select_incomplete(page)
+        run_fmriprep_report_viewer(page)
+        run_xcpd_report_viewer(page)
 
         ctx.close()
         browser.close()
