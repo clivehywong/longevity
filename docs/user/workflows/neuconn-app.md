@@ -176,9 +176,9 @@ After QC approval, open **fMRI Analysis → Subject Level**.
 | `sibling bids_excluded/` | Excluded scans (original structure preserved) |
 | `<bids>/derivatives/qc_images/` | QC image cache |
 | `derivatives/func/preprocessing/fmriprep/` | fMRIPrep outputs |
-| `derivatives/func/preprocessing/xcpd_fc/` | XCP-D FC (no GSR) outputs |
-| `derivatives/func/preprocessing/xcpd_fc_gsr/` | XCP-D FC+GSR outputs |
-| `derivatives/func/preprocessing/xcpd_ec/` | XCP-D EC outputs |
+| `derivatives/func/preprocessing/xcpd/fc/` | XCP-D FC (no GSR) outputs |
+| `derivatives/func/preprocessing/xcpd/fc_gsr/` | XCP-D FC+GSR outputs |
+| `derivatives/func/preprocessing/xcpd/ec/` | XCP-D EC outputs |
 | `derivatives/dwi/preprocessing/qsiprep/` | QSIPrep outputs (future) |
 | `derivatives/pipeline_runs/` | SLURM scripts, run manifests, and log references |
 | `derivatives/func/subject_level/fc/` | Subject-level FC manifests and seed exports |

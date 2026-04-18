@@ -50,9 +50,10 @@ derivatives/
   func/
     preprocessing/
       fmriprep/          # fMRIPrep outputs
-      xcpd_fc/           # XCP-D FC (no GSR)
-      xcpd_fc_gsr/       # XCP-D FC+GSR
-      xcpd_ec/           # XCP-D EC (effective connectivity)
+      xcpd/
+        fc/              # XCP-D FC (no GSR)
+        fc_gsr/          # XCP-D FC+GSR
+        ec/              # XCP-D EC (effective connectivity)
     subject_level/
       fc/                # subject-level FC manifests
   dwi/
