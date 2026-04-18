@@ -545,6 +545,15 @@ def build_xcpd_command(
             raise FileNotFoundError(f"FreeSurfer license file not found: {fs_license}")
         command.extend(["--fs-license-file", fs_license])
 
+    # Concurrency limits — cap Nipype workers to the allocated CPUs so multiple
+    # simultaneous jobs on a shared node don't starve each other.
+    nprocs = xcpd_config.get("nprocs")
+    if nprocs:
+        command.extend(["--nprocs", str(nprocs)])
+    omp_nthreads = xcpd_config.get("omp_nthreads")
+    if omp_nthreads:
+        command.extend(["--omp-nthreads", str(omp_nthreads)])
+
     command.extend(atlas_cli_dataset_args(config, selected_atlases, str(dataset_root) if dataset_root else None))
     if selected_atlases:
         command.extend(["--atlases", *[str(atlas) for atlas in selected_atlases]])
@@ -652,6 +661,15 @@ def build_remote_xcpd_command(
 
     if fs_license:
         command.extend(["--fs-license-file", fs_license])
+
+    # Concurrency limits — cap Nipype workers to the allocated CPUs so multiple
+    # simultaneous jobs on a shared node don't starve each other.
+    nprocs = xcpd_config.get("nprocs")
+    if nprocs:
+        command.extend(["--nprocs", str(nprocs)])
+    omp_nthreads = xcpd_config.get("omp_nthreads")
+    if omp_nthreads:
+        command.extend(["--omp-nthreads", str(omp_nthreads)])
 
     command.extend(atlas_cli_dataset_args(config, selected_atlases, remote_dataset_root))
     if selected_atlases:

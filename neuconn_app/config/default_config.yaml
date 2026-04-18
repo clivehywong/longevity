@@ -153,6 +153,8 @@ xcpd:
     bandpass_filter: true
     head_radius: "auto"
     min_coverage: 0.5
+    nprocs: 8        # Nipype parallel workers — match SLURM cpus-per-task
+    omp_nthreads: 1  # OMP threads per worker
   # FC-GSR: same as FC but with global signal regression (36P) for comparison
   fc_gsr:
     mode: "linc"
@@ -177,6 +179,8 @@ xcpd:
     bandpass_filter: true
     head_radius: "auto"
     min_coverage: 0.5
+    nprocs: 8
+    omp_nthreads: 1
   # EC: effective connectivity (no GSR, no smoothing, longer min_time)
   ec:
     mode: "linc"
@@ -201,6 +205,8 @@ xcpd:
     bandpass_filter: true
     head_radius: "auto"
     min_coverage: 0.5
+    nprocs: 8
+    omp_nthreads: 1
 
 subject_exclusion:
   mean_fd_threshold: 0.5
