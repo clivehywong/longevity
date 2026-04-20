@@ -693,6 +693,15 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
             with yes_col:
                 if st.button("✅ Yes, delete", key="confirm_remove_xcpd_yes", type="primary"):
                     import shutil
+                    # HPC cleanup first (needs run_info still in state)
+                    hpc_errors = []
+                    if also_hpc:
+                        for pname in ("fc", "fc_gsr", "ec"):
+                            try:
+                                cleanup_xcpd_hpc_files(config, pname)
+                            except Exception as hpc_err:
+                                hpc_errors.append(f"{pname}: {hpc_err}")
+                    # Remove local dirs
                     paths = config.get("paths", {})
                     removed_dirs = []
                     for dir_key in ("xcpd_fc_dir", "xcpd_fc_gsr_dir", "xcpd_ec_dir"):
@@ -708,14 +717,6 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                     for run_key in ("xcpd_fc", "xcpd_fc_gsr", "xcpd_ec"):
                         runs.pop(run_key, None)
                     save_pipeline_state(config, state)
-                    # HPC cleanup
-                    hpc_errors = []
-                    if also_hpc:
-                        for pname in ("fc", "fc_gsr", "ec"):
-                            try:
-                                cleanup_xcpd_hpc_files(config, pname)
-                            except Exception as hpc_err:
-                                hpc_errors.append(f"{pname}: {hpc_err}")
                     st.session_state[confirm_key] = False
                     msg = f"Removed local XCP-D outputs: {', '.join(removed_dirs) or 'none found'}. Pipeline state reset."
                     if also_hpc and not hpc_errors:
