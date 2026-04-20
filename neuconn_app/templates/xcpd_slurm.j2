@@ -13,7 +13,7 @@
 # Pipeline: {{ pipeline }}
 # Subjects ({{ participants | length }}): {{ participants | join(', ') }}
 
-set -euo pipefail
+set -uo pipefail
 
 # Initialize module system if available
 if [ -f /etc/profile.d/modules.sh ]; then
@@ -53,6 +53,9 @@ if [ -z "$SUBID" ]; then
     exit 1
 fi
 
+# Per-subject work directory to avoid nipype contention between array tasks
+WORK_DIR="{{ work_dir }}/sub-${SUBID}"
+
 echo "======================================"
 echo "XCP-D {{ pipeline | upper }} pipeline"
 echo "Subject: ${SUBID}"
@@ -60,10 +63,11 @@ echo "Array task: ${SLURM_ARRAY_TASK_ID} / {{ num_subjects }}"
 echo "Job ID: ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "Node: $(hostname)"
 echo "Start time: $(date)"
+echo "Work dir: ${WORK_DIR}"
 echo "======================================"
 
-# Create output directories
-mkdir -p {{ remote_output }} {{ remote_work }} {{ work_dir }} {{ remote_base }}/logs
+# Create output and work directories
+mkdir -p {{ remote_output }} "${WORK_DIR}" {{ remote_base }}/logs
 
 # Run XCP-D via Singularity for this subject
 singularity run \
@@ -74,6 +78,7 @@ singularity run \
 {%- for arg_line in xcpd_arg_lines %}
   {{ arg_line }} \
 {%- endfor %}
+  -w "${WORK_DIR}" \
   --participant-label "${SUBID}"
 
 EXIT_CODE=$?

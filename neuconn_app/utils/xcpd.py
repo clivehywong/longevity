@@ -577,6 +577,7 @@ def build_remote_xcpd_command(
     remote_dataset_root: Optional[str] = None,
     remote_fmriprep_dir: Optional[str] = None,
     work_dir: Optional[str] = None,
+    omit_work_dir: bool = False,
 ) -> List[str]:
     """Build the remote Singularity command for an XCP-D run."""
     hpc_cfg = HPCConfig.from_config(config)
@@ -641,10 +642,11 @@ def build_remote_xcpd_command(
             str(xcpd_config.get("report_output_level", "session")),
             "--output-run-wise-correlations",
             _bool_flag(xcpd_config.get("output_run_wise_correlations", True)),
-            "-w",
-            resolved_work_dir,
         ]
     )
+
+    if not omit_work_dir:
+        command.extend(["-w", resolved_work_dir])
 
     if xcpd_config.get("despike", True):
         command.append("--despike")
@@ -721,8 +723,8 @@ def generate_xcpd_slurm_script(
     else:
         remote_output = hpc_cfg.remote_xcpd_ec
 
-    # Build xcpd_args WITHOUT --participant-label — the template injects the
-    # per-array-task subject from the sublist file at runtime.
+    # Build xcpd_args WITHOUT --participant-label or -w — the template injects
+    # per-array-task subject and per-subject work directory at runtime.
     full_command = build_remote_xcpd_command(
         config,
         pipeline_name,
@@ -731,6 +733,7 @@ def generate_xcpd_slurm_script(
         remote_dataset_root=remote_dataset_root,
         remote_fmriprep_dir=remote_fmriprep_dir,
         work_dir=work_dir,
+        omit_work_dir=True,        # template adds per-subject -w at runtime
     )
     image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
     try:
