@@ -606,7 +606,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                 "Label": spec.label,
                 "Description": spec.description,
             })
-        st.dataframe(atlas_table_rows, use_container_width=True, hide_index=True)
+        st.dataframe(atlas_table_rows, width="stretch", hide_index=True)
 
     atlas_rows = build_xcpd_atlas_status_rows(config, all_selected_atlases)
     if atlas_rows:
