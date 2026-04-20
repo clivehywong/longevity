@@ -43,6 +43,7 @@ from utils.xcpd import (
 )
 from utils.xcpd_atlases import (
     atlas_option_ids,
+    all_builtin_atlas_ids,
     build_xcpd_atlas_status_rows,
     format_xcpd_atlas_label,
     missing_xcpd_atlas_resources,
@@ -547,6 +548,10 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
     atlas_options = atlas_option_ids(config, list(fc_defaults) + list(fc_gsr_defaults) + list(ec_defaults))
 
     st.markdown("### Atlas Selection")
+    st.caption(
+        "📦 = XCP-D built-in atlas (no local files needed) · "
+        "🔧 = Project-local custom atlas (requires atlas files on disk)"
+    )
     atlas_col1, atlas_col2, atlas_col3 = st.columns(3)
     with atlas_col1:
         selected_fc_atlases = st.multiselect(
@@ -555,7 +560,11 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
             default=[a for a in fc_defaults if a in atlas_options],
             format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
             key="xcpd_fc_run_atlases",
-            help="Atlases for the FC (no-GSR) pipeline.",
+            help=(
+                "Atlases for the FC (no-GSR) pipeline. "
+                "Built-in 4S atlases combine Schaefer cortical + subcortical parcels. "
+                "E.g. 4S256Parcels = Schaefer 200 cortical + 56 subcortical."
+            ),
         )
     with atlas_col2:
         selected_fc_gsr_atlases = st.multiselect(
@@ -564,7 +573,10 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
             default=[a for a in fc_gsr_defaults if a in atlas_options],
             format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
             key="xcpd_fc_gsr_run_atlases",
-            help="Atlases for the FC + GSR comparison pipeline.",
+            help=(
+                "Atlases for the FC + GSR comparison pipeline. "
+                "Typically the same set as FC for direct comparison."
+            ),
         )
     with atlas_col3:
         selected_ec_atlases = st.multiselect(
@@ -573,10 +585,28 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
             default=[a for a in ec_defaults if a in atlas_options],
             format_func=lambda atlas_id: format_xcpd_atlas_label(config, atlas_id),
             key="xcpd_ec_run_atlases",
-            help="Atlases for the effective connectivity pipeline.",
+            help=(
+                "Atlases for the effective connectivity pipeline. "
+                "Typically the same set as FC."
+            ),
         )
 
     all_selected_atlases = list(selected_fc_atlases) + list(selected_fc_gsr_atlases) + list(selected_ec_atlases)
+
+    # Atlas reference table
+    from utils.xcpd_atlases import get_xcpd_atlas_catalog
+    full_catalog = get_xcpd_atlas_catalog(config)
+    with st.expander("ℹ️ Atlas reference", expanded=False):
+        atlas_table_rows = []
+        for aid, spec in full_catalog.items():
+            atlas_table_rows.append({
+                "Type": "📦 Built-in" if spec.source_type == "builtin" else "🔧 Custom",
+                "ID": aid,
+                "Label": spec.label,
+                "Description": spec.description,
+            })
+        st.dataframe(atlas_table_rows, use_container_width=True, hide_index=True)
+
     atlas_rows = build_xcpd_atlas_status_rows(config, all_selected_atlases)
     if atlas_rows:
         with st.expander("Atlas availability", expanded=False):
@@ -635,6 +665,50 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                     st.rerun()
                 except Exception as chain_err:
                     st.error(f"Chain submission failed: {chain_err}")
+
+    # --- Remove all preprocessed XCP-D outputs ---
+    st.markdown("---")
+    remove_col1, remove_col2 = st.columns([3, 1])
+    with remove_col1:
+        st.caption(
+            "⚠️ Remove **all** local XCP-D preprocessed outputs (FC, FC+GSR, EC). "
+            "This does NOT delete HPC files. Pipeline state will be reset."
+        )
+    with remove_col2:
+        confirm_key = "confirm_remove_xcpd_outputs"
+        st.session_state.setdefault(confirm_key, False)
+        if not st.session_state[confirm_key]:
+            if st.button("🗑️ Remove all XCP-D outputs", key="remove_xcpd_btn", type="secondary"):
+                st.session_state[confirm_key] = True
+                st.rerun()
+        else:
+            st.warning("Are you sure? This will delete all local XCP-D outputs.")
+            yes_col, no_col = st.columns(2)
+            with yes_col:
+                if st.button("✅ Yes, delete", key="confirm_remove_xcpd_yes", type="primary"):
+                    import shutil
+                    paths = config.get("paths", {})
+                    removed_dirs = []
+                    for dir_key in ("xcpd_fc_dir", "xcpd_fc_gsr_dir", "xcpd_ec_dir"):
+                        d = paths.get(dir_key, "")
+                        if d and os.path.isdir(d):
+                            shutil.rmtree(d)
+                            removed_dirs.append(dir_key)
+                    # Reset pipeline state
+                    for step_key in ("xcpd_fc", "xcpd_fc_gsr", "xcpd_ec", "post_xcpd_qc", "qc_gate"):
+                        state = set_step_status(config, step_key, "not_started", "", state=state)
+                    # Clear run info
+                    runs = state.get("runs", {})
+                    for run_key in ("xcpd_fc", "xcpd_fc_gsr", "xcpd_ec"):
+                        runs.pop(run_key, None)
+                    save_pipeline_state(config, state)
+                    st.session_state[confirm_key] = False
+                    st.success(f"Removed XCP-D outputs: {', '.join(removed_dirs) or 'none found'}. Pipeline state reset.")
+                    st.rerun()
+            with no_col:
+                if st.button("❌ Cancel", key="confirm_remove_xcpd_no"):
+                    st.session_state[confirm_key] = False
+                    st.rerun()
 
     col1, col2, col3 = st.columns(3)
     with col1:

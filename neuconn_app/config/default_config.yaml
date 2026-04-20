@@ -142,7 +142,7 @@ xcpd:
     high_pass: 0.01
     low_pass: 0.08
     smoothing: 6.0
-    atlases: ["LongevitySchaefer200", "Tian"]
+    atlases: ["4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"]
     input_type: "fmriprep"
     file_format: "nifti"
     output_type: "censored"
@@ -168,7 +168,7 @@ xcpd:
     high_pass: 0.01
     low_pass: 0.08
     smoothing: 6.0
-    atlases: ["LongevitySchaefer200", "Tian"]
+    atlases: ["4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"]
     input_type: "fmriprep"
     file_format: "nifti"
     output_type: "censored"
@@ -194,7 +194,7 @@ xcpd:
     high_pass: 0.01
     low_pass: 0.10
     smoothing: 0.0
-    atlases: ["LongevitySchaefer200", "Tian"]
+    atlases: ["4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"]
     input_type: "fmriprep"
     file_format: "nifti"
     output_type: "censored"

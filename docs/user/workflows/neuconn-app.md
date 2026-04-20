@@ -89,6 +89,23 @@ Before using **fMRI Analysis → XCP-D Pipeline**, you need:
 
 > **Atlas space**: all project atlases (Schaefer 200/400 + Tian subcortex) use **MNI152NLin6Asym** (identical to FSL's `MNI152_T1_2mm`). Files are at `atlases/tian/Schaefer2018_*_Tian_Subcortex_S2_MNI152NLin6Asym_2mm.nii.gz`.
 
+#### XCP-D built-in atlases
+
+XCP-D v26+ ships **16 built-in atlases** that require no external downloads. These are pre-selected by default:
+
+| Atlas | Parcels | Description |
+|---|---|---|
+| **4S156Parcels** – **4S1056Parcels** (10 atlases) | 156–1056 | Schaefer cortical + 56 subcortical (CIT168, thalamic, amygdala-hippocampus, cerebellar) |
+| **Glasser** | 360 | Multi-modal cortical parcellation from HCP |
+| **Gordon** | 333 | Laumann/Gordon cortical parcellation |
+| **HCP** | — | HCP subcortical atlas |
+| **Tian** | — | Melbourne Subcortex Atlas |
+| **MIDB**, **MyersLabonte** | — | Community-contributed parcellations |
+
+The recommended default set is **4S256Parcels, 4S456Parcels, Glasser, Gordon, Tian**. Custom project atlases (prefixed 🔧 in the UI) still require the `--datasets` flag and a local staging directory.
+
+Open the **Atlas reference** expander in the XCP-D Runs tab to see the full catalog with descriptions.
+
 For HPC runs, configure SSH host, **Port**, remote project root, and HPC Singularity image path in **Settings → HPC**.
 
 ### SSH tunnel shortcut
@@ -154,6 +171,14 @@ For each pipeline:
 3. Click **▶ Start … XCP-D**. A SLURM job ID (HPC) or PID (local) is shown.
 4. Monitor progress with **🔄 Refresh status**. The progress bar shows `~N/total subjects estimated` (derived from Nipype processing steps).
 5. After HPC completion, use **📥 Download XCP-D outputs from HPC** to rsync results locally; then use **🗑️ Clean up HPC files** to free remote disk space.
+
+#### Removing all XCP-D outputs
+
+At the bottom of the **XCP-D Runs** tab, click **🗑️ Remove all XCP-D outputs** to delete all local FC, FC+GSR, and EC output directories and reset pipeline state to `not_started`. This is useful when re-running with different atlases or parameters. A confirmation step prevents accidental deletion.
+
+#### SLURM script format
+
+Generated SLURM scripts use multiline formatting (one argument per line with `\` continuation) for readability. Use the **🔍 Preview script with current settings** expander to review before submitting, or **📂 Last submitted script (read-only)** to inspect a prior submission.
 
 #### Pipeline status values
 

@@ -735,9 +735,34 @@ def generate_xcpd_slurm_script(
     image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
     try:
         img_idx = full_command.index(image_path)
-        xcpd_args = " ".join(shlex.quote(p) for p in full_command[img_idx + 1:])
+        raw_args = full_command[img_idx + 1:]
     except ValueError:
-        xcpd_args = " ".join(shlex.quote(p) for p in full_command[2:])
+        raw_args = full_command[2:]
+
+    # Group args into logical pairs/singles for multiline rendering.
+    # Flags like --despike stand alone; flags with values stay paired.
+    xcpd_arg_lines: list[str] = []
+    i = 0
+    while i < len(raw_args):
+        token = raw_args[i]
+        if token.startswith("-"):
+            # Check if the next token is a value (not another flag)
+            if i + 1 < len(raw_args) and not raw_args[i + 1].startswith("-"):
+                # Collect all value tokens until the next flag
+                vals = []
+                j = i + 1
+                while j < len(raw_args) and not raw_args[j].startswith("-"):
+                    vals.append(shlex.quote(raw_args[j]))
+                    j += 1
+                xcpd_arg_lines.append(f"{shlex.quote(token)} {' '.join(vals)}")
+                i = j
+            else:
+                xcpd_arg_lines.append(shlex.quote(token))
+                i += 1
+        else:
+            # Positional arg (e.g. bids_dir, output_dir, analysis_level)
+            xcpd_arg_lines.append(shlex.quote(token))
+            i += 1
 
     bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
     fs_license = os.path.expanduser(hpc_cfg.freesurfer_license or "")
@@ -783,7 +808,7 @@ def generate_xcpd_slurm_script(
         singularity_image=image_path,
         fs_license=hpc_cfg.freesurfer_license,
         bind_mounts=bind_mounts,
-        xcpd_args=xcpd_args,
+        xcpd_arg_lines=xcpd_arg_lines,
         participants=participants,
         sublist_file=sublist_file,
     )

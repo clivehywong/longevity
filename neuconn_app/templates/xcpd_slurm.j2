@@ -71,7 +71,9 @@ singularity run \
   -B {{ mount }}:{{ mount }} \
 {%- endfor %}
   {{ singularity_image }} \
-  {{ xcpd_args }} \
+{%- for arg_line in xcpd_arg_lines %}
+  {{ arg_line }} \
+{%- endfor %}
   --participant-label "${SUBID}"
 
 EXIT_CODE=$?

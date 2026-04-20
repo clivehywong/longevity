@@ -1,5 +1,9 @@
 """
 Atlas catalog and dataset helpers for XCP-D runs.
+
+XCP-D v26+ ships 16 built-in atlases.  This module catalogues them all and
+also keeps the project-local custom atlases so users can still select them
+if needed.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ class XCPDAtlasSpec:
     atlas_id: str
     label: str
     description: str
-    source_type: str
+    source_type: str  # "builtin" or "custom"
     source_relpath: Optional[str] = None
     label_relpath: Optional[str] = None
     image_suffix: str = "dseg"
@@ -29,6 +33,7 @@ class XCPDAtlasSpec:
     resolution: str = "02"
 
 
+# Legacy aliases so old config values still resolve
 ATLAS_ALIASES = {
     "DiFuMo256": "LongevityDiFuMo256",
     "difumo256": "LongevityDiFuMo256",
@@ -39,20 +44,80 @@ ATLAS_ALIASES = {
     "Schaefer400_7net": "LongevitySchaefer400",
 }
 
+# ── XCP-D built-in atlas definitions ──────────────────────────────────────
+# Ordered by type: 4S (combined cortical+subcortical), cortical, subcortical.
+
+_4S_DESCRIPTION = (
+    "Combined Schaefer cortical + CIT168 subcortical + Diedrichsen cerebellar "
+    "+ HCP thalamic + amygdala/hippocampus parcels.  Shipped with XCP-D."
+)
+
+XCPD_BUILTIN_ATLASES: Dict[str, XCPDAtlasSpec] = {}
+for _n_parcels in (156, 256, 356, 456, 556, 656, 756, 856, 956, 1056):
+    _schaefer_n = _n_parcels - 56  # 56 subcortical parcels in every 4S variant
+    _id = f"4S{_n_parcels}Parcels"
+    XCPD_BUILTIN_ATLASES[_id] = XCPDAtlasSpec(
+        atlas_id=_id,
+        label=f"4S {_n_parcels} (Schaefer {_schaefer_n} + subcortical)",
+        description=f"Schaefer {_schaefer_n} cortical parcels (7-network) + 56 subcortical. {_4S_DESCRIPTION}",
+        source_type="builtin",
+    )
+
+XCPD_BUILTIN_ATLASES.update({
+    "Glasser": XCPDAtlasSpec(
+        atlas_id="Glasser",
+        label="Glasser 360 (cortical)",
+        description="HCP Multi-Modal Parcellation (MMP1.0) — 360 cortical areas. Shipped with XCP-D.",
+        source_type="builtin",
+    ),
+    "Gordon": XCPDAtlasSpec(
+        atlas_id="Gordon",
+        label="Gordon 333 (cortical)",
+        description="Gordon 333 cortical parcellation based on resting-state boundary maps. Shipped with XCP-D.",
+        source_type="builtin",
+    ),
+    "HCP": XCPDAtlasSpec(
+        atlas_id="HCP",
+        label="HCP (subcortical)",
+        description="CIFTI subcortical parcellation from the HCP. Shipped with XCP-D.",
+        source_type="builtin",
+    ),
+    "MIDB": XCPDAtlasSpec(
+        atlas_id="MIDB",
+        label="MIDB",
+        description="MIDB precision functional atlas. Shipped with XCP-D.",
+        source_type="builtin",
+    ),
+    "MyersLabonte": XCPDAtlasSpec(
+        atlas_id="MyersLabonte",
+        label="Myers-Labonté",
+        description="Myers-Labonté infant parcellation. Shipped with XCP-D.",
+        source_type="builtin",
+    ),
+    "Tian": XCPDAtlasSpec(
+        atlas_id="Tian",
+        label="Tian (subcortical)",
+        description="Tian subcortical atlas. Shipped with XCP-D.",
+        source_type="builtin",
+    ),
+})
+
 
 def recommended_xcpd_atlases() -> List[str]:
-    return ["LongevitySchaefer200", "Tian"]
+    """Practical default subset of built-in atlases for NeuConn runs."""
+    return ["4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"]
+
+
+def all_builtin_atlas_ids() -> List[str]:
+    """All 16 XCP-D built-in atlas IDs (XCP-D's own default)."""
+    return list(XCPD_BUILTIN_ATLASES.keys())
 
 
 def get_xcpd_atlas_catalog(config: Dict) -> Dict[str, XCPDAtlasSpec]:
-    atlases_dir = Path(config["paths"]["atlases_dir"])
-    return {
-        "Tian": XCPDAtlasSpec(
-            atlas_id="Tian",
-            label="Tian (XCP-D built-in)",
-            description="Built-in Tian subcortical atlas distributed with XCP-D.",
-            source_type="builtin",
-        ),
+    """Return the full atlas catalog: built-in + project-local custom atlases."""
+    catalog: Dict[str, XCPDAtlasSpec] = {}
+    catalog.update(XCPD_BUILTIN_ATLASES)
+    catalog.update({
         "LongevityDiFuMo256": XCPDAtlasSpec(
             atlas_id="LongevityDiFuMo256",
             label="DiFuMo 256 (project atlas)",
@@ -65,7 +130,7 @@ def get_xcpd_atlas_catalog(config: Dict) -> Dict[str, XCPDAtlasSpec]:
         "LongevitySchaefer200": XCPDAtlasSpec(
             atlas_id="LongevitySchaefer200",
             label="Schaefer 200 / 7 networks (project atlas)",
-            description="Project-local Schaefer 200 parcel atlas from atlases/schaefer200_7net.nii.",
+            description="Project-local Schaefer 200 parcel atlas. Consider using built-in 4S256Parcels instead.",
             source_type="custom",
             source_relpath="schaefer200_7net.nii",
             label_relpath="schaefer200_7net.txt",
@@ -73,15 +138,15 @@ def get_xcpd_atlas_catalog(config: Dict) -> Dict[str, XCPDAtlasSpec]:
         "LongevitySchaefer400": XCPDAtlasSpec(
             atlas_id="LongevitySchaefer400",
             label="Schaefer 400 / 7 networks (project atlas)",
-            description="Project-local Schaefer 400 parcel atlas from atlases/schaefer400_7net.nii.",
+            description="Project-local Schaefer 400 parcel atlas. Consider using built-in 4S456Parcels instead.",
             source_type="custom",
             source_relpath="schaefer400_7net.nii",
             label_relpath="schaefer400_7net.txt",
         ),
         "LongevitySchaeferTian200S2": XCPDAtlasSpec(
             atlas_id="LongevitySchaeferTian200S2",
-            label="Schaefer-Tian S2 200 / 7 networks (project atlas)",
-            description="Combined Schaefer-Tian S2 atlas in MNI152NLin6Asym (FSL MNI152) space.",
+            label="Schaefer-Tian S2 200 (project atlas)",
+            description="Combined Schaefer-Tian S2 in MNI152NLin6Asym. Consider using built-in 4S256Parcels instead.",
             source_type="custom",
             source_relpath="tian/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_MNI152NLin6Asym_2mm.nii.gz",
             label_relpath="tian/Schaefer2018_200Parcels_7Networks_order_Tian_Subcortex_S2_label.txt",
@@ -89,14 +154,15 @@ def get_xcpd_atlas_catalog(config: Dict) -> Dict[str, XCPDAtlasSpec]:
         ),
         "LongevitySchaeferTian400S2": XCPDAtlasSpec(
             atlas_id="LongevitySchaeferTian400S2",
-            label="Schaefer-Tian S2 400 / 7 networks (project atlas)",
-            description="Combined Schaefer-Tian S2 atlas in MNI152NLin6Asym (FSL MNI152) space.",
+            label="Schaefer-Tian S2 400 (project atlas)",
+            description="Combined Schaefer-Tian S2 in MNI152NLin6Asym. Consider using built-in 4S456Parcels instead.",
             source_type="custom",
             source_relpath="tian/Schaefer2018_400Parcels_7Networks_order_Tian_Subcortex_S2_MNI152NLin6Asym_2mm.nii.gz",
             label_relpath="tian/Schaefer2018_400Parcels_7Networks_order_Tian_Subcortex_S2_label.txt",
             template="MNI152NLin6Asym",
         ),
-    }
+    })
+    return catalog
 
 
 def normalize_xcpd_atlas_selection(atlas_ids: Optional[Iterable[str]]) -> List[str]:
@@ -122,7 +188,10 @@ def atlas_option_ids(config: Dict, current_values: Optional[Iterable[str]] = Non
 
 def format_xcpd_atlas_label(config: Dict, atlas_id: str) -> str:
     spec = get_xcpd_atlas_catalog(config).get(atlas_id)
-    return spec.label if spec else atlas_id
+    if not spec:
+        return atlas_id
+    tag = "🔧" if spec.source_type == "custom" else "📦"
+    return f"{tag} {spec.label}"
 
 
 def missing_xcpd_atlas_resources(config: Dict, atlas_ids: Optional[Iterable[str]]) -> List[Path]:

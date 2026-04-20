@@ -148,13 +148,32 @@ hpc:
 ### XCP-D (single job)
 `utils/xcpd.py` `generate_xcpd_slurm_script()` renders `templates/xcpd_slurm.j2` into a **single** SLURM job (XCP-D processes all subjects in one `singularity run` invocation). Submission flow:
 
-1. `generate_xcpd_slurm_script()` — Jinja2 renders template with bind mounts and xcpd_args; CPUs = `nprocs × omp_nthreads`
+1. `generate_xcpd_slurm_script()` — Jinja2 renders template with bind mounts and `xcpd_arg_lines` (list of multiline args); CPUs = `nprocs × omp_nthreads`
 2. Script is saved locally to `pipeline_runs_dir/xcpd_{pipeline}/run_TIMESTAMP/xcpd_{pipeline}_job.sh`
 3. Script is uploaded to the HPC via `HPCConnection.write_file()`
 4. `sbatch xcpd_{pipeline}_job.sh` is executed over SSH; all three pipelines may be chained with `--dependency=afterok`
 5. The returned SLURM job ID is stored in run_info as `job_id`; initial status is **`queued`**
 6. `refresh_xcpd_run()` polls `squeue -j {job_id} -h -o '%T|%r'` and transitions: PENDING→`queued`, RUNNING→`running`, COMPLETED→`completed`, FAILED/DependencyNeverSatisfied→`failed`
 7. `stop_xcpd_run()` calls `scancel {job_id}` and cascades to downstream pipelines
+
+#### SLURM multiline rendering
+
+The generated SLURM script renders each XCP-D CLI flag on its own line with `\` continuation for readability. `generate_xcpd_slurm_script()` builds `xcpd_arg_lines: list[str]` by parsing flags and their values into logical pairs/groups. The Jinja2 template (`xcpd_slurm.j2`) iterates the list with a `\` continuation on each line.
+
+### Atlas catalog (`utils/xcpd_atlases.py`)
+
+XCP-D v26+ ships **16 built-in atlases** that require no `--datasets` flag. The catalog is defined in `XCPD_BUILTIN_ATLASES` (dict of `XCPDAtlasSpec` keyed by atlas ID). Custom project atlases are registered separately via `get_project_atlas_specs()`.
+
+Key functions:
+- `get_xcpd_atlas_catalog()` → dict of all 21 atlases (16 built-in + 5 custom)
+- `recommended_xcpd_atlases()` → `["4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"]`
+- `all_builtin_atlas_ids()` → sorted list of 16 built-in IDs
+- `format_xcpd_atlas_label(id)` → `"📦 4S256Parcels — ..."` (built-in) or `"🔧 LongevitySchaefer200 — ..."` (custom)
+- `atlas_cli_dataset_args()` → returns `--datasets longevity=/path` only when custom atlases are selected
+
+### Remove all XCP-D outputs
+
+The **🗑️ Remove all XCP-D outputs** button (bottom of XCP-D Runs tab) uses `shutil.rmtree()` on local FC, FC+GSR, and EC output directories and resets pipeline state for all five steps (`xcpd_fc`, `xcpd_fc_gsr`, `xcpd_ec`, `post_xcpd_qc`, `qc_gate`). It does **not** affect HPC files (use **🗑️ Clean up HPC files** for that).
 
 ### Per-subject status files
 
@@ -193,6 +212,7 @@ The "Software / Images" tab was separated from HPC Settings so local execution p
 | `utils/bids.py` | dataset scanning, parameter detection, exclusion support |
 | `utils/hpc.py` | SSH and SLURM workflow objects; `HPCConfig` dataclass (includes `port` field) |
 | `utils/xcpd.py` | XCP-D local and HPC execution; SLURM script generation; status file writing |
+| `utils/xcpd_atlases.py` | Atlas catalog (16 XCP-D built-in + custom project atlases); CLI arg builder |
 | `utils/xcpd_qc.py` | XCP-D QC rendering helpers; `get_xcpd_subject_status()` |
 | `utils/qc_database.py` | QC persistence helpers |
 | `utils/image_cache.py` | cached QC-image lifecycle |
