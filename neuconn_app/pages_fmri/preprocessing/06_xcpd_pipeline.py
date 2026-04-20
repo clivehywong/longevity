@@ -5,6 +5,7 @@ Gated XCP-D pipeline page for FD inspection, execution, and QC review.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Dict, List
@@ -671,8 +672,8 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
     remove_col1, remove_col2 = st.columns([3, 1])
     with remove_col1:
         st.caption(
-            "⚠️ Remove **all** local XCP-D preprocessed outputs (FC, FC+GSR, EC). "
-            "This does NOT delete HPC files. Pipeline state will be reset."
+            "⚠️ Remove **all** XCP-D preprocessed outputs (local and optionally HPC). "
+            "Pipeline state will be reset to `not_started`."
         )
     with remove_col2:
         confirm_key = "confirm_remove_xcpd_outputs"
@@ -683,6 +684,11 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                 st.rerun()
         else:
             st.warning("Are you sure? This will delete all local XCP-D outputs.")
+            also_hpc = st.checkbox(
+                "Also remove HPC files (work dirs, SLURM scripts, logs)",
+                value=False, key="remove_xcpd_also_hpc",
+                help="Connects to HPC and removes remote work directories and scripts for all 3 pipelines.",
+            )
             yes_col, no_col = st.columns(2)
             with yes_col:
                 if st.button("✅ Yes, delete", key="confirm_remove_xcpd_yes", type="primary"):
@@ -702,8 +708,21 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                     for run_key in ("xcpd_fc", "xcpd_fc_gsr", "xcpd_ec"):
                         runs.pop(run_key, None)
                     save_pipeline_state(config, state)
+                    # HPC cleanup
+                    hpc_errors = []
+                    if also_hpc:
+                        for pname in ("fc", "fc_gsr", "ec"):
+                            try:
+                                cleanup_xcpd_hpc_files(config, pname)
+                            except Exception as hpc_err:
+                                hpc_errors.append(f"{pname}: {hpc_err}")
                     st.session_state[confirm_key] = False
-                    st.success(f"Removed XCP-D outputs: {', '.join(removed_dirs) or 'none found'}. Pipeline state reset.")
+                    msg = f"Removed local XCP-D outputs: {', '.join(removed_dirs) or 'none found'}. Pipeline state reset."
+                    if also_hpc and not hpc_errors:
+                        msg += " HPC files removed."
+                    if hpc_errors:
+                        msg += f" HPC errors: {'; '.join(hpc_errors)}"
+                    st.success(msg)
                     st.rerun()
             with no_col:
                 if st.button("❌ Cancel", key="confirm_remove_xcpd_no"):
