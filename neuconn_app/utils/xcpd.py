@@ -1450,9 +1450,10 @@ def download_xcpd_outputs_from_hpc(
 
 
 def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
-    """Remove XCP-D work directory and SLURM script from HPC after a successful download.
+    """Remove XCP-D output, work directory, and SLURM script from HPC.
 
-    This is safe to call after ``download_xcpd_outputs_from_hpc`` has completed.
+    Cleans the remote output directory (``derivatives/preprocessing/xcpd/<pipeline>``),
+    work directory, SLURM scripts, and log files.
     Raises ``RuntimeError`` if the HPC connection fails.
     """
     from utils.pipeline_state import load_pipeline_state
@@ -1467,10 +1468,24 @@ def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
     remote_log_out = run_info.get("remote_log_out")
     remote_log_err = run_info.get("remote_log_err")
 
+    # Resolve the remote XCP-D output directory
+    if pipeline_name == "fc":
+        remote_output = hpc_cfg.remote_xcpd_fc
+    elif pipeline_name == "fc_gsr":
+        remote_output = hpc_cfg.remote_xcpd_fc_gsr
+    else:
+        remote_output = hpc_cfg.remote_xcpd_ec
+    if not remote_output:
+        remote_output = f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline_name}"
+
     conn = None
     try:
         conn = HPCConnection(hpc_cfg)
         conn.connect()
+        # Remove output directory
+        if remote_output:
+            conn.execute(f"rm -rf {shlex.quote(remote_output)}", timeout=120)
+        # Remove work directory
         if work_dir:
             conn.execute(f"rm -rf {shlex.quote(work_dir)}", timeout=120)
         for remote_file in (remote_script, remote_log_out, remote_log_err):
