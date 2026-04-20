@@ -694,8 +694,19 @@ def generate_xcpd_slurm_script(
     remote_dataset_root: Optional[str] = None,
     remote_fmriprep_dir: Optional[str] = None,
     work_dir: Optional[str] = None,
+    max_concurrent: Optional[int] = None,
+    partition: Optional[str] = None,
 ) -> str:
     """Render the XCP-D SLURM batch script using the xcpd_slurm.j2 template.
+
+    Uses a SLURM array job (``--array=1-N%max_concurrent``) so each subject
+    runs as an independent task.  The participant list is written to a separate
+    sublist file on the HPC before submission.
+
+    Args:
+        max_concurrent: Maximum simultaneous array tasks.  Defaults to
+            ``config['hpc']['slurm']['max_concurrent_jobs']`` (or 4).
+        partition: SLURM partition name.  Defaults to ``hpc_cfg.partition``.
 
     Returns the rendered script as a string.
     """
@@ -710,25 +721,22 @@ def generate_xcpd_slurm_script(
     else:
         remote_output = hpc_cfg.remote_xcpd_ec
 
-    # Build the full singularity command, then strip off the "singularity run -B … image"
-    # prefix to get just the XCP-D CLI arguments.
+    # Build xcpd_args WITHOUT --participant-label — the template injects the
+    # per-array-task subject from the sublist file at runtime.
     full_command = build_remote_xcpd_command(
         config,
         pipeline_name,
-        participant_labels=participant_labels,
+        participant_labels=None,   # omit here; array job picks subject from file
         session_ids=session_ids,
         remote_dataset_root=remote_dataset_root,
         remote_fmriprep_dir=remote_fmriprep_dir,
         work_dir=work_dir,
     )
-    # full_command = ["singularity", "run", "-B", "...", ..., image_path, fmriprep_dir, ...]
-    # Split at the image path to get post-image args; the template handles bind mounts separately.
     image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
     try:
         img_idx = full_command.index(image_path)
         xcpd_args = " ".join(shlex.quote(p) for p in full_command[img_idx + 1:])
     except ValueError:
-        # Fallback: use everything after the last bind-mount argument
         xcpd_args = " ".join(shlex.quote(p) for p in full_command[2:])
 
     bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
@@ -745,6 +753,15 @@ def generate_xcpd_slurm_script(
     memory = hpc_cfg.xcpd_memory if hpc_cfg.xcpd_memory else hpc_cfg.memory
     time_limit = hpc_cfg.xcpd_time_limit if hpc_cfg.xcpd_time_limit else hpc_cfg.time_limit
 
+    participants = list(_strip_bids_prefix(participant_labels, "sub-") or [])
+    num_subjects = len(participants) if participants else 1
+
+    slurm_cfg = config.get("hpc", {}).get("slurm", {})
+    _max_concurrent = max_concurrent if max_concurrent is not None else int(slurm_cfg.get("max_concurrent_jobs", 4))
+    _partition = partition if partition is not None else hpc_cfg.partition
+
+    sublist_file = f"{hpc_cfg.remote_base}/sublist_xcpd_{pipeline_name}.txt"
+
     templates_dir = Path(__file__).parent.parent / "templates"
     env = Environment(loader=FileSystemLoader(str(templates_dir)))
     template = env.get_template("xcpd_slurm.j2")
@@ -752,10 +769,12 @@ def generate_xcpd_slurm_script(
     return template.render(
         job_name=f"xcpd_{pipeline_name}",
         pipeline=pipeline_name,
-        partition=hpc_cfg.partition,
+        partition=_partition,
         cpus=cpus,
         memory=memory,
         time_limit=time_limit,
+        num_subjects=num_subjects,
+        max_concurrent=_max_concurrent,
         remote_base=hpc_cfg.remote_base,
         remote_output=remote_output,
         remote_fmriprep=remote_fmriprep_dir or hpc_cfg.remote_fmriprep,
@@ -765,7 +784,8 @@ def generate_xcpd_slurm_script(
         fs_license=hpc_cfg.freesurfer_license,
         bind_mounts=bind_mounts,
         xcpd_args=xcpd_args,
-        participants=list(_strip_bids_prefix(participant_labels, "sub-") or []),
+        participants=participants,
+        sublist_file=sublist_file,
     )
 
 
@@ -858,12 +878,16 @@ def start_remote_xcpd_run(
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
     dep_job_id: Optional[str] = None,
+    max_concurrent: Optional[int] = None,
+    partition: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Submit an XCP-D SLURM job on the configured HPC host.
+    """Submit an XCP-D SLURM array job on the configured HPC host.
 
     Args:
         dep_job_id: If provided, submits with ``--dependency=afterok:{dep_job_id}``
             so this job only starts after that predecessor succeeds.
+        max_concurrent: Maximum simultaneous array tasks (``--array=1-N%K``).
+        partition: SLURM partition to target.
     """
     artifacts = _run_artifact_paths(config, pipeline_name)
     hpc_cfg = HPCConfig.from_config(config)
@@ -886,6 +910,8 @@ def start_remote_xcpd_run(
         remote_dataset_root=remote_dataset_root,
         remote_fmriprep_dir=str(preflight["fmriprep_dir"]),
         work_dir=str(preflight["work_dir"]),
+        max_concurrent=max_concurrent,
+        partition=partition,
     )
 
     # Save script locally for inspection
@@ -893,16 +919,19 @@ def start_remote_xcpd_run(
     with open(local_script, "w") as f:
         f.write(script_content)
 
-    # Upload script to HPC and submit
+    # Upload sublist + script to HPC and submit
     remote_script = f"{hpc_cfg.remote_base}/xcpd_{pipeline_name}_job.sh"
+    sublist_file = f"{hpc_cfg.remote_base}/sublist_xcpd_{pipeline_name}.txt"
+    participants = list(_strip_bids_prefix(participant_labels, "sub-") or [])
+    sublist_content = "\n".join(participants)
 
     conn = None
     try:
         conn = HPCConnection(hpc_cfg)
         conn.connect()
+        conn.execute(f"mkdir -p {shlex.quote(f'{hpc_cfg.remote_base}/logs')}", timeout=30)
+        conn.write_file(sublist_content, sublist_file)
         conn.write_file(script_content, remote_script)
-        mkdir_cmd = f"mkdir -p {shlex.quote(f'{hpc_cfg.remote_base}/logs')}"
-        conn.execute(mkdir_cmd, timeout=30)
         sbatch_cmd = (
             f"sbatch --dependency=afterok:{dep_job_id} {shlex.quote(remote_script)}"
             if dep_job_id
@@ -952,6 +981,8 @@ def start_xcpd_chain(
     session_ids: Optional[Iterable[str]] = None,
     nprocs: Optional[int] = None,
     omp_nthreads: Optional[int] = None,
+    max_concurrent: Optional[int] = None,
+    partition: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Submit FC → FC+GSR → EC as a SLURM dependency chain.
 
@@ -976,6 +1007,8 @@ def start_xcpd_chain(
             participant_labels=participant_labels,
             session_ids=session_ids,
             dep_job_id=prev_job_id,
+            max_concurrent=max_concurrent,
+            partition=partition,
         )
         results[pipeline] = run_info
         prev_job_id = run_info["job_id"]

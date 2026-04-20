@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from utils.config import save_config
 from utils.fd_inspection import build_fd_summary, generate_fd_plots, highlight_fd_rows
+from utils.hpc import HPCConfig, HPCConnection
 from utils.pipeline_state import (
     STEP_ORDER,
     append_pipeline_log,
@@ -434,7 +435,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
     hpc_cfg_dict = config.get("hpc", {}).get("slurm", {})
     xcpd_max_cpus = int(hpc_cfg_dict.get("xcpd_max_cpus", 15))
     with st.expander("⚙️ SLURM Resources", expanded=False):
-        st.caption("Controls the parallelism of the XCP-D workflow. Applies to all three pipelines.")
+        st.caption("Controls the parallelism and scheduling of the XCP-D workflow. Applies to all three pipelines.")
         res_col1, res_col2 = st.columns(2)
         with res_col1:
             nprocs = st.slider(
@@ -464,6 +465,63 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                 f"⚠️ {total_cpus} CPUs exceeds the recommended maximum of {xcpd_max_cpus}. "
                 "Check your cluster QOS limits before submitting."
             )
+
+        st.divider()
+
+        max_concurrent = st.slider(
+            "Max concurrent jobs",
+            min_value=1,
+            max_value=16,
+            value=int(hpc_cfg_dict.get("max_concurrent_jobs", 4)),
+            key="xcpd_max_concurrent",
+            help=(
+                "Maximum number of SLURM array tasks running simultaneously "
+                "(generates #SBATCH --array=1-N%K). "
+                "Reduce this if the cluster has tight QOS limits."
+            ),
+        )
+
+        st.markdown("**Partition**")
+        _available_parts = st.session_state.get("xcpd_available_partitions", [])
+        _config_partition = config.get("hpc", {}).get("slurm", {}).get("partition", "shared_cpu")
+        part_col, btn_col = st.columns([3, 1])
+        with btn_col:
+            if st.button("Fetch", key="xcpd_fetch_partitions", help="Query HPC via SSH to get available partitions"):
+                try:
+                    with st.spinner("Connecting to HPC…"):
+                        _hpc_cfg_obj = HPCConfig.from_config(config)
+                        _conn = HPCConnection(_hpc_cfg_obj)
+                        _conn.connect()
+                        _stdout, _stderr, _code = _conn.execute(
+                            "sinfo -h -o '%P %a %D %C' | tr -d '*'", timeout=20
+                        )
+                        _conn.disconnect()
+                    if _code == 0 and _stdout.strip():
+                        _parsed = [ln.split()[0] for ln in _stdout.strip().splitlines() if ln.strip()]
+                        st.session_state["xcpd_available_partitions"] = _parsed
+                        _available_parts = _parsed
+                        st.success(f"Found {len(_parsed)} partitions")
+                    else:
+                        st.error(f"sinfo failed: {_stderr.strip() or 'unknown error'}")
+                except Exception as _e:
+                    st.error(f"Could not fetch partitions: {_e}")
+        with part_col:
+            if _available_parts:
+                _opts = _available_parts if _config_partition in _available_parts else [_config_partition] + _available_parts
+                partition = st.selectbox(
+                    "Partition",
+                    options=_opts,
+                    index=_opts.index(_config_partition) if _config_partition in _opts else 0,
+                    key="xcpd_partition",
+                    help="SLURM partition name for the XCP-D array jobs.",
+                )
+            else:
+                partition = st.selectbox(
+                    "Partition",
+                    options=[_config_partition],
+                    key="xcpd_partition",
+                    help="SLURM partition name. Click 'Fetch' to load available partitions from HPC.",
+                )
 
     if run_on_hpc:
         with st.expander("📤 Upload fMRIPrep to HPC", expanded=False):
@@ -564,6 +622,8 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                             session_ids=sessions or None,
                             nprocs=nprocs,
                             omp_nthreads=omp_nthreads,
+                            max_concurrent=max_concurrent,
+                            partition=partition,
                         )
                     job_ids = {p: info["job_id"] for p, info in chain_result.items()}
                     st.success(
@@ -583,6 +643,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
             fc_info, run_on_hpc, selected_subjects, sessions,
             extra_note="aCompCor nuisance regression without global signal removal. Primary FC pipeline.",
             nprocs=nprocs, omp_nthreads=omp_nthreads,
+            max_concurrent=max_concurrent, partition=partition,
         )
     with col2:
         _render_pipeline_panel(
@@ -590,6 +651,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
             fc_gsr_info, run_on_hpc, selected_subjects, sessions,
             extra_note="36P regressors including global signal regression. Run alongside FC to compare.",
             nprocs=nprocs, omp_nthreads=omp_nthreads,
+            max_concurrent=max_concurrent, partition=partition,
         )
     with col3:
         _render_pipeline_panel(
@@ -597,6 +659,7 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
             ec_info, run_on_hpc, selected_subjects, sessions,
             extra_note="Censored timeseries; no smoothing; wider bandpass (0.008–0.09 Hz). For effective connectivity estimation.",
             nprocs=nprocs, omp_nthreads=omp_nthreads,
+            max_concurrent=max_concurrent, partition=partition,
         )
 
     # --- Per-subject completion status ---
@@ -642,6 +705,8 @@ def _render_pipeline_panel(
     extra_note: str = "",
     nprocs: int = 8,
     omp_nthreads: int = 1,
+    max_concurrent: int = 4,
+    partition: str = "shared_cpu",
 ) -> None:
     """Render the run/status panel for a single XCP-D pipeline."""
     step_key = f"xcpd_{pipeline_name}"
@@ -709,7 +774,11 @@ def _render_pipeline_panel(
                     config["xcpd"][pipeline_name]["omp_nthreads"] = omp_nthreads
                     save_runtime_config(config)
                     if run_on_hpc:
-                        info = start_remote_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
+                        info = start_remote_xcpd_run(
+                            config, pipeline_name,
+                            selected_subjects or None, sessions or None,
+                            max_concurrent=max_concurrent, partition=partition,
+                        )
                     else:
                         info = start_xcpd_run(config, pipeline_name, selected_subjects or None, sessions or None)
                     # Invalidate QC gate when re-running a completed pipeline
