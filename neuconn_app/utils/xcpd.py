@@ -971,8 +971,12 @@ def start_remote_xcpd_run(
 
     # sbatch stdout: "Submitted batch job 12345"
     job_id = stdout.strip().split()[-1]
-    remote_log_out = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_{job_id}.out"
-    remote_log_err = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_{job_id}.err"
+    # Array jobs use %A_%a in the SLURM template, producing files like
+    # xcpd_fc_4131_1.out.  Store the prefix so fetch/cleanup helpers can
+    # enumerate all per-task log files via glob.
+    remote_log_prefix = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_{job_id}"
+    remote_log_out = f"{remote_log_prefix}.out"
+    remote_log_err = f"{remote_log_prefix}.err"
 
     run_info = {
         "pipeline": pipeline_name,
@@ -982,6 +986,7 @@ def start_remote_xcpd_run(
         "remote_script": remote_script,
         "remote_log_out": remote_log_out,
         "remote_log_err": remote_log_err,
+        "remote_log_prefix": remote_log_prefix,
         "submitted_at": datetime.now().isoformat(),
         "participant_labels": list(participant_labels or []),
         "session_ids": list(session_ids or []),
@@ -1066,25 +1071,56 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
             hpc_cfg = HPCConfig.from_config(config)
             conn = HPCConnection(hpc_cfg)
             conn.connect()
-            # Query both state and reason so we can distinguish pending types
+            # Query both state and reason so we can distinguish pending types.
+            # For array jobs squeue returns one line per active task; take the
+            # highest-priority state: RUNNING > PENDING > others.
             stdout, _, _ = conn.execute(
                 f"squeue -j {shlex.quote(str(job_id))} -h -o '%T|%r' 2>/dev/null",
                 timeout=30,
             )
             raw = stdout.strip()
-            if "|" in raw:
-                slurm_state, slurm_reason = raw.upper().split("|", 1)
-            else:
-                slurm_state = raw.upper()
-                slurm_reason = ""
+            slurm_state = ""
+            slurm_reason = ""
+            if raw:
+                # Collect all states from array tasks
+                task_states: List[str] = []
+                task_reasons: List[str] = []
+                for task_line in raw.splitlines():
+                    task_line = task_line.strip()
+                    if not task_line:
+                        continue
+                    if "|" in task_line:
+                        st, rs = task_line.upper().split("|", 1)
+                    else:
+                        st, rs = task_line.upper(), ""
+                    task_states.append(st)
+                    task_reasons.append(rs)
+                # Prefer RUNNING > COMPLETING > PENDING > anything else
+                for pref in ("RUNNING", "COMPLETING", "PENDING"):
+                    if pref in task_states:
+                        idx = task_states.index(pref)
+                        slurm_state = pref
+                        slurm_reason = task_reasons[idx]
+                        break
+                if not slurm_state and task_states:
+                    slurm_state = task_states[0]
+                    slurm_reason = task_reasons[0]
 
             if not slurm_state:
-                # Job has left the queue; query sacct for final state
+                # Job has left the queue; query sacct for final state.
+                # For array jobs, check all task states and report the
+                # worst outcome (FAILED > CANCELLED > TIMEOUT > COMPLETED).
                 stdout, _, _ = conn.execute(
-                    f"sacct -j {shlex.quote(str(job_id))} -n -o State 2>/dev/null | head -1",
+                    f"sacct -j {shlex.quote(str(job_id))} -n -o State --parsable2 2>/dev/null",
                     timeout=30,
                 )
-                slurm_state = stdout.strip().upper()
+                sacct_states = [s.strip().upper() for s in stdout.strip().splitlines() if s.strip()]
+                failure_states = {"FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"}
+                failed = [s for s in sacct_states if s in failure_states]
+                if failed:
+                    slurm_state = failed[0]
+                elif sacct_states:
+                    slurm_state = sacct_states[0]
                 slurm_reason = ""
 
             if slurm_state == "PENDING":
@@ -1150,7 +1186,8 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
 
     # Process is gone — determine success vs failure from log markers
     log_file = run_info.get("log_file")
-    progress = parse_xcpd_progress(Path(log_file) if log_file else None)
+    n_tasks = len(run_info.get("participant_labels") or []) or None
+    progress = parse_xcpd_progress(Path(log_file) if log_file else None, n_expected_tasks=n_tasks)
     if progress["has_error"] and not progress["is_done"]:
         run_info["status"] = "failed"
         run_info["completed_at"] = datetime.now().isoformat()
@@ -1312,8 +1349,25 @@ def collect_qc_reports(output_dir: Path) -> Dict[str, List[Path]]:
     }
 
 
-def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = None) -> Dict[str, Any]:
+def parse_xcpd_progress(
+    log_file: Optional[Path],
+    stored_total: Optional[int] = None,
+    n_expected_tasks: Optional[int] = None,
+) -> Dict[str, Any]:
     """Parse an XCP-D/nipype log file and return progress information.
+
+    For concatenated array-task logs (separated by ``=== filename ===``
+    headers), aggregates progress across all tasks: ``nodes_total`` is
+    ``per_task_graph_size * n_expected_tasks`` and ``nodes_done`` is the
+    sum across tasks.
+
+    Parameters
+    ----------
+    n_expected_tasks
+        Number of SLURM array tasks expected (i.e. number of subjects).
+        Used to compute a reliable ``nodes_total`` even when not all tasks
+        have started yet.  Falls back to the number of "workflow graph"
+        lines found in the log.
 
     Uses *stored_total* as a fallback when the "N nodes built" line has not
     yet been written to the local log (e.g. for HPC runs whose log was
@@ -1326,6 +1380,8 @@ def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = 
         "last_lines": [],
         "has_error": False,
         "is_done": False,
+        "task_count": 0,
+        "tasks_done": 0,
     }
     if not log_file or not Path(log_file).exists():
         return result
@@ -1337,20 +1393,37 @@ def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = 
     lines = content.splitlines()
     result["last_lines"] = lines[-50:]
 
+    # Track per-task graph sizes so we can sum for array jobs
+    per_task_nodes: int = 0
+    task_graph_count = 0
+
     for line in lines:
         m = re.search(r"workflow graph with (\d+) nodes", line)
         if m:
-            result["nodes_total"] = int(m.group(1))
+            per_task_nodes = int(m.group(1))
+            task_graph_count += 1
         if "[Node] Finished" in line:
             result["nodes_done"] += 1
         m = re.search(r'\[Node\] (?:Setting-up|Executing) "([^"]+)"', line)
         if m:
-            # Show only the short node name (last dotted component)
             result["current_node"] = m.group(1).split(".")[-1]
         if " ERROR " in line or "Traceback (most recent" in line or line.startswith("FATAL:") or " FATAL " in line:
             result["has_error"] = True
         if "Workflow finished" in line or "XCP-D finished successfully" in line:
-            result["is_done"] = True
+            result["tasks_done"] += 1
+
+    result["task_count"] = task_graph_count
+
+    if task_graph_count >= 1 and per_task_nodes:
+        # Use the expected task count (from run_info participant list) when
+        # available; fall back to the number of tasks whose logs we've seen.
+        effective_tasks = n_expected_tasks or task_graph_count
+        result["nodes_total"] = per_task_nodes * effective_tasks
+
+    # All expected tasks must finish for the overall run to be "done"
+    expected = n_expected_tasks or task_graph_count
+    if result["tasks_done"] > 0 and expected > 0 and result["tasks_done"] >= expected:
+        result["is_done"] = True
 
     return result
 
@@ -1358,28 +1431,71 @@ def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = 
 def fetch_hpc_xcpd_log(config: Dict[str, Any], run_info: Dict[str, Any]) -> Optional[Path]:
     """Download the full remote XCP-D SLURM log to the local log_file path.
 
+    For SLURM array jobs, per-task logs (e.g. ``xcpd_fc_4131_1.out``,
+    ``xcpd_fc_4131_2.out``) are concatenated into the single local file
+    with separators so the caller can see all tasks' output.
+
     Returns the local Path on success, None on failure.
     """
+    remote_log_prefix = run_info.get("remote_log_prefix")
     remote_log = run_info.get("remote_log_out")
     local_log = run_info.get("log_file")
-    if not remote_log or not local_log:
+    if not local_log:
+        return None
+    if not remote_log_prefix and not remote_log:
         return None
     hpc_cfg = HPCConfig.from_config(config)
     conn = None
     try:
         conn = HPCConnection(hpc_cfg)
         conn.connect()
-        stdout, _, exit_code = conn.execute(
-            f"cat {shlex.quote(remote_log)} 2>/dev/null",
-            timeout=120,
-        )
-        if stdout:
+
+        combined: List[str] = []
+
+        if remote_log_prefix:
+            # Enumerate array-task log files (sorted numerically).
+            # Use find -name to avoid shell glob expansion vulnerabilities.
+            prefix_dir = str(Path(remote_log_prefix).parent)
+            prefix_base = str(Path(remote_log_prefix).name)
+            stdout, _, _ = conn.execute(
+                f"find {shlex.quote(prefix_dir)} -maxdepth 1 "
+                f"\\( -name {shlex.quote(prefix_base + '_*.out')} "
+                f"-o -name {shlex.quote(prefix_base + '.out')} \\) "
+                f"2>/dev/null | sort -t_ -k3 -n",
+                timeout=30,
+            )
+            log_files = [f for f in stdout.strip().splitlines() if f.strip()]
+            if not log_files:
+                # Fallback: try the exact remote_log_out path
+                if remote_log:
+                    log_files = [remote_log]
+            for lf in log_files:
+                out, _, _ = conn.execute(
+                    f"cat {shlex.quote(lf.strip())} 2>/dev/null",
+                    timeout=120,
+                )
+                if out:
+                    fname = Path(lf.strip()).name
+                    combined.append(f"=== {fname} ===")
+                    combined.append(out)
+        elif remote_log:
+            out, _, _ = conn.execute(
+                f"cat {shlex.quote(remote_log)} 2>/dev/null",
+                timeout=120,
+            )
+            if out:
+                combined.append(out)
+
+        if combined:
             local_path = Path(local_log)
             local_path.parent.mkdir(parents=True, exist_ok=True)
-            local_path.write_text(stdout)
+            local_path.write_text("\n".join(combined))
             return local_path
     except Exception:
-        pass
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to fetch HPC log for job %s", run_info.get("job_id"), exc_info=True
+        )
     finally:
         _safe_disconnect(conn)
     return None
@@ -1465,6 +1581,7 @@ def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
 
     work_dir = run_info.get("work_dir") or _remote_xcpd_work_dir(hpc_cfg, pipeline_name)
     remote_script = run_info.get("remote_script")
+    remote_log_prefix = run_info.get("remote_log_prefix")
     remote_log_out = run_info.get("remote_log_out")
     remote_log_err = run_info.get("remote_log_err")
 
@@ -1488,9 +1605,35 @@ def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
         # Remove work directory
         if work_dir:
             conn.execute(f"rm -rf {shlex.quote(work_dir)}", timeout=120)
-        for remote_file in (remote_script, remote_log_out, remote_log_err):
-            if remote_file:
-                conn.execute(f"rm -f {shlex.quote(remote_file)}", timeout=30)
+        # Remove SLURM script
+        if remote_script:
+            conn.execute(f"rm -f {shlex.quote(remote_script)}", timeout=30)
+        # Remove log files: for array jobs, use the prefix to match all
+        # per-task logs (e.g. xcpd_fc_4131_1.out, xcpd_fc_4131_2.out)
+        if remote_log_prefix:
+            prefix_dir = str(Path(remote_log_prefix).parent)
+            prefix_base = str(Path(remote_log_prefix).name)
+            # Use find -name to safely enumerate matching files
+            stdout, _, _ = conn.execute(
+                f"find {shlex.quote(prefix_dir)} -maxdepth 1 "
+                f"-name {shlex.quote(prefix_base + '*')} "
+                f"2>/dev/null",
+                timeout=30,
+            )
+            for lf in stdout.strip().splitlines():
+                lf = lf.strip()
+                if lf:
+                    conn.execute(f"rm -f {shlex.quote(lf)}", timeout=30)
+        else:
+            # Legacy: individual log paths
+            for remote_file in (remote_log_out, remote_log_err):
+                if remote_file:
+                    conn.execute(f"rm -f {shlex.quote(remote_file)}", timeout=30)
+        # Also remove the sublist file
+        job_id = run_info.get("job_id")
+        if job_id:
+            sublist_path = f"{hpc_cfg.remote_base}/scripts/xcpd_{pipeline_name}_{job_id}_subjects.txt"
+            conn.execute(f"rm -f {shlex.quote(sublist_path)}", timeout=30)
         append_pipeline_log(config, f"Cleaned up HPC files for XCP-D {pipeline_name.upper()}")
     finally:
         _safe_disconnect(conn)

@@ -924,9 +924,11 @@ def _render_pipeline_panel(
     if current_status in ("running", "completed", "failed"):
         log_file = run_info.get("log_file")
         stored_total = run_info.get("nodes_total")
+        n_tasks = len(run_info.get("participant_labels") or []) or None
         progress = parse_xcpd_progress(
             Path(log_file) if log_file else None,
             stored_total=stored_total,
+            n_expected_tasks=n_tasks,
         )
 
         # Persist nodes_total back into run_info so we don't lose it on log refetch
