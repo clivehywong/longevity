@@ -145,16 +145,25 @@ hpc:
 ### fMRIPrep (array job)
 `utils/hpc.py` `HPCWorkflowManager.generate_slurm_script()` renders `templates/fmriprep_slurm.j2` into a SLURM array job (one task per subject) and submits via `sbatch`.
 
-### XCP-D (single job)
-`utils/xcpd.py` `generate_xcpd_slurm_script()` renders `templates/xcpd_slurm.j2` into a **single** SLURM job (XCP-D processes all subjects in one `singularity run` invocation). Submission flow:
+### XCP-D (array job)
+`utils/xcpd.py` `generate_xcpd_slurm_script()` renders `templates/xcpd_slurm.j2` into a **SLURM array job** (one task per subject). Each array task reads its subject ID from a subject-list file on the HPC and runs XCP-D inside Singularity for that single subject. Submission flow:
 
-1. `generate_xcpd_slurm_script()` — Jinja2 renders template with bind mounts and `xcpd_arg_lines` (list of multiline args); CPUs = `nprocs × omp_nthreads`
+1. `generate_xcpd_slurm_script()` — Jinja2 renders template with bind mounts and `xcpd_arg_lines` (list of multiline args); CPUs = `nprocs × omp_nthreads`; `omit_work_dir=True` so the template adds `-w` at runtime
 2. Script is saved locally to `pipeline_runs_dir/xcpd_{pipeline}/run_TIMESTAMP/xcpd_{pipeline}_job.sh`
-3. Script is uploaded to the HPC via `HPCConnection.write_file()`
-4. `sbatch xcpd_{pipeline}_job.sh` is executed over SSH; all three pipelines may be chained with `--dependency=afterok`
-5. The returned SLURM job ID is stored in run_info as `job_id`; initial status is **`queued`**
-6. `refresh_xcpd_run()` polls `squeue -j {job_id} -h -o '%T|%r'` and transitions: PENDING→`queued`, RUNNING→`running`, COMPLETED→`completed`, FAILED/DependencyNeverSatisfied→`failed`
-7. `stop_xcpd_run()` calls `scancel {job_id}` and cascades to downstream pipelines
+3. A subject-list file (`sublist_xcpd_{pipeline}.txt`) is uploaded alongside the script
+4. Script is uploaded to the HPC via `HPCConnection.write_file()`
+5. `sbatch xcpd_{pipeline}_job.sh` is executed over SSH; all three pipelines may be chained with `--dependency=afterok`
+6. The returned SLURM job ID is stored in run_info as `job_id`; a `remote_log_prefix` (e.g., `logs/xcpd_fc_4143`) is stored for log enumeration; initial status is **`queued`**
+7. `refresh_xcpd_run()` polls `squeue -j {job_id} -h -o '%T|%r'` across all array tasks, prioritising status as RUNNING > COMPLETING > PENDING, and transitions accordingly
+8. `stop_xcpd_run()` calls `scancel {job_id}` and cascades to downstream pipelines
+
+#### Per-subject work directories
+
+Each array task creates its own Nipype work directory at `{work_dir}/sub-{SUBID}` to prevent file-based lock contention between parallel tasks. `build_remote_xcpd_command()` accepts `omit_work_dir=True` so that the generated XCP-D argument list omits `-w`; the SLURM template then adds `-w "${WORK_DIR}"` at runtime after computing `WORK_DIR` from the array task's subject ID.
+
+#### Array job log handling
+
+SLURM produces per-task log files using `%A_%a` (array job ID + task index), e.g., `xcpd_fc_4143_1.out`, `xcpd_fc_4143_2.out`, etc. The run_info stores a `remote_log_prefix` (e.g., `logs/xcpd_fc_4143`) and a `remote_sublist` path. Log collection and cleanup use `find -name '{prefix}.out' -o -name '{prefix}.err' -o -name '{prefix}_*.out' -o -name '{prefix}_*.err'` to enumerate only the relevant files without accidentally matching logs from other jobs sharing a numeric prefix. `parse_xcpd_progress()` accepts `n_expected_tasks` to compute the correct total node count across all array tasks.
 
 #### SLURM multiline rendering
 

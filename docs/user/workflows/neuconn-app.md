@@ -157,19 +157,22 @@ Open the **⚙️ SLURM Resources** expander (shared by all three pipelines) bef
 |---|---|---|
 | `nprocs` | Parallel Nipype workers per job | 8 |
 | `omp_nthreads` | OpenMP threads per worker | 1 |
+| `Max concurrent jobs` | Max SLURM array tasks running simultaneously | 2 |
 | Total CPUs | `nprocs × omp_nthreads` — must not exceed cluster QOS limit | ≤15 |
 
-Increasing `nprocs` speeds up each pipeline at the cost of more CPU hours. Leave `omp_nthreads` at 1 unless your node has idle hyperthreads.
+Increasing `nprocs` speeds up each subject at the cost of more CPU hours. Leave `omp_nthreads` at 1 unless your node has idle hyperthreads. Reduce `Max concurrent jobs` to 1 if you encounter memory pressure or resource contention (e.g., ALFF voxelwise computation in NIfTI mode is CPU-intensive).
 
 #### Submitting pipelines
+
+XCP-D pipelines run as **SLURM array jobs** — each subject is processed in its own array task with a dedicated work directory. This avoids Nipype work-directory contention between parallel tasks.
 
 For each pipeline:
 
 1. Select subjects and sessions.
    - Use **🎯 FC incomplete / FC+GSR incomplete / EC incomplete** buttons to auto-select only subjects that have not yet successfully completed that pipeline. Use **↩ Reset** to restore the full subject list.
 2. Toggle **Run on HPC** if needed; use the **Upload fMRIPrep to HPC** expander if the derivatives are not yet on the cluster.
-3. Click **▶ Start … XCP-D**. A SLURM job ID (HPC) or PID (local) is shown.
-4. Monitor progress with **🔄 Refresh status**. The progress bar shows `~N/total subjects estimated` (derived from Nipype processing steps).
+3. Click **▶ Start … XCP-D**. A SLURM array job ID (HPC) or PID (local) is shown.
+4. Monitor progress with **🔄 Refresh status**. The progress bar shows `~N/total nodes estimated` (derived from Nipype processing steps across all array tasks).
 5. After HPC completion, use **📥 Download XCP-D outputs from HPC** to rsync results locally; then use **🗑️ Clean up HPC files** to free remote disk space.
 
 #### Removing all XCP-D outputs
@@ -178,7 +181,9 @@ At the bottom of the **XCP-D Runs** tab, click **🗑️ Remove all XCP-D output
 
 #### SLURM script format
 
-Generated SLURM scripts use multiline formatting (one argument per line with `\` continuation) for readability. Use the **🔍 Preview script with current settings** expander to review before submitting, or **📂 Last submitted script (read-only)** to inspect a prior submission.
+Generated SLURM scripts use multiline formatting (one argument per line with `\` continuation) for readability. The script is structured as an array job with `#SBATCH --array=1-N%max_concurrent` where each task reads a subject ID from a subject-list file. Each task creates its own Nipype work directory (`work/xcpd/{pipeline}/sub-{SUBID}`) to prevent contention. Use the **🔍 Preview script with current settings** expander to review before submitting, or **📂 Last submitted script (read-only)** to inspect a prior submission.
+
+Log files follow the naming pattern `xcpd_{pipeline}_{JOBID}_{TASKID}.{out|err}` (one per subject). Use **📥 Fetch HPC log** to download all per-task logs for inspection.
 
 #### Pipeline status values
 
