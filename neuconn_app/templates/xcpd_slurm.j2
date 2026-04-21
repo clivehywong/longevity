@@ -15,6 +15,34 @@
 
 set -uo pipefail
 
+# ===== Node-local logging to avoid NFS log-write failures =====
+# SLURM's NFS .out/.err file handle can become stale under disk pressure
+# (e.g. quota exceeded), causing all stdout/stderr writes to produce 0-byte
+# files and commands that write to stdout to fail silently.
+# We redirect all output to node-local /tmp first, then copy to NFS on exit.
+JOB_ARRAY_ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID}}"
+TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
+TMPLOG="/tmp/xcpd_{{ pipeline }}_${JOB_ARRAY_ID}_${TASK_ID}.log"
+NFS_LOG="{{ remote_base }}/logs/xcpd_{{ pipeline }}_${JOB_ARRAY_ID}_${TASK_ID}.log"
+LOCAL_TMP="/tmp/singularity_{{ pipeline }}_${JOB_ARRAY_ID}_${TASK_ID}"
+
+# Guard against running cleanup twice (EXIT fires after INT/TERM traps)
+_CLEANUP_DONE=0
+_cleanup() {
+    [ "${_CLEANUP_DONE}" = "1" ] && return
+    _CLEANUP_DONE=1
+    [ -s "${TMPLOG}" ] && cp "${TMPLOG}" "${NFS_LOG}" 2>/dev/null || true
+    rm -rf "${LOCAL_TMP}" 2>/dev/null || true
+}
+trap '_cleanup' EXIT
+trap '_cleanup; exit 130' INT
+trap '_cleanup; exit 143' TERM
+
+# Redirect all output to local /tmp (fallback to SLURM .out if /tmp unwritable)
+if touch "${TMPLOG}" 2>/dev/null; then
+    exec > "${TMPLOG}" 2>&1
+fi
+
 # Initialize module system if available
 if [ -f /etc/profile.d/modules.sh ]; then
     source /etc/profile.d/modules.sh
@@ -25,7 +53,9 @@ fi
 # Load singularity module if needed
 if ! command -v singularity &> /dev/null && command -v module &> /dev/null; then
     module purge
-    module load singularity 2>/dev/null || true
+    if ! module load singularity; then
+        echo "WARNING: module load singularity failed — will check binary directly"
+    fi
 fi
 
 if ! command -v singularity &> /dev/null; then
@@ -56,18 +86,48 @@ fi
 # Per-subject work directory to avoid nipype contention between array tasks
 WORK_DIR="{{ work_dir }}/sub-${SUBID}"
 
+# Use node-local /tmp for Singularity runtime temp (avoids 57GB+ NFS cache pressure)
+if mkdir -p "${LOCAL_TMP}" 2>/dev/null; then
+    export SINGULARITY_TMPDIR="${LOCAL_TMP}"
+    export APPTAINER_TMPDIR="${LOCAL_TMP}"
+fi
+
 echo "======================================"
 echo "XCP-D {{ pipeline | upper }} pipeline"
 echo "Subject: ${SUBID}"
-echo "Array task: ${SLURM_ARRAY_TASK_ID} / {{ num_subjects }}"
-echo "Job ID: ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
+echo "Array task: ${TASK_ID} / {{ num_subjects }}"
+echo "Job ID: ${JOB_ARRAY_ID}_${TASK_ID}"
 echo "Node: $(hostname)"
 echo "Start time: $(date)"
 echo "Work dir: ${WORK_DIR}"
 echo "======================================"
 
-# Create output and work directories
-mkdir -p {{ remote_output }} "${WORK_DIR}" {{ remote_base }}/logs
+# Create logs directory first (required before NFS preflight probe below)
+mkdir -p "{{ remote_base }}/logs" || { echo "ERROR: cannot create logs dir at {{ remote_base }}/logs"; exit 1; }
+
+# NFS preflight: verify real data writes work (not just metadata/touch).
+# Under disk quota exceeded, file creation (metadata) succeeds but data writes
+# silently produce 0-byte files with exit 0. We write actual bytes and verify
+# file size to catch this before spending hours computing only to fail on output.
+_NFS_PROBE="{{ remote_base }}/logs/.nfs_probe_${JOB_ARRAY_ID}_${TASK_ID}"
+printf 'xcpd_nfs_probe_data' > "${_NFS_PROBE}" 2>/dev/null || true
+if [ ! -s "${_NFS_PROBE}" ]; then
+    rm -f "${_NFS_PROBE}" 2>/dev/null || true
+    echo "ERROR: NFS data write preflight failed at {{ remote_base }}/logs/."
+    echo "  Disk quota may be exceeded. Check: quota -s"
+    echo "  Free space by removing unneeded work dirs: {{ remote_base }}/work/"
+    exit 1
+fi
+rm -f "${_NFS_PROBE}" 2>/dev/null || true
+
+# Create output and work directories (error if not possible — do not proceed silently)
+if ! mkdir -p "{{ remote_output }}" "${WORK_DIR}"; then
+    echo "ERROR: Failed to create output/work directories."
+    echo "  Output: {{ remote_output }}"
+    echo "  Work: ${WORK_DIR}"
+    echo "  Check disk quota: quota -s"
+    exit 1
+fi
 
 # Run XCP-D via Singularity for this subject
 singularity run \

@@ -1464,7 +1464,9 @@ def fetch_hpc_xcpd_log(config: Dict[str, Any], run_info: Dict[str, Any]) -> Opti
             stdout, _, _ = conn.execute(
                 f"find {shlex.quote(prefix_dir)} -maxdepth 1 "
                 f"\\( -name {shlex.quote(prefix_base + '_*.out')} "
-                f"-o -name {shlex.quote(prefix_base + '.out')} \\) "
+                f"-o -name {shlex.quote(prefix_base + '.out')} "
+                f"-o -name {shlex.quote(prefix_base + '_*.log')} "
+                f"-o -name {shlex.quote(prefix_base + '.log')} \\) "
                 f"2>/dev/null | sort -t_ -k3 -n",
                 timeout=30,
             )
@@ -1474,12 +1476,22 @@ def fetch_hpc_xcpd_log(config: Dict[str, Any], run_info: Dict[str, Any]) -> Opti
                 if remote_log:
                     log_files = [remote_log]
             for lf in log_files:
+                lf = lf.strip()
                 out, _, _ = conn.execute(
-                    f"cat {shlex.quote(lf.strip())} 2>/dev/null",
+                    f"cat {shlex.quote(lf)} 2>/dev/null",
                     timeout=120,
                 )
+                if not out and lf.endswith(".out"):
+                    # The SLURM .out file is empty (NFS log write failure).
+                    # Check for the explicit .log file written by the job script
+                    # via `exec > /tmp/... && cp to NFS` pattern.
+                    explicit_log = str(Path(lf).with_suffix(".log"))
+                    out, _, _ = conn.execute(
+                        f"cat {shlex.quote(explicit_log)} 2>/dev/null",
+                        timeout=120,
+                    )
                 if out:
-                    fname = Path(lf.strip()).name
+                    fname = Path(lf).name
                     combined.append(f"=== {fname} ===")
                     combined.append(out)
         elif remote_log:
@@ -1624,8 +1636,10 @@ def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
                 f"find {shlex.quote(prefix_dir)} -maxdepth 1 "
                 f"\\( -name {shlex.quote(prefix_base + '.out')} "
                 f"-o -name {shlex.quote(prefix_base + '.err')} "
+                f"-o -name {shlex.quote(prefix_base + '.log')} "
                 f"-o -name {shlex.quote(prefix_base + '_*.out')} "
-                f"-o -name {shlex.quote(prefix_base + '_*.err')} \\) "
+                f"-o -name {shlex.quote(prefix_base + '_*.err')} "
+                f"-o -name {shlex.quote(prefix_base + '_*.log')} \\) "
                 f"2>/dev/null"
             )
             stdout, _, _ = conn.execute(find_cmd, timeout=30)
