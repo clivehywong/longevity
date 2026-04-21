@@ -987,6 +987,7 @@ def start_remote_xcpd_run(
         "status": "queued",
         "backend": "hpc",
         "remote_script": remote_script,
+        "remote_sublist": sublist_file,
         "remote_log_out": remote_log_out,
         "remote_log_err": remote_log_err,
         "remote_log_prefix": remote_log_prefix,
@@ -1612,17 +1613,22 @@ def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
         if remote_script:
             conn.execute(f"rm -f {shlex.quote(remote_script)}", timeout=30)
         # Remove log files: for array jobs, use the prefix to match all
-        # per-task logs (e.g. xcpd_fc_4131_1.out, xcpd_fc_4131_2.out)
+        # per-task logs (e.g. xcpd_fc_4131_1.out, xcpd_fc_4131_2.out).
+        # Match exactly prefix.out, prefix.err (non-array legacy), and
+        # prefix_N.out, prefix_N.err (array tasks) to avoid deleting logs
+        # belonging to other jobs whose IDs share a common numeric prefix.
         if remote_log_prefix:
             prefix_dir = str(Path(remote_log_prefix).parent)
             prefix_base = str(Path(remote_log_prefix).name)
-            # Use find -name to safely enumerate matching files
-            stdout, _, _ = conn.execute(
+            find_cmd = (
                 f"find {shlex.quote(prefix_dir)} -maxdepth 1 "
-                f"-name {shlex.quote(prefix_base + '*')} "
-                f"2>/dev/null",
-                timeout=30,
+                f"\\( -name {shlex.quote(prefix_base + '.out')} "
+                f"-o -name {shlex.quote(prefix_base + '.err')} "
+                f"-o -name {shlex.quote(prefix_base + '_*.out')} "
+                f"-o -name {shlex.quote(prefix_base + '_*.err')} \\) "
+                f"2>/dev/null"
             )
+            stdout, _, _ = conn.execute(find_cmd, timeout=30)
             for lf in stdout.strip().splitlines():
                 lf = lf.strip()
                 if lf:
@@ -1632,11 +1638,12 @@ def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
             for remote_file in (remote_log_out, remote_log_err):
                 if remote_file:
                     conn.execute(f"rm -f {shlex.quote(remote_file)}", timeout=30)
-        # Also remove the sublist file
-        job_id = run_info.get("job_id")
-        if job_id:
-            sublist_path = f"{hpc_cfg.remote_base}/scripts/xcpd_{pipeline_name}_{job_id}_subjects.txt"
-            conn.execute(f"rm -f {shlex.quote(sublist_path)}", timeout=30)
+        # Remove the sublist file
+        remote_sublist = run_info.get("remote_sublist")
+        if not remote_sublist:
+            # Fallback for runs submitted before remote_sublist was stored
+            remote_sublist = f"{hpc_cfg.remote_base}/sublist_xcpd_{pipeline_name}.txt"
+        conn.execute(f"rm -f {shlex.quote(remote_sublist)}", timeout=30)
         append_pipeline_log(config, f"Cleaned up HPC files for XCP-D {pipeline_name.upper()}")
     finally:
         _safe_disconnect(conn)
