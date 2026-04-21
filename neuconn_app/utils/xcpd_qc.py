@@ -112,7 +112,8 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
                             st.success(f"FC outputs saved to {out}")
                             st.rerun()
                         except Exception as exc:
-                            st.error(f"Download failed: {exc}")
+                            st.error("Download failed")
+                            st.code(str(exc), language="text")
             with cols[1]:
                 if st.button("Download FC+GSR outputs", key="dl_fc_gsr_hpc"):
                     with st.spinner("Downloading FC+GSR outputs from HPC…"):
@@ -121,7 +122,8 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
                             st.success(f"FC+GSR outputs saved to {out}")
                             st.rerun()
                         except Exception as exc:
-                            st.error(f"Download failed: {exc}")
+                            st.error("Download failed")
+                            st.code(str(exc), language="text")
             with cols[2]:
                 if st.button("Download EC outputs", key="dl_ec_hpc"):
                     with st.spinner("Downloading EC outputs from HPC…"):
@@ -130,7 +132,8 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
                             st.success(f"EC outputs saved to {out}")
                             st.rerun()
                         except Exception as exc:
-                            st.error(f"Download failed: {exc}")
+                            st.error("Download failed")
+                            st.code(str(exc), language="text")
 
     col1, col2, col3 = st.columns(3)
     with col1:

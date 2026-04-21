@@ -1545,7 +1545,7 @@ def download_xcpd_outputs_from_hpc(
     if not remote_xcpd_dir:
         remote_xcpd_dir = f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline_name}"
 
-    rsync_cmd = ["rsync", "-avz", "--no-perms"]
+    rsync_cmd = ["rsync", "-avz", "--no-perms", "--timeout=60"]
     _ssh_opts = []
     if hpc_cfg.port and hpc_cfg.port != 22:
         _ssh_opts += ["-p", str(hpc_cfg.port)]
@@ -1557,25 +1557,26 @@ def download_xcpd_outputs_from_hpc(
     subjects = [f"sub-{label}" if not label.startswith("sub-") else label
                 for label in (participant_labels or [])]
     if subjects:
-        # Include only selected subjects
+        # Include only selected subjects plus shared output dirs (logs, atlases).
+        # All includes must come before --exclude=* (first-match wins in rsync).
         for sub in subjects:
             rsync_cmd += [f"--include={sub}/", f"--include={sub}/**"]
-        rsync_cmd += ["--include=dataset_description.json", "--include=*.json",
-                      "--include=*.bib", "--include=*.html",
-                      "--exclude=*/"]
-    # Also always include top-level files (dataset_description, etc.)
-    rsync_cmd += [
-        "--include=dataset_description.json",
-        "--include=*.json",
-        "--include=*.bib",
-    ]
+        rsync_cmd += [
+            "--include=logs/", "--include=logs/**",
+            "--include=sourcedata/", "--include=sourcedata/atlases/",
+            "--include=sourcedata/atlases/**",
+            "--include=dataset_description.json", "--include=*.json",
+            "--include=*.bib", "--include=*.html",
+            "--exclude=*",  # strict: exclude all unmatched files and dirs
+        ]
+    # Without subject filtering, rsync mirrors everything — no excludes needed.
 
     rsync_cmd += [
         f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_xcpd_dir}/",
         f"{local_out_dir}/",
     ]
 
-    result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=7200)
     if result.returncode not in (0, 24):  # 24 = partial transfer (acceptable)
         raise RuntimeError(result.stderr or result.stdout or f"rsync exited {result.returncode}")
     return str(local_out_dir)

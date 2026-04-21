@@ -1012,7 +1012,8 @@ def _render_pipeline_panel(
                                 )
                                 st.success(f"Downloaded to `{local_dir}`")
                             except Exception as dl_err:
-                                st.error(f"Download failed: {dl_err}")
+                                st.error("Download failed")
+                                st.code(str(dl_err), language="text")
                 with cleanup_col:
                     if st.button(
                         "🗑️ Clean up HPC files",
