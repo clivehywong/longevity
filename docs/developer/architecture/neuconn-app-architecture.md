@@ -165,6 +165,33 @@ Each array task creates its own Nipype work directory at `{work_dir}/sub-{SUBID}
 
 SLURM produces per-task log files using `%A_%a` (array job ID + task index), e.g., `xcpd_fc_4143_1.out`, `xcpd_fc_4143_2.out`, etc. The run_info stores a `remote_log_prefix` (e.g., `logs/xcpd_fc_4143`) and a `remote_sublist` path. Log collection and cleanup use `find -name '{prefix}.out' -o -name '{prefix}.err' -o -name '{prefix}_*.out' -o -name '{prefix}_*.err'` to enumerate only the relevant files without accidentally matching logs from other jobs sharing a numeric prefix. `parse_xcpd_progress()` accepts `n_expected_tasks` to compute the correct total node count across all array tasks.
 
+The SLURM template redirects all stdout/stderr to node-local `/tmp` at startup (`exec > /tmp/xcpd_...log 2>&1`). A `_cleanup()` EXIT trap copies the `/tmp` log to the NFS `logs/` directory when the task exits. This means:
+
+- **During a run**: `.out` / `.err` files on NFS are 0 bytes (log lives in `/tmp`)
+- **After a run**: `.log` files appear alongside `.out` / `.err` files (copied from `/tmp` by `_cleanup()`)
+
+`fetch_hpc_xcpd_log()` matches both `.log` and `.out`/`.err` patterns. Cleanup removes all four file patterns.
+
+#### NFS preflight (disk quota protection)
+
+Before writing any output, the SLURM template executes a preflight write:
+
+```bash
+printf 'data' > "$OUTPUT_DIR/.nfs_preflight" && [ -s "$OUTPUT_DIR/.nfs_preflight" ]
+```
+
+This detects `EDQUOT` (NFS disk quota exceeded) reliably — `touch` succeeds even over quota but `printf + -s check` fails because data writes return `EDQUOT` silently. If the preflight fails the job exits immediately rather than producing 0-byte output files.
+
+> **Disk quota note**: Each pipeline's Nipype work directory grows to ~10–15 GB per subject (~400 GB for 33 subjects). Run `🗑️ Clean up HPC files` between pipelines to free the work directory before submitting the next pipeline.
+
+#### rsync download filter order
+
+`download_xcpd_outputs_from_hpc()` uses rsync with explicit include/exclude rules. Rule ordering is critical: **first match wins**.
+
+When `participant_labels` is provided, each subject generates `--include=sub-XXX/` + `--include=sub-XXX/**` rules, followed by shared includes (`logs/`, `sourcedata/atlases/`) and finally `--exclude=*` (strict allowlisting). Any `--include` rules placed after `--exclude=*` are dead code and have no effect. Use `--exclude=*` (not `--exclude=*/`) to block both unmatched files and unmatched directories.
+
+The subprocess has a wall-clock timeout (7200 s) and rsync uses `--timeout=60` to abort if the connection is idle for 60 s. Full downloads without `participant_labels` can exceed 100 GB per pipeline; subject-filtered downloads are much smaller.
+
 #### SLURM multiline rendering
 
 The generated SLURM script renders each XCP-D CLI flag on its own line with `\` continuation for readability. `generate_xcpd_slurm_script()` builds `xcpd_arg_lines: list[str]` by parsing flags and their values into logical pairs/groups. The Jinja2 template (`xcpd_slurm.j2`) iterates the list with a `\` continuation on each line.

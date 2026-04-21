@@ -183,7 +183,25 @@ At the bottom of the **XCP-D Runs** tab, click **🗑️ Remove all XCP-D output
 
 Generated SLURM scripts use multiline formatting (one argument per line with `\` continuation) for readability. The script is structured as an array job with `#SBATCH --array=1-N%max_concurrent` where each task reads a subject ID from a subject-list file. Each task creates its own Nipype work directory (`work/xcpd/{pipeline}/sub-{SUBID}`) to prevent contention. Use the **🔍 Preview script with current settings** expander to review before submitting, or **📂 Last submitted script (read-only)** to inspect a prior submission.
 
-Log files follow the naming pattern `xcpd_{pipeline}_{JOBID}_{TASKID}.{out|err}` (one per subject). Use **📥 Fetch HPC log** to download all per-task logs for inspection.
+Log files follow the naming pattern `xcpd_{pipeline}_{JOBID}_{TASKID}.{out|err}` (one per subject). During a run, `.out` files may be 0 bytes — the actual log content is written to the compute node's `/tmp` and copied to NFS by a `_cleanup()` trap on task exit. Completed tasks produce `.log` files alongside the `.out`/`.err` files. Use **📥 Fetch HPC log** to download all per-task logs for inspection.
+
+#### Disk quota management
+
+Each XCP-D pipeline produces a large work directory (`work/xcpd/{pipeline}/`) that holds Nipype intermediate files — roughly **10–15 GB per subject**, adding up to **400+ GB for 33 subjects**. Running all three pipelines (FC → FC+GSR → EC) in sequence without cleaning up intermediate work directories can exceed a 1.5 TB home-directory quota.
+
+**Recommended workflow to stay within quota:**
+
+1. Submit FC; wait for completion.
+2. Download FC outputs (**📥 Download XCP-D outputs from HPC**).
+3. Clean up FC HPC files (**🗑️ Clean up HPC files**) — this removes the FC output dir, work dir, and logs.
+4. Submit FC+GSR; wait for completion.
+5. Download FC+GSR outputs; clean up HPC.
+6. Submit EC; wait for completion.
+7. Download EC outputs; clean up HPC.
+
+> **Warning:** Running FC, FC+GSR, and EC concurrently without cleaning up between them can accumulate 1–2 TB of work-directory data. If the NFS quota is exceeded (`EDQUOT`), file creation may succeed silently while data writes produce 0-byte files — check output file sizes rather than just file existence. Use `lfs quota` or `quota -s` on the login node to monitor your usage.
+
+The **🗑️ Clean up HPC files** button removes the output directory, work directory, SLURM script, and log files for the selected pipeline. Always download first; cleanup is irreversible.
 
 #### Pipeline status values
 
