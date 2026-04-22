@@ -483,6 +483,7 @@ class HPCWorkflowManager:
         # ── Build single rsync command for all subjects ──────────────────────
         ssh_opts = (
             "ssh"
+            f" -p {self.config.port}"
             " -o StrictHostKeyChecking=no"
             " -o ServerAliveInterval=60"
             " -o ServerAliveCountMax=10"
