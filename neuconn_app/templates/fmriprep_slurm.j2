@@ -28,7 +28,7 @@ fi
 # Configuration
 BIDS_DIR="{{ remote_bids }}"
 OUT_DIR="{{ remote_fmriprep }}"
-WORK_DIR="{{ remote_work }}"
+WORK_DIR="{{ remote_work }}/sub-${SUBID}"
 IMG="{{ singularity_image }}"
 LICENSE="{{ freesurfer_license }}"
 
@@ -73,11 +73,14 @@ singularity run --cleanenv \
 EXIT_CODE=$?
 
 # fMRIPrep may exit non-zero due to Sentry cleanup or other non-fatal issues.
-# Check for the HTML report to determine actual success.
+# Only treat as success if the HTML report AND expected confounds outputs exist.
 REPORT_FILE="${OUT_DIR}/sub-${SUBID}.html"
-if [ ${EXIT_CODE} -ne 0 ] && [ -f "${REPORT_FILE}" ]; then
-    echo "WARNING: fMRIPrep exited with code ${EXIT_CODE} but HTML report exists — treating as success"
+CONFOUNDS_FOUND=$(find "${OUT_DIR}/sub-${SUBID}" -name "*desc-confounds_timeseries.tsv" -type f 2>/dev/null | head -1)
+if [ ${EXIT_CODE} -ne 0 ] && [ -f "${REPORT_FILE}" ] && [ -n "${CONFOUNDS_FOUND}" ]; then
+    echo "WARNING: fMRIPrep exited with code ${EXIT_CODE} but outputs are complete — treating as success"
     EXIT_CODE=0
+elif [ ${EXIT_CODE} -ne 0 ] && [ -f "${REPORT_FILE}" ] && [ -z "${CONFOUNDS_FOUND}" ]; then
+    echo "ERROR: fMRIPrep exited with code ${EXIT_CODE} and confounds are missing — incomplete run"
 fi
 
 echo "======================================"

@@ -744,6 +744,49 @@ class HPCWorkflowManager:
             f"-exec rm -rf {{}} + 2>/dev/null || true"
         )
 
+        # Pre-populate fsaverage from the fMRIPrep container before parallel subjects
+        # start. BIDSFreeSurferDir (niworkflows) skips the copy when dest already
+        # exists, so pre-seeding it eliminates the first-writer race that previously
+        # caused "OSError: [Errno 39] Directory not empty".
+        # Completeness is verified via the FS7-specific rh.FG1.mpm.vpnl.label file.
+        # The copy is staged in a temp dir and atomically renamed to avoid leaving a
+        # partial tree if the operation is interrupted.
+        fsav_dst = f"{self.config.remote_fmriprep}/sourcedata/freesurfer"
+        conn.execute(f"mkdir -p {fsav_dst}")
+        stdout, _, _ = conn.execute(
+            f"test -f '{fsav_dst}/fsaverage/label/rh.FG1.mpm.vpnl.label'"
+            " && echo 'complete' || echo 'missing'"
+        )
+        if "missing" in stdout:
+            logger.info("Pre-populating fsaverage from fMRIPrep container (one-time setup)...")
+            singularity_bin = self._find_singularity_bin(conn)
+            tmp_dst = f"{fsav_dst}/fsaverage.tmp"
+            conn.execute(f"rm -rf {tmp_dst} {fsav_dst}/fsaverage 2>/dev/null || true")
+            _, stderr_cp, rc_cp = conn.execute(
+                f"{singularity_bin} exec {self.config.singularity_image}"
+                f" bash -c 'cp -a /opt/freesurfer/subjects/fsaverage {tmp_dst}'"
+            )
+            if rc_cp != 0:
+                raise RuntimeError(
+                    f"Failed to copy fsaverage from container: {stderr_cp}"
+                )
+            # Validate sentinel file before promotion
+            ok, _, _ = conn.execute(
+                f"test -f '{tmp_dst}/label/rh.FG1.mpm.vpnl.label'"
+                " && echo 'ok' || echo 'bad'"
+            )
+            if "ok" not in ok:
+                conn.execute(f"rm -rf {tmp_dst}")
+                raise RuntimeError(
+                    "fsaverage copy from container is missing required FS7 label file; "
+                    "aborting submission to avoid a broken FreeSurfer subjects dir"
+                )
+            # Atomic promotion
+            _, _, rc_mv = conn.execute(f"mv {tmp_dst} {fsav_dst}/fsaverage")
+            if rc_mv != 0:
+                raise RuntimeError("Failed to move fsaverage.tmp → fsaverage")
+            logger.info("fsaverage pre-population complete")
+
         # Submit job
         stdout, stderr, exit_code = conn.execute(
             f"cd {self.config.remote_base} && sbatch fmriprep_job.sh"
@@ -759,6 +802,20 @@ class HPCWorkflowManager:
             raise RuntimeError(f"Could not parse job ID from: {stdout}")
 
         return match.group(1)
+
+    def _find_singularity_bin(self, conn: "HPCConnection") -> str:
+        """Return the full path to the singularity executable on the remote host."""
+        stdout, _, _ = conn.execute("which singularity 2>/dev/null || echo ''")
+        if stdout.strip():
+            return stdout.strip()
+        # Fallback: known module-installed location on this HPC
+        fallback = "/mnt/eduhk-hpc-prod-data/module/software/singularity/bin/singularity"
+        stdout2, _, _ = conn.execute(f"test -x {fallback} && echo found || echo missing")
+        if "found" in stdout2:
+            return fallback
+        raise RuntimeError(
+            "singularity not found on remote host; cannot pre-populate fsaverage"
+        )
 
     def load_submission_script(self, script_name: str = "fmriprep_job.sh") -> Optional[str]:
         """Load a previously submitted SLURM script from the remote project directory."""
@@ -1181,6 +1238,7 @@ class HPCWorkflowManager:
         self.local_output.mkdir(parents=True, exist_ok=True)
 
         remote_source = f"{self.config.user}@{self.config.host}:{self.config.remote_fmriprep}"
+        ssh_opts = ["-e", f"ssh -p {self.config.port} -o StrictHostKeyChecking=no"]
 
         for idx, sub_id in enumerate(subjects):
             sub_dir = f"sub-{sub_id}"
@@ -1191,6 +1249,7 @@ class HPCWorkflowManager:
             # Download subject directory (excluding fsnative)
             cmd = [
                 "rsync", "-avz", "--progress",
+                *ssh_opts,
                 "--exclude=*_space-fsnative_*",
                 f"{remote_source}/{sub_dir}/",
                 f"{self.local_output}/{sub_dir}/"
@@ -1210,6 +1269,7 @@ class HPCWorkflowManager:
                 if success:
                     html_cmd = [
                         "rsync", "-avz",
+                        *ssh_opts,
                         f"{remote_source}/{sub_dir}.html",
                         f"{self.local_output}/"
                     ]
@@ -1232,12 +1292,14 @@ class HPCWorkflowManager:
         try:
             subprocess.run([
                 "rsync", "-avz",
+                *ssh_opts,
                 f"{remote_source}/dataset_description.json",
                 f"{self.local_output}/"
             ], capture_output=True, timeout=60)
 
             subprocess.run([
                 "rsync", "-avz",
+                *ssh_opts,
                 f"{remote_source}/logs/",
                 f"{self.local_output}/logs/"
             ], capture_output=True, timeout=300)
@@ -1286,7 +1348,9 @@ class HPCWorkflowManager:
                     rm_paths.append(f"{self.config.remote_fmriprep}/sub-{sub_id}.html")
 
                 if cleanup_work:
-                    # Remove per-subject work trees across older and newer fMRIPrep layouts.
+                    # Subject-specific work dir (current layout: /work/sub-{id}).
+                    rm_paths.append(f"{self.config.remote_work}/sub-{sub_id}")
+                    # Legacy per-subject work trees across older and newer fMRIPrep layouts.
                     rm_paths.extend([
                         f"{self.config.remote_work}/fmriprep*/single_subject_{sub_id}_wf",
                         f"{self.config.remote_work}/fmriprep*_wf/single_subject_{sub_id}_wf",
@@ -1311,6 +1375,20 @@ class HPCWorkflowManager:
 
             if progress_callback:
                 progress_callback(sub_id, status, (idx + 1) / total)
+
+        # Remove residual top-level work dirs not matched by per-subject globs:
+        # 1. fmriprep* work dirs that are now empty (or only contain tiny metadata)
+        # 2. Timestamp-UUID session dirs created by fMRIPrep (YYYYMMDD-HHMMSS_<uuid> format)
+        if cleanup_work:
+            try:
+                residual_cmd = (
+                    f"find {self.config.remote_work} -maxdepth 1"
+                    r" \( -name 'fmriprep*' -o -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9]*_*' \)"
+                    " -type d -exec rm -rf {} + 2>/dev/null; true"
+                )
+                conn.execute(residual_cmd, timeout=120)
+            except Exception:
+                pass  # Non-critical residual cleanup
 
         return results
 
