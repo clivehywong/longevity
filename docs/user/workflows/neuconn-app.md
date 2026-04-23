@@ -60,7 +60,7 @@ The sidebar has two levels:
 
 | Column | Meaning |
 |---|---|
-| fMRIPrep | HTML report found in `derivatives/func/preprocessing/fmriprep/<sub>/` |
+| fMRIPrep | Root-level subject HTML report `sub-XXX.html` found in `derivatives/func/preprocessing/fmriprep/` |
 | XCP-D FC | output directory found for FC (no GSR) pipeline |
 | XCP-D FC+GSR | output directory found for FC+GSR pipeline |
 | XCP-D EC | output directory found for EC pipeline |

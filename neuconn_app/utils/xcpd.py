@@ -1222,11 +1222,14 @@ def _write_subject_status_files(
     ``failed <timestamp>``.
     """
     xcpd_dir_key = f"xcpd_{pipeline_name}_dir"
-    xcpd_output_dir = Path(
+    xcpd_output_dir_raw = (
         config["paths"].get(xcpd_dir_key)
         or config["paths"].get("xcpd_fc_dir", "")
     )
-    if not xcpd_output_dir or not xcpd_output_dir.exists():
+    if not xcpd_output_dir_raw:
+        return
+    xcpd_output_dir = Path(xcpd_output_dir_raw)
+    if not xcpd_output_dir.exists():
         return
     timestamp = run_info.get("completed_at", datetime.now().isoformat())
     status_text = f"completed {timestamp}" if success else f"failed {timestamp}"

@@ -17,10 +17,16 @@ import streamlit as st
 _GROUP_CSV_COLUMNS = ["subject_id", "group"]
 
 
-def _locate_group_csv(config: dict) -> Path:
-    """Return expected path of group.csv (project_root/group.csv)."""
-    project_root = config.get("project_root") or config.get("paths", {}).get("project_root", "")
-    project_root = Path(project_root).expanduser()
+def _locate_group_csv(config: dict) -> Optional[Path]:
+    """Return expected path of group.csv, or None if project_root is not configured."""
+    project_root_str = (
+        config.get("project_root") or config.get("paths", {}).get("project_root", "")
+    )
+    if not project_root_str:
+        return None
+    project_root = Path(project_root_str).expanduser()
+    if not project_root.is_absolute():
+        return None
     return project_root / "group.csv"
 
 
@@ -52,6 +58,14 @@ def render() -> None:
 
     config = st.session_state.get("config", {})
     csv_path = _locate_group_csv(config)
+
+    # Guard: project_root must be configured before any file I/O is allowed
+    if csv_path is None:
+        st.error(
+            "**Project root not configured.** "
+            "Go to **Settings** and set `project_root` before using this page."
+        )
+        return
 
     # ── Load or initialise state ─────────────────────────────────────────────
     if "subject_data_df" not in st.session_state or st.button(
@@ -95,10 +109,15 @@ def render() -> None:
     # ── Editable table ───────────────────────────────────────────────────────
     st.subheader("Group assignments")
 
-    # Build column config with a constrained group dropdown where possible
+    # Build column config with a constrained group dropdown where possible.
+    # subject_id must remain editable when num_rows="dynamic" so users can
+    # enter IDs for newly-added rows.  Validation is done at save time.
     groups_seen = sorted(set(df.get("group", pd.Series(dtype=str)).dropna().unique()) - {""})
     col_config: dict = {
-        "subject_id": st.column_config.TextColumn("Subject ID", disabled=True),
+        "subject_id": st.column_config.TextColumn(
+            "Subject ID",
+            help="BIDS subject identifier, e.g. sub-033",
+        ),
         "group": st.column_config.SelectboxColumn(
             "Group",
             options=groups_seen or ["Control", "Walking"],
@@ -157,11 +176,20 @@ def render() -> None:
     save_col, _ = st.columns([1, 3])
     with save_col:
         if st.button("💾 Save to group.csv", type="primary", width="stretch"):
-            try:
-                final = st.session_state.subject_data_df
-                final.to_csv(csv_path, index=False)
-                st.success(f"Saved {len(final)} rows to `{csv_path}`")
-            except Exception as e:
-                st.error(f"Could not save: {e}")
+            final = st.session_state.subject_data_df
+            # Validate subject_id uniqueness before writing
+            dup_ids = final["subject_id"].dropna().duplicated()
+            if dup_ids.any():
+                st.error(
+                    f"Duplicate subject IDs detected: "
+                    f"{', '.join(final['subject_id'][dup_ids].unique())}. "
+                    "Fix before saving."
+                )
+            else:
+                try:
+                    final.to_csv(csv_path, index=False)
+                    st.success(f"Saved {len(final)} rows to `{csv_path}`")
+                except Exception as e:
+                    st.error(f"Could not save: {e}")
 
     st.caption(f"File: `{csv_path}`")

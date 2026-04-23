@@ -24,15 +24,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _fmriprep_status(fmriprep_dir: Path, sub: str) -> str:
-    """Return traffic-light emoji for fMRIPrep completion."""
-    sub_dir = fmriprep_dir / sub
-    if not sub_dir.exists():
-        return "⚪"
-    # XCP-D HTML report is the canonical completion indicator
-    html_files = list(sub_dir.rglob("*.html"))
-    if html_files:
+    """Return traffic-light emoji for fMRIPrep completion.
+
+    fMRIPrep writes its subject-level HTML report as ``sub-XXX.html`` at the
+    root of the output directory, not inside the per-subject folder.  We also
+    accept the presence of ``dataset_description.json`` as a secondary
+    completeness indicator.
+    """
+    # Primary: root-level subject report, e.g. fmriprep/sub-033.html
+    if (fmriprep_dir / f"{sub}.html").exists():
         return "✅"
-    return "🔄"
+    # Secondary: dataset_description.json presence (run started and wrote outputs)
+    if (fmriprep_dir / "dataset_description.json").exists() and (fmriprep_dir / sub).exists():
+        return "✅"
+    if (fmriprep_dir / sub).exists():
+        return "🔄"
+    return "⚪"
 
 
 def _xcpd_status(xcpd_out_dir: Path, sub: str) -> str:

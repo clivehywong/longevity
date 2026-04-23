@@ -21,8 +21,9 @@ def get_xcpd_subject_status(xcpd_output_dir: Path, subjects: List[str]) -> pd.Da
 
     For each subject the function checks for:
     1. A ``status`` sentinel file written by NeuConn after a run completes.
-    2. Presence of the XCP-D HTML report (``sub-*/figures/*.html``) as a
-       fallback indicator that XCP-D itself finished successfully.
+    2. Presence of any XCP-D HTML file anywhere under the subject directory
+       (``sub_dir.rglob("*.html")``) as a fallback indicator that XCP-D itself
+       finished successfully.
 
     Returns a DataFrame with columns: subject, status, details.
     """
