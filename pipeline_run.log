@@ -1,0 +1,363 @@
+nohup: ignoring input
+============================================
+============================================
+PIPELINE STARTED: Wed Apr 22 05:51:58 PM HKT 2026
+============================================
+PIPELINE STARTED: Wed Apr 22 05:51:58 PM HKT 2026
+============================================
+
+
+--- Phase 1 Check #1 at Wed Apr 22 05:51:58 PM HKT 2026 ---
+--- Phase 1 Check #1 at Wed Apr 22 05:51:58 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4331_1 shared_cp                                      fmriprep_long clivewon  RUNNING      11:48 1-00:00:00      1 eduhkhpc4
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4331_1 shared_cp                                      fmriprep_long clivewon  RUNNING      11:48 1-00:00:00      1 eduhkhpc4
+            4331_2 shared_cp                                      fmriprep_long clivewon  RUNNING      11:48 1-00:00:00      1 eduhkhpc4
+            4331_3 shared_cp                                      fmriprep_long clivewon  RUNNING      11:48 1-00:00:00      1 eduhkhpc4
+            4331_4 shared_cp                                      fmriprep_long clivewon  RUNNING      11:48 1-00:00:00      1 eduhkhpc4
+--- Log tails ---
+            4331_2 shared_cp                                      fmriprep_long clivewon  RUNNING      11:48 1-00:00:00      1 eduhkhpc4
+            4331_3 shared_cp                                      fmriprep_long clivewon  RUNNING      11:48 1-00:00:00      1 eduhkhpc4
+            4331_4 shared_cp                                      fmriprep_long clivewon  RUNNING      11:48 1-00:00:00      1 eduhkhpc4
+--- Log tails ---
+sub-066:
+sub-066:
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_066_ses_01-02_wf.anat_fit_wf.t2w_template_wf.anat_merge" in "/work/fmriprep_25_2_wf/sub_066_ses_01-02_wf/anat_fit_wf/t2w_template_wf/anat_merge".
+260422-17:51:19,340 nipype.workflow INFO:
+	 [Node] Executing "anat_merge" <niworkflows.interfaces.freesurfer.StructuralReference>
+---
+sub-068:
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_068_ses_01-02_wf.anat_fit_wf.t2w_template_wf.anat_merge" in "/work/fmriprep_25_2_wf/sub_068_ses_01-02_wf/anat_fit_wf/t2w_template_wf/anat_merge".
+260422-17:51:23,932 nipype.workflow INFO:
+	 [Node] Executing "anat_merge" <niworkflows.interfaces.freesurfer.StructuralReference>
+---
+sub-072:
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_072_ses_01-02_wf.anat_fit_wf.t2w_template_wf.anat_merge" in "/work/fmriprep_25_2_wf/sub_072_ses_01-02_wf/anat_fit_wf/t2w_template_wf/anat_merge".
+260422-17:51:43,0 nipype.workflow INFO:
+	 [Node] Executing "anat_merge" <niworkflows.interfaces.freesurfer.StructuralReference>
+---
+sub-077:
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_066_ses_01-02_wf.anat_fit_wf.t2w_template_wf.anat_merge" in "/work/fmriprep_25_2_wf/sub_066_ses_01-02_wf/anat_fit_wf/t2w_template_wf/anat_merge".
+260422-17:51:19,340 nipype.workflow INFO:
+	 [Node] Executing "anat_merge" <niworkflows.interfaces.freesurfer.StructuralReference>
+---
+sub-068:
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_068_ses_01-02_wf.anat_fit_wf.t2w_template_wf.anat_merge" in "/work/fmriprep_25_2_wf/sub_068_ses_01-02_wf/anat_fit_wf/t2w_template_wf/anat_merge".
+260422-17:51:23,932 nipype.workflow INFO:
+	 [Node] Executing "anat_merge" <niworkflows.interfaces.freesurfer.StructuralReference>
+---
+sub-072:
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_072_ses_01-02_wf.anat_fit_wf.t2w_template_wf.anat_merge" in "/work/fmriprep_25_2_wf/sub_072_ses_01-02_wf/anat_fit_wf/t2w_template_wf/anat_merge".
+260422-17:51:43,0 nipype.workflow INFO:
+	 [Node] Executing "anat_merge" <niworkflows.interfaces.freesurfer.StructuralReference>
+---
+sub-077:
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_077_ses_01-02_wf.anat_fit_wf.anat_template_wf.anat_merge" in "/work/fmriprep_25_2_wf/sub_077_ses_01-02_wf/anat_fit_wf/anat_template_wf/anat_merge".
+260422-17:51:30,523 nipype.workflow INFO:
+	 [Node] Executing "anat_merge" <niworkflows.interfaces.freesurfer.StructuralReference>
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_077_ses_01-02_wf.anat_fit_wf.anat_template_wf.anat_merge" in "/work/fmriprep_25_2_wf/sub_077_ses_01-02_wf/anat_fit_wf/anat_template_wf/anat_merge".
+260422-17:51:30,523 nipype.workflow INFO:
+	 [Node] Executing "anat_merge" <niworkflows.interfaces.freesurfer.StructuralReference>
+Jobs still running, sleeping 30 minutes...
+Jobs still running, sleeping 30 minutes...
+
+
+--- Phase 1 Check #2 at Wed Apr 22 06:21:59 PM HKT 2026 ---
+--- Phase 1 Check #2 at Wed Apr 22 06:21:59 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- Log tails ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- Log tails ---
+sub-066:
+sub-066:
+Exit code: 0
+End time: Wed Apr 22 06:03:31 PM HKT 2026
+======================================
+---
+sub-068:
+Exit code: 0
+End time: Wed Apr 22 06:03:03 PM HKT 2026
+======================================
+---
+sub-072:
+Exit code: 0
+End time: Wed Apr 22 06:04:28 PM HKT 2026
+======================================
+---
+sub-077:
+Exit code: 0
+End time: Wed Apr 22 06:04:54 PM HKT 2026
+======================================
+Exit code: 0
+End time: Wed Apr 22 06:03:31 PM HKT 2026
+======================================
+---
+sub-068:
+Exit code: 0
+End time: Wed Apr 22 06:03:03 PM HKT 2026
+======================================
+---
+sub-072:
+Exit code: 0
+End time: Wed Apr 22 06:04:28 PM HKT 2026
+======================================
+---
+sub-077:
+Exit code: 0
+End time: Wed Apr 22 06:04:54 PM HKT 2026
+======================================
+=== All fMRIPrep jobs (4331_*) are GONE from queue at Wed Apr 22 06:21:59 PM HKT 2026 ===
+=== All fMRIPrep jobs (4331_*) are GONE from queue at Wed Apr 22 06:21:59 PM HKT 2026 ===
+
+
+=== PHASE 2: Checking fMRIPrep Outputs at Wed Apr 22 06:21:59 PM HKT 2026 ===
+=== PHASE 2: Checking fMRIPrep Outputs at Wed Apr 22 06:21:59 PM HKT 2026 ===
+--- Error counts ---
+--- Error counts ---
+/home/clivewong/proj/long/logs/sub-1_4332.out:2
+/home/clivewong/proj/long/logs/sub-2_4333.out:2
+/home/clivewong/proj/long/logs/sub-3_4334.out:2
+/home/clivewong/proj/long/logs/sub-4_4331.out:2
+/home/clivewong/proj/long/logs/sub-1_4332.out:2
+/home/clivewong/proj/long/logs/sub-2_4333.out:2
+/home/clivewong/proj/long/logs/sub-3_4334.out:2
+/home/clivewong/proj/long/logs/sub-4_4331.out:2
+--- Output dirs ---
+--- Output dirs ---
+sub-077
+sub-077.html
+sub-077
+sub-077.html
+--- MNI BOLD files ---
+--- MNI BOLD files ---
+sub-066: 0 MNI BOLD files
+sub-066: 0 MNI BOLD files
+sub-068: 0 MNI BOLD files
+sub-068: 0 MNI BOLD files
+sub-072: 0 MNI BOLD files
+sub-072: 0 MNI BOLD files
+sub-077: 0 MNI BOLD files
+sub-077: 0 MNI BOLD files
+--- HTML reports ---
+--- HTML reports ---
+/home/clivewong/proj/long/derivatives/preprocessing/fmriprep/sub-077.html
+/home/clivewong/proj/long/derivatives/preprocessing/fmriprep/sub-077.html
+No HTML reports found
+No HTML reports found
+--- Log success/fail messages ---
+--- Log success/fail messages ---
+Log: sub-1_4332
+Log: sub-1_4332
+	 fMRIPrep finished successfully!
+WARNING: fMRIPrep exited with code 1 but HTML report exists — treating as success
+Finished subject: 066
+	 fMRIPrep finished successfully!
+WARNING: fMRIPrep exited with code 1 but HTML report exists — treating as success
+Finished subject: 066
+Log: sub-2_4333
+Log: sub-2_4333
+	 fMRIPrep finished successfully!
+WARNING: fMRIPrep exited with code 1 but HTML report exists — treating as success
+Finished subject: 068
+	 fMRIPrep finished successfully!
+WARNING: fMRIPrep exited with code 1 but HTML report exists — treating as success
+Finished subject: 068
+Log: sub-3_4334
+Log: sub-3_4334
+	 fMRIPrep finished successfully!
+WARNING: fMRIPrep exited with code 1 but HTML report exists — treating as success
+Finished subject: 072
+	 fMRIPrep finished successfully!
+WARNING: fMRIPrep exited with code 1 but HTML report exists — treating as success
+Finished subject: 072
+Log: sub-4_4331
+Log: sub-4_4331
+	 fMRIPrep finished successfully!
+WARNING: fMRIPrep exited with code 1 but HTML report exists — treating as success
+Finished subject: 077
+	 fMRIPrep finished successfully!
+WARNING: fMRIPrep exited with code 1 but HTML report exists — treating as success
+Finished subject: 077
+
+
+=== PHASE 3: Downloading fMRIPrep Outputs at Wed Apr 22 06:22:02 PM HKT 2026 ===
+=== PHASE 3: Downloading fMRIPrep Outputs at Wed Apr 22 06:22:02 PM HKT 2026 ===
+--- Downloading sub-066 at Wed Apr 22 06:22:02 PM HKT 2026 ---
+--- Downloading sub-066 at Wed Apr 22 06:22:02 PM HKT 2026 ---
+receiving incremental file list
+rsync: [sender] change_dir "/home/clivewong/proj/long/derivatives/preprocessing/fmriprep/sub-066" failed: No such file or directory (2)
+
+sent 8 bytes  received 8 bytes  32.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+receiving incremental file list
+rsync: [sender] change_dir "/home/clivewong/proj/long/derivatives/preprocessing/fmriprep/sub-066" failed: No such file or directory (2)
+
+sent 8 bytes  received 8 bytes  32.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+Done sub-066 at Wed Apr 22 06:22:02 PM HKT 2026
+Done sub-066 at Wed Apr 22 06:22:02 PM HKT 2026
+--- Downloading sub-068 at Wed Apr 22 06:22:02 PM HKT 2026 ---
+--- Downloading sub-068 at Wed Apr 22 06:22:02 PM HKT 2026 ---
+receiving incremental file list
+rsync: [sender] change_dir "/home/clivewong/proj/long/derivatives/preprocessing/fmriprep/sub-068" failed: No such file or directory (2)
+
+sent 8 bytes  received 8 bytes  10.67 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+receiving incremental file list
+rsync: [sender] change_dir "/home/clivewong/proj/long/derivatives/preprocessing/fmriprep/sub-068" failed: No such file or directory (2)
+
+sent 8 bytes  received 8 bytes  10.67 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+Done sub-068 at Wed Apr 22 06:22:03 PM HKT 2026
+Done sub-068 at Wed Apr 22 06:22:03 PM HKT 2026
+--- Downloading sub-072 at Wed Apr 22 06:22:03 PM HKT 2026 ---
+--- Downloading sub-072 at Wed Apr 22 06:22:03 PM HKT 2026 ---
+receiving incremental file list
+rsync: [sender] change_dir "/home/clivewong/proj/long/derivatives/preprocessing/fmriprep/sub-072" failed: No such file or directory (2)
+
+sent 8 bytes  received 8 bytes  32.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+receiving incremental file list
+rsync: [sender] change_dir "/home/clivewong/proj/long/derivatives/preprocessing/fmriprep/sub-072" failed: No such file or directory (2)
+
+sent 8 bytes  received 8 bytes  32.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+Done sub-072 at Wed Apr 22 06:22:03 PM HKT 2026
+Done sub-072 at Wed Apr 22 06:22:03 PM HKT 2026
+--- Downloading sub-077 at Wed Apr 22 06:22:03 PM HKT 2026 ---
+--- Downloading sub-077 at Wed Apr 22 06:22:03 PM HKT 2026 ---
+receiving incremental file list
+
+sent 31 bytes  received 1,654 bytes  3,370.00 bytes/sec
+total size is 48,706,637  speedup is 28,906.02
+receiving incremental file list
+
+sent 31 bytes  received 1,654 bytes  3,370.00 bytes/sec
+total size is 48,706,637  speedup is 28,906.02
+Done sub-077 at Wed Apr 22 06:22:03 PM HKT 2026
+Done sub-077 at Wed Apr 22 06:22:03 PM HKT 2026
+--- Downloading HTML reports ---
+--- Downloading HTML reports ---
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+
+sent 20 bytes  received 74 bytes  188.00 bytes/sec
+total size is 59,422  speedup is 632.15
+
+sent 20 bytes  received 74 bytes  188.00 bytes/sec
+total size is 59,422  speedup is 632.15
+--- Verify downloads ---
+--- Verify downloads ---
+sub-066: 0 MNI BOLD files
+sub-066: 0 MNI BOLD files
+sub-068: 0 MNI BOLD files
+sub-068: 0 MNI BOLD files
+sub-072: 0 MNI BOLD files
+sub-072: 0 MNI BOLD files
+sub-077: 0 MNI BOLD files
+sub-077: 0 MNI BOLD files
+
+
+=== PHASE 4: Cleaning up HPC fMRIPrep work dir at Wed Apr 22 06:22:05 PM HKT 2026 ===
+=== PHASE 4: Cleaning up HPC fMRIPrep work dir at Wed Apr 22 06:22:05 PM HKT 2026 ===
+2.8G	/home/clivewong/proj/long/work/
+2.8G	/home/clivewong/proj/long/work/
+fMRIPrep work cleanup done
+fMRIPrep work cleanup done
+2.1M	/home/clivewong/proj/long/work/
+2.1M	/home/clivewong/proj/long/work/
+
+
+=== PHASE 5a: Checking QC Status at Wed Apr 22 06:22:24 PM HKT 2026 ===
+=== PHASE 5a: Checking QC Status at Wed Apr 22 06:22:24 PM HKT 2026 ===
+sub-066: {'sub-066_ses-02_rest_bold': {'notes': 'Missing Volume', 'reviewer': 'user', 'status': '❌ Fail', 'timestamp': '2026-04-11T21:26:23.987589'}}
+sub-068: {'sub-068_ses-02_rest_bold': {'notes': 'Missing Volume', 'reviewer': 'user', 'status': '❌ Fail', 'timestamp': '2026-04-11T21:27:20.365435'}}
+sub-072: {'sub-072_ses-02_rest_bold': {'notes': 'Missing Volume', 'reviewer': 'user', 'status': '❌ Fail', 'timestamp': '2026-04-11T21:29:32.376043'}}
+sub-077: {'sub-077_ses-02_rest_bold': {'notes': 'Missing Volume', 'reviewer': 'user', 'status': '❌ Fail', 'timestamp': '2026-04-11T21:28:33.626644'}}
+sub-066: {'sub-066_ses-02_rest_bold': {'notes': 'Missing Volume', 'reviewer': 'user', 'status': '❌ Fail', 'timestamp': '2026-04-11T21:26:23.987589'}}
+sub-068: {'sub-068_ses-02_rest_bold': {'notes': 'Missing Volume', 'reviewer': 'user', 'status': '❌ Fail', 'timestamp': '2026-04-11T21:27:20.365435'}}
+sub-072: {'sub-072_ses-02_rest_bold': {'notes': 'Missing Volume', 'reviewer': 'user', 'status': '❌ Fail', 'timestamp': '2026-04-11T21:29:32.376043'}}
+sub-077: {'sub-077_ses-02_rest_bold': {'notes': 'Missing Volume', 'reviewer': 'user', 'status': '❌ Fail', 'timestamp': '2026-04-11T21:28:33.626644'}}
+QC Updated: ['sub-066_ses-02_rest_bold', 'sub-068_ses-02_rest_bold', 'sub-072_ses-02_rest_bold', 'sub-077_ses-02_rest_bold']
+QC Updated: ['sub-066_ses-02_rest_bold', 'sub-068_ses-02_rest_bold', 'sub-072_ses-02_rest_bold', 'sub-077_ses-02_rest_bold']
+
+
+=== PHASE 5b: Submitting XCP-D at Wed Apr 22 06:22:24 PM HKT 2026 ===
+--- Submitting XCP-D FC ---
+=== PHASE 5b: Submitting XCP-D at Wed Apr 22 06:22:24 PM HKT 2026 ===
+--- Submitting XCP-D FC ---
+FC submission: Submitted batch job 4337
+FC submission: Submitted batch job 4337
+FC Job ID: 4337
+FC Job ID: 4337
+--- Submitting XCP-D FC+GSR ---
+--- Submitting XCP-D FC+GSR ---
+FC+GSR submission: Submitted batch job 4338
+FC+GSR submission: Submitted batch job 4338
+FC+GSR Job ID: 4338
+FC+GSR Job ID: 4338
+--- Submitting XCP-D EC ---
+--- Submitting XCP-D EC ---
+EC submission: Submitted batch job 4339
+EC submission: Submitted batch job 4339
+EC Job ID: 4339
+EC Job ID: 4339
+=== XCP-D Jobs submitted: FC=4337, FC+GSR=4338, EC=4339 ===
+=== XCP-D Jobs submitted: FC=4337, FC+GSR=4338, EC=4339 ===
+Job IDs saved to xcpd_job_ids.txt
+Job IDs saved to xcpd_job_ids.txt
+
+
+=== PHASE 6: Monitoring XCP-D at Wed Apr 22 06:22:25 PM HKT 2026 ===
+=== PHASE 6: Monitoring XCP-D at Wed Apr 22 06:22:25 PM HKT 2026 ===
+
+
+--- XCP-D Check #1 at Wed Apr 22 06:22:25 PM HKT 2026 ---
+--- XCP-D Check #1 at Wed Apr 22 06:22:25 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4339 shared_cp                                      xcpd_ec_4subs clivewon  PENDING       0:00 1-00:00:00      1 (None)
+              4337 shared_cp                                      xcpd_fc_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+              4338 shared_cp                                   xcpd_fcgsr_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+--- Checking XCP-D outputs ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4339 shared_cp                                      xcpd_ec_4subs clivewon  PENDING       0:00 1-00:00:00      1 (None)
+              4337 shared_cp                                      xcpd_fc_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+              4338 shared_cp                                   xcpd_fcgsr_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+--- Checking XCP-D outputs ---
+  fc: no output yet
+  fc: no output yet
+  fc_gsr: no output yet
+  fc_gsr: no output yet
+  ec: no output yet
+  ec: no output yet
+XCP-D jobs still in queue, sleeping 30 minutes...
+XCP-D jobs still in queue, sleeping 30 minutes...

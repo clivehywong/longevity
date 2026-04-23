@@ -1,0 +1,3499 @@
+nohup: ignoring input
+============================================
+============================================
+PIPELINE V2 STARTED: Wed Apr 22 06:36:03 PM HKT 2026
+PIPELINE V2 STARTED: Wed Apr 22 06:36:03 PM HKT 2026
+PID: 467049
+PID: 467049
+Subjects: 066 068 072 077
+Subjects: 066 068 072 077
+============================================
+============================================
+
+
+=== PHASE 0: Pre-flight at Wed Apr 22 06:36:03 PM HKT 2026 ===
+=== PHASE 0: Pre-flight at Wed Apr 22 06:36:03 PM HKT 2026 ===
+--- Removing stale fsaverage from HPC ---
+--- Removing stale fsaverage from HPC ---
+fsaverage removed
+fsaverage removed
+--- HPC FreeSurfer subjects dir contents ---
+--- HPC FreeSurfer subjects dir contents ---
+--- Cleaning stale XCP-D work ---
+--- Cleaning stale XCP-D work ---
+xcpd work cleaned
+xcpd work cleaned
+--- Updating sublist.txt ---
+--- Updating sublist.txt ---
+sublist.txt now contains:
+sublist.txt now contains:
+066
+068
+072
+077
+066
+068
+072
+077
+--- Uploading BIDS data ---
+--- Uploading BIDS data ---
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1338) [sender=3.2.7]
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1338) [sender=3.2.7]
+  Uploading sub-066...
+  Uploading sub-066...
+
+sent 817,733,468 bytes  received 1,368 bytes  77,879,508.19 bytes/sec
+total size is 817,589,757  speedup is 1.00
+
+sent 817,733,468 bytes  received 1,368 bytes  77,879,508.19 bytes/sec
+total size is 817,589,757  speedup is 1.00
+  Uploading sub-068...
+  Uploading sub-068...
+
+sent 799,684,608 bytes  received 1,368 bytes  84,177,471.16 bytes/sec
+total size is 799,548,050  speedup is 1.00
+
+sent 799,684,608 bytes  received 1,368 bytes  84,177,471.16 bytes/sec
+total size is 799,548,050  speedup is 1.00
+  Uploading sub-072...
+  Uploading sub-072...
+
+sent 801,568,035 bytes  received 1,368 bytes  84,375,726.63 bytes/sec
+total size is 801,428,344  speedup is 1.00
+
+sent 801,568,035 bytes  received 1,368 bytes  84,375,726.63 bytes/sec
+total size is 801,428,344  speedup is 1.00
+  Uploading sub-077...
+  Uploading sub-077...
+
+sent 845,126,588 bytes  received 1,368 bytes  80,488,376.76 bytes/sec
+total size is 844,976,010  speedup is 1.00
+
+sent 845,126,588 bytes  received 1,368 bytes  80,488,376.76 bytes/sec
+total size is 844,976,010  speedup is 1.00
+BIDS upload complete at Wed Apr 22 06:36:44 PM HKT 2026
+BIDS upload complete at Wed Apr 22 06:36:44 PM HKT 2026
+  HPC bids/sub-066: 22 .nii.gz files
+  HPC bids/sub-066: 22 .nii.gz files
+  HPC bids/sub-068: 22 .nii.gz files
+  HPC bids/sub-068: 22 .nii.gz files
+  HPC bids/sub-072: 22 .nii.gz files
+  HPC bids/sub-072: 22 .nii.gz files
+  HPC bids/sub-077: 22 .nii.gz files
+  HPC bids/sub-077: 22 .nii.gz files
+
+
+=== PHASE 1: Submitting fMRIPrep at Wed Apr 22 06:36:45 PM HKT 2026 ===
+=== PHASE 1: Submitting fMRIPrep at Wed Apr 22 06:36:45 PM HKT 2026 ===
+Submission: Submitted batch job 4340
+Submission: Submitted batch job 4340
+fMRIPrep array job ID: 4340
+fMRIPrep array job ID: 4340
+Monitoring job 4340...
+Monitoring job 4340...
+
+
+--- fMRIPrep Check #1 at Wed Apr 22 06:36:45 PM HKT 2026 ---
+--- fMRIPrep Check #1 at Wed Apr 22 06:36:45 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+      4340_[1-4%4] shared_cp                                      fmriprep_long clivewon  PENDING       0:00 1-00:00:00      1 (None)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+      4340_[1-4%4] shared_cp                                      fmriprep_long clivewon  PENDING       0:00 1-00:00:00      1 (None)
+  task4: ======================================
+  task4: ======================================
+Job 4340 still in queue, sleeping 30 min...
+Job 4340 still in queue, sleeping 30 min...
+
+
+--- fMRIPrep Check #2 at Wed Apr 22 07:06:46 PM HKT 2026 ---
+--- fMRIPrep Check #2 at Wed Apr 22 07:06:46 PM HKT 2026 ---
+
+
+  task4: 	 [Node] Executing "autorecon1" <smriprep.interfaces.freesurfer.ReconAll>
+  task4: 	 [Node] Executing "autorecon1" <smriprep.interfaces.freesurfer.ReconAll>
+=== Job 4340 left queue at Wed Apr 22 07:06:47 PM HKT 2026 ===
+=== Job 4340 left queue at Wed Apr 22 07:06:47 PM HKT 2026 ===
+--- Checking sacct for exit status ---
+--- Checking sacct for exit status ---
+4340_1       CANCELLED+      0:0   00:24:05            
+4340_1.batch  CANCELLED     0:15   00:24:06  14894156K 
+4340_1.exte+  COMPLETED      0:0   00:24:07       256K 
+4340_2       CANCELLED+      0:0   00:24:05            
+4340_2.batch  CANCELLED     0:15   00:24:06  14742324K 
+4340_2.exte+  COMPLETED      0:0   00:24:07          0 
+4340_3       CANCELLED+      0:0   00:24:05            
+4340_3.batch  CANCELLED     0:15   00:24:06  15097360K 
+4340_3.exte+  COMPLETED      0:0   00:24:07       256K 
+4340_4       CANCELLED+      0:0   00:24:05            
+4340_4.batch  CANCELLED     0:15   00:24:06  16181504K 
+4340_4.exte+  COMPLETED      0:0   00:24:07       256K 
+4340_1       CANCELLED+      0:0   00:24:05            
+4340_1.batch  CANCELLED     0:15   00:24:06  14894156K 
+4340_1.exte+  COMPLETED      0:0   00:24:07       256K 
+4340_2       CANCELLED+      0:0   00:24:05            
+4340_2.batch  CANCELLED     0:15   00:24:06  14742324K 
+4340_2.exte+  COMPLETED      0:0   00:24:07          0 
+4340_3       CANCELLED+      0:0   00:24:05            
+4340_3.batch  CANCELLED     0:15   00:24:06  15097360K 
+4340_3.exte+  COMPLETED      0:0   00:24:07       256K 
+4340_4       CANCELLED+      0:0   00:24:05            
+4340_4.batch  CANCELLED     0:15   00:24:06  16181504K 
+4340_4.exte+  COMPLETED      0:0   00:24:07       256K 
+
+
+=== PHASE 2: Verifying fMRIPrep Outputs at Wed Apr 22 07:06:47 PM HKT 2026 ===
+=== PHASE 2: Verifying fMRIPrep Outputs at Wed Apr 22 07:06:47 PM HKT 2026 ===
+--- MNI BOLD counts on HPC ---
+--- MNI BOLD counts on HPC ---
+  sub-066: 0 MNI BOLD, 0 confounds, 0 total .nii.gz
+  sub-066: 0 MNI BOLD, 0 confounds, 0 total .nii.gz
+    WARNING: incomplete!
+    WARNING: incomplete!
+  sub-068: 0 MNI BOLD, 0 confounds, 0 total .nii.gz
+  sub-068: 0 MNI BOLD, 0 confounds, 0 total .nii.gz
+    WARNING: incomplete!
+    WARNING: incomplete!
+  sub-072: 0 MNI BOLD, 0 confounds, 0 total .nii.gz
+  sub-072: 0 MNI BOLD, 0 confounds, 0 total .nii.gz
+    WARNING: incomplete!
+    WARNING: incomplete!
+  sub-077: 0 MNI BOLD, 0 confounds, 0 total .nii.gz
+  sub-077: 0 MNI BOLD, 0 confounds, 0 total .nii.gz
+    WARNING: incomplete!
+    WARNING: incomplete!
+--- SLURM log tails ---
+--- SLURM log tails ---
+	 [Node] Finished "_inu_n40", elapsed time 15.745912s.
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_077_ses_01-02_wf.anat_fit_wf.surface_recon_wf.autorecon1" in "/work/fmriprep_25_2_wf/sub_077_ses_01-02_wf/anat_fit_wf/surface_recon_wf/autorecon1".
+	 [Node] Finished "_inu_n40", elapsed time 15.745912s.
+	 [Node] Setting-up "fmriprep_25_2_wf.sub_077_ses_01-02_wf.anat_fit_wf.surface_recon_wf.autorecon1" in "/work/fmriprep_25_2_wf/sub_077_ses_01-02_wf/anat_fit_wf/surface_recon_wf/autorecon1".
+WARNING: fMRIPrep outputs appear incomplete. Check logs.
+WARNING: fMRIPrep outputs appear incomplete. Check logs.
+
+
+=== PHASE 3: Downloading fMRIPrep Outputs at Wed Apr 22 07:06:52 PM HKT 2026 ===
+=== PHASE 3: Downloading fMRIPrep Outputs at Wed Apr 22 07:06:52 PM HKT 2026 ===
+--- Downloading sub-066 ---
+--- Downloading sub-066 ---
+
+sent 32 bytes  received 8 bytes  80.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+
+sent 32 bytes  received 8 bytes  80.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+  Local: 0 .nii.gz total, 0 preproc_bold
+  Local: 0 .nii.gz total, 0 preproc_bold
+--- Downloading sub-068 ---
+--- Downloading sub-068 ---
+
+sent 32 bytes  received 8 bytes  80.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+
+sent 32 bytes  received 8 bytes  80.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+  Local: 0 .nii.gz total, 0 preproc_bold
+  Local: 0 .nii.gz total, 0 preproc_bold
+--- Downloading sub-072 ---
+--- Downloading sub-072 ---
+
+sent 32 bytes  received 8 bytes  26.67 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+
+sent 32 bytes  received 8 bytes  26.67 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+  Local: 0 .nii.gz total, 0 preproc_bold
+  Local: 0 .nii.gz total, 0 preproc_bold
+--- Downloading sub-077 ---
+--- Downloading sub-077 ---
+
+sent 32 bytes  received 8 bytes  80.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+
+sent 32 bytes  received 8 bytes  80.00 bytes/sec
+total size is 0  speedup is 0.00
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1865) [Receiver=3.2.7]
+rsync: [Receiver] write error: Broken pipe (32)
+  Local: 0 .nii.gz total, 0 preproc_bold
+  Local: 0 .nii.gz total, 0 preproc_bold
+
+sent 676 bytes  received 2,269 bytes  5,890.00 bytes/sec
+total size is 75,097  speedup is 25.50
+
+sent 676 bytes  received 2,269 bytes  5,890.00 bytes/sec
+total size is 75,097  speedup is 25.50
+
+
+=== PHASE 4: Cleaning HPC fMRIPrep Work + BIDS at Wed Apr 22 07:06:55 PM HKT 2026 ===
+=== PHASE 4: Cleaning HPC fMRIPrep Work + BIDS at Wed Apr 22 07:06:55 PM HKT 2026 ===
+4.0K	/home/clivewong/proj/long/work/
+4.0K	/home/clivewong/proj/long/work/
+fMRIPrep work cleaned
+fMRIPrep work cleaned
+Cleaned bids/sub-066
+Cleaned bids/sub-066
+Cleaned bids/sub-068
+Cleaned bids/sub-068
+Cleaned bids/sub-072
+Cleaned bids/sub-072
+Cleaned bids/sub-077
+Cleaned bids/sub-077
+4.0K	/home/clivewong/proj/long/work/
+4.0K	/home/clivewong/proj/long/work/
+8.0K	/home/clivewong/proj/long/bids/
+8.0K	/home/clivewong/proj/long/bids/
+
+
+=== PHASE 5a: Updating QC Status at Wed Apr 22 07:06:59 PM HKT 2026 ===
+=== PHASE 5a: Updating QC Status at Wed Apr 22 07:06:59 PM HKT 2026 ===
+Updated: []
+  sub-066_ses-02_rest_bold: {'status': 'pass', 'updated_at': '2026-04-22T18:22:24.313474', 'reason': 'Corrected BOLD data uploaded and processed by fMRIPrep'}
+  sub-068_ses-02_rest_bold: {'status': 'pass', 'updated_at': '2026-04-22T18:22:24.313490', 'reason': 'Corrected BOLD data uploaded and processed by fMRIPrep'}
+  sub-072_ses-02_rest_bold: {'status': 'pass', 'updated_at': '2026-04-22T18:22:24.313493', 'reason': 'Corrected BOLD data uploaded and processed by fMRIPrep'}
+  sub-077_ses-02_rest_bold: {'status': 'pass', 'updated_at': '2026-04-22T18:22:24.313496', 'reason': 'Corrected BOLD data uploaded and processed by fMRIPrep'}
+Updated: []
+  sub-066_ses-02_rest_bold: {'status': 'pass', 'updated_at': '2026-04-22T18:22:24.313474', 'reason': 'Corrected BOLD data uploaded and processed by fMRIPrep'}
+  sub-068_ses-02_rest_bold: {'status': 'pass', 'updated_at': '2026-04-22T18:22:24.313490', 'reason': 'Corrected BOLD data uploaded and processed by fMRIPrep'}
+  sub-072_ses-02_rest_bold: {'status': 'pass', 'updated_at': '2026-04-22T18:22:24.313493', 'reason': 'Corrected BOLD data uploaded and processed by fMRIPrep'}
+  sub-077_ses-02_rest_bold: {'status': 'pass', 'updated_at': '2026-04-22T18:22:24.313496', 'reason': 'Corrected BOLD data uploaded and processed by fMRIPrep'}
+
+
+=== PHASE 5b: Submitting XCP-D at Wed Apr 22 07:06:59 PM HKT 2026 ===
+=== PHASE 5b: Submitting XCP-D at Wed Apr 22 07:06:59 PM HKT 2026 ===
+FC: Submitted batch job 4345 -> job 4345
+FC: Submitted batch job 4345 -> job 4345
+FC+GSR: Submitted batch job 4346 -> job 4346
+FC+GSR: Submitted batch job 4346 -> job 4346
+EC: Submitted batch job 4347 -> job 4347
+EC: Submitted batch job 4347 -> job 4347
+XCP-D job IDs saved: FC=4345 FC+GSR=4346 EC=4347
+XCP-D job IDs saved: FC=4345 FC+GSR=4346 EC=4347
+
+
+=== PHASE 6: Monitoring XCP-D at Wed Apr 22 07:06:59 PM HKT 2026 ===
+=== PHASE 6: Monitoring XCP-D at Wed Apr 22 07:06:59 PM HKT 2026 ===
+
+
+--- XCP-D Check #1 at Wed Apr 22 07:06:59 PM HKT 2026 ---
+--- XCP-D Check #1 at Wed Apr 22 07:06:59 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4345 shared_cp                                      xcpd_fc_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+              4346 shared_cp                                   xcpd_fcgsr_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+              4347 shared_cp                                      xcpd_ec_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4345 shared_cp                                      xcpd_fc_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+              4346 shared_cp                                   xcpd_fcgsr_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+              4347 shared_cp                                      xcpd_ec_4subs clivewon  RUNNING       0:01 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+XCP-D jobs still running, sleeping 30 min...
+XCP-D jobs still running, sleeping 30 min...
+
+
+--- XCP-D Check #2 at Wed Apr 22 07:37:03 PM HKT 2026 ---
+--- XCP-D Check #2 at Wed Apr 22 07:37:03 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #3 at Wed Apr 22 08:07:11 PM HKT 2026 ---
+--- XCP-D Check #3 at Wed Apr 22 08:07:11 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #4 at Wed Apr 22 08:37:18 PM HKT 2026 ---
+--- XCP-D Check #4 at Wed Apr 22 08:37:18 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING      17:18 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING      17:18 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING      17:18 1-00:00:00      1 eduhkhpc4
+            4348_4 shared_cp                                      fmriprep_long clivewon  RUNNING      17:18 1-00:00:00      1 eduhkhpc4
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING      17:18 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING      17:18 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING      17:18 1-00:00:00      1 eduhkhpc4
+            4348_4 shared_cp                                      fmriprep_long clivewon  RUNNING      17:18 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #5 at Wed Apr 22 09:07:26 PM HKT 2026 ---
+--- XCP-D Check #5 at Wed Apr 22 09:07:26 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING      47:26 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING      47:26 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING      47:26 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING      47:26 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING      47:26 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING      47:26 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #6 at Wed Apr 22 09:37:34 PM HKT 2026 ---
+--- XCP-D Check #6 at Wed Apr 22 09:37:34 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING    1:17:34 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    1:17:34 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    1:17:34 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING    1:17:34 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    1:17:34 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    1:17:34 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #7 at Wed Apr 22 10:07:42 PM HKT 2026 ---
+--- XCP-D Check #7 at Wed Apr 22 10:07:42 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING    1:47:41 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    1:47:41 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    1:47:41 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING    1:47:41 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    1:47:41 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    1:47:41 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #8 at Wed Apr 22 10:37:49 PM HKT 2026 ---
+--- XCP-D Check #8 at Wed Apr 22 10:37:49 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING    2:17:49 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    2:17:49 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    2:17:49 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING    2:17:49 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    2:17:49 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    2:17:49 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #9 at Wed Apr 22 11:07:57 PM HKT 2026 ---
+--- XCP-D Check #9 at Wed Apr 22 11:07:57 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING    2:47:56 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    2:47:56 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    2:47:56 1-00:00:00      1 eduhkhpc4
+            4348_1 shared_cp                                      fmriprep_long clivewon  RUNNING    2:47:56 1-00:00:00      1 eduhkhpc4
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    2:47:56 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    2:47:56 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #10 at Wed Apr 22 11:38:04 PM HKT 2026 ---
+--- XCP-D Check #10 at Wed Apr 22 11:38:04 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    3:18:04 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    3:18:04 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+            4348_2 shared_cp                                      fmriprep_long clivewon  RUNNING    3:18:04 1-00:00:00      1 eduhkhpc4
+            4348_3 shared_cp                                      fmriprep_long clivewon  RUNNING    3:18:04 1-00:00:00      1 eduhkhpc4
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #11 at Thu Apr 23 12:08:12 AM HKT 2026 ---
+--- XCP-D Check #11 at Thu Apr 23 12:08:12 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #12 at Thu Apr 23 12:38:20 AM HKT 2026 ---
+--- XCP-D Check #12 at Thu Apr 23 12:38:20 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #13 at Thu Apr 23 01:08:27 AM HKT 2026 ---
+--- XCP-D Check #13 at Thu Apr 23 01:08:27 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #14 at Thu Apr 23 01:38:35 AM HKT 2026 ---
+--- XCP-D Check #14 at Thu Apr 23 01:38:35 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #15 at Thu Apr 23 02:08:43 AM HKT 2026 ---
+--- XCP-D Check #15 at Thu Apr 23 02:08:43 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #16 at Thu Apr 23 02:38:50 AM HKT 2026 ---
+--- XCP-D Check #16 at Thu Apr 23 02:38:50 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #17 at Thu Apr 23 03:08:58 AM HKT 2026 ---
+--- XCP-D Check #17 at Thu Apr 23 03:08:58 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #18 at Thu Apr 23 03:39:05 AM HKT 2026 ---
+--- XCP-D Check #18 at Thu Apr 23 03:39:05 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #19 at Thu Apr 23 04:09:13 AM HKT 2026 ---
+--- XCP-D Check #19 at Thu Apr 23 04:09:13 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #20 at Thu Apr 23 04:39:21 AM HKT 2026 ---
+--- XCP-D Check #20 at Thu Apr 23 04:39:21 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #21 at Thu Apr 23 05:09:29 AM HKT 2026 ---
+--- XCP-D Check #21 at Thu Apr 23 05:09:29 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #22 at Thu Apr 23 05:39:37 AM HKT 2026 ---
+--- XCP-D Check #22 at Thu Apr 23 05:39:37 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #23 at Thu Apr 23 06:09:44 AM HKT 2026 ---
+--- XCP-D Check #23 at Thu Apr 23 06:09:44 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #24 at Thu Apr 23 06:39:52 AM HKT 2026 ---
+--- XCP-D Check #24 at Thu Apr 23 06:39:52 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #25 at Thu Apr 23 07:10:00 AM HKT 2026 ---
+--- XCP-D Check #25 at Thu Apr 23 07:10:00 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #26 at Thu Apr 23 07:40:08 AM HKT 2026 ---
+--- XCP-D Check #26 at Thu Apr 23 07:40:08 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #27 at Thu Apr 23 08:10:16 AM HKT 2026 ---
+--- XCP-D Check #27 at Thu Apr 23 08:10:16 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #28 at Thu Apr 23 08:40:23 AM HKT 2026 ---
+--- XCP-D Check #28 at Thu Apr 23 08:40:23 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #29 at Thu Apr 23 09:10:31 AM HKT 2026 ---
+--- XCP-D Check #29 at Thu Apr 23 09:10:31 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #30 at Thu Apr 23 09:40:39 AM HKT 2026 ---
+--- XCP-D Check #30 at Thu Apr 23 09:40:39 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #31 at Thu Apr 23 10:10:47 AM HKT 2026 ---
+--- XCP-D Check #31 at Thu Apr 23 10:10:47 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #32 at Thu Apr 23 10:40:55 AM HKT 2026 ---
+--- XCP-D Check #32 at Thu Apr 23 10:40:55 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+      4370_[1-3%4] shared_cp                                            xcpd_ec clivewon  PENDING       0:00  12:00:00      1 (Dependency)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+      4370_[1-3%4] shared_cp                                            xcpd_ec clivewon  PENDING       0:00  12:00:00      1 (Dependency)
+      4369_[1-3%4] shared_cp                                        xcpd_fc_gsr clivewon  PENDING       0:00  12:00:00      1 (Dependency)
+              4371 shared_cp                                    fmriprep_sub077 clivewon  RUNNING      11:36 1-00:00:00      1 eduhkhpc4
+            4366_1 shared_cp                                            xcpd_fc clivewon  RUNNING      24:30  12:00:00      1 eduhkhpc3
+            4366_2 shared_cp                                            xcpd_fc clivewon  RUNNING      24:30  12:00:00      1 eduhkhpc3
+            4366_3 shared_cp                                            xcpd_fc clivewon  RUNNING      24:30  12:00:00      1 eduhkhpc3
+      4369_[1-3%4] shared_cp                                        xcpd_fc_gsr clivewon  PENDING       0:00  12:00:00      1 (Dependency)
+              4371 shared_cp                                    fmriprep_sub077 clivewon  RUNNING      11:36 1-00:00:00      1 eduhkhpc4
+            4366_1 shared_cp                                            xcpd_fc clivewon  RUNNING      24:30  12:00:00      1 eduhkhpc3
+            4366_2 shared_cp                                            xcpd_fc clivewon  RUNNING      24:30  12:00:00      1 eduhkhpc3
+            4366_3 shared_cp                                            xcpd_fc clivewon  RUNNING      24:30  12:00:00      1 eduhkhpc3
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 8 files
+  fc/sub-066: 8 files
+  fc/sub-068: 8 files
+  fc/sub-068: 8 files
+  fc/sub-072: 8 files
+  fc/sub-072: 8 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #33 at Thu Apr 23 11:11:03 AM HKT 2026 ---
+--- XCP-D Check #33 at Thu Apr 23 11:11:03 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+      4370_[1-3%4] shared_cp                                            xcpd_ec clivewon  PENDING       0:00  12:00:00      1 (Dependency)
+              4371 shared_cp                                    fmriprep_sub077 clivewon  RUNNING      41:44 1-00:00:00      1 eduhkhpc4
+            4369_1 shared_cp                                        xcpd_fc_gsr clivewon  RUNNING      23:29  12:00:00      1 eduhkhpc4
+            4369_2 shared_cp                                        xcpd_fc_gsr clivewon  RUNNING      23:29  12:00:00      1 eduhkhpc4
+            4369_3 shared_cp                                        xcpd_fc_gsr clivewon  RUNNING      23:29  12:00:00      1 eduhkhpc3
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+      4370_[1-3%4] shared_cp                                            xcpd_ec clivewon  PENDING       0:00  12:00:00      1 (Dependency)
+              4371 shared_cp                                    fmriprep_sub077 clivewon  RUNNING      41:44 1-00:00:00      1 eduhkhpc4
+            4369_1 shared_cp                                        xcpd_fc_gsr clivewon  RUNNING      23:29  12:00:00      1 eduhkhpc4
+            4369_2 shared_cp                                        xcpd_fc_gsr clivewon  RUNNING      23:29  12:00:00      1 eduhkhpc4
+            4369_3 shared_cp                                        xcpd_fc_gsr clivewon  RUNNING      23:29  12:00:00      1 eduhkhpc3
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 12 files
+  fc/sub-066: 12 files
+  fc/sub-068: 12 files
+  fc/sub-068: 12 files
+  fc/sub-072: 12 files
+  fc/sub-072: 12 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 8 files
+  fc_gsr/sub-066: 8 files
+  fc_gsr/sub-068: 8 files
+  fc_gsr/sub-068: 8 files
+  fc_gsr/sub-072: 10 files
+  fc_gsr/sub-072: 10 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #34 at Thu Apr 23 11:41:11 AM HKT 2026 ---
+--- XCP-D Check #34 at Thu Apr 23 11:41:11 AM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4371 shared_cp                                    fmriprep_sub077 clivewon  RUNNING    1:11:52 1-00:00:00      1 eduhkhpc4
+            4370_1 shared_cp                                            xcpd_ec clivewon  RUNNING      22:46  12:00:00      1 eduhkhpc4
+            4370_2 shared_cp                                            xcpd_ec clivewon  RUNNING      22:46  12:00:00      1 eduhkhpc4
+            4370_3 shared_cp                                            xcpd_ec clivewon  RUNNING      22:46  12:00:00      1 eduhkhpc3
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4371 shared_cp                                    fmriprep_sub077 clivewon  RUNNING    1:11:52 1-00:00:00      1 eduhkhpc4
+            4370_1 shared_cp                                            xcpd_ec clivewon  RUNNING      22:46  12:00:00      1 eduhkhpc4
+            4370_2 shared_cp                                            xcpd_ec clivewon  RUNNING      22:46  12:00:00      1 eduhkhpc4
+            4370_3 shared_cp                                            xcpd_ec clivewon  RUNNING      22:46  12:00:00      1 eduhkhpc3
+--- XCP-D output file counts ---
+  fc/sub-066: 12 files
+  fc/sub-066: 12 files
+  fc/sub-068: 12 files
+  fc/sub-068: 12 files
+  fc/sub-072: 12 files
+  fc/sub-072: 12 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 12 files
+  fc_gsr/sub-066: 12 files
+  fc_gsr/sub-068: 12 files
+  fc_gsr/sub-068: 12 files
+  fc_gsr/sub-072: 12 files
+  fc_gsr/sub-072: 12 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 6 files
+  ec/sub-066: 6 files
+  ec/sub-068: 6 files
+  ec/sub-068: 6 files
+  ec/sub-072: 6 files
+  ec/sub-072: 6 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #35 at Thu Apr 23 12:11:19 PM HKT 2026 ---
+--- XCP-D Check #35 at Thu Apr 23 12:11:19 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 12 files
+  fc/sub-066: 12 files
+  fc/sub-068: 12 files
+  fc/sub-068: 12 files
+  fc/sub-072: 12 files
+  fc/sub-072: 12 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 12 files
+  fc_gsr/sub-066: 12 files
+  fc_gsr/sub-068: 12 files
+  fc_gsr/sub-068: 12 files
+  fc_gsr/sub-072: 12 files
+  fc_gsr/sub-072: 12 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 8 files
+  ec/sub-066: 8 files
+  ec/sub-068: 8 files
+  ec/sub-068: 8 files
+  ec/sub-072: 8 files
+  ec/sub-072: 8 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #36 at Thu Apr 23 12:41:26 PM HKT 2026 ---
+--- XCP-D Check #36 at Thu Apr 23 12:41:26 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #37 at Thu Apr 23 01:11:34 PM HKT 2026 ---
+--- XCP-D Check #37 at Thu Apr 23 01:11:34 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #38 at Thu Apr 23 01:41:42 PM HKT 2026 ---
+--- XCP-D Check #38 at Thu Apr 23 01:41:42 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #39 at Thu Apr 23 02:11:50 PM HKT 2026 ---
+--- XCP-D Check #39 at Thu Apr 23 02:11:50 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #40 at Thu Apr 23 02:41:57 PM HKT 2026 ---
+--- XCP-D Check #40 at Thu Apr 23 02:41:57 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4398 shared_cp                                       fmriprep_066 clivewon  RUNNING      18:50   5:00:00      1 eduhkhpc3
+              4399 shared_cp                                       fmriprep_068 clivewon  RUNNING      18:50   5:00:00      1 eduhkhpc3
+              4400 shared_cp                                       fmriprep_072 clivewon  RUNNING      18:50   5:00:00      1 eduhkhpc3
+              4401 shared_cp                                       fmriprep_077 clivewon  RUNNING      18:50   5:00:00      1 eduhkhpc3
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4398 shared_cp                                       fmriprep_066 clivewon  RUNNING      18:50   5:00:00      1 eduhkhpc3
+              4399 shared_cp                                       fmriprep_068 clivewon  RUNNING      18:50   5:00:00      1 eduhkhpc3
+              4400 shared_cp                                       fmriprep_072 clivewon  RUNNING      18:50   5:00:00      1 eduhkhpc3
+              4401 shared_cp                                       fmriprep_077 clivewon  RUNNING      18:50   5:00:00      1 eduhkhpc3
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #41 at Thu Apr 23 03:12:05 PM HKT 2026 ---
+--- XCP-D Check #41 at Thu Apr 23 03:12:05 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4398 shared_cp                                       fmriprep_066 clivewon  RUNNING      48:57   5:00:00      1 eduhkhpc3
+              4399 shared_cp                                       fmriprep_068 clivewon  RUNNING      48:57   5:00:00      1 eduhkhpc3
+              4400 shared_cp                                       fmriprep_072 clivewon  RUNNING      48:57   5:00:00      1 eduhkhpc3
+              4401 shared_cp                                       fmriprep_077 clivewon  RUNNING      48:57   5:00:00      1 eduhkhpc3
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+              4398 shared_cp                                       fmriprep_066 clivewon  RUNNING      48:57   5:00:00      1 eduhkhpc3
+              4399 shared_cp                                       fmriprep_068 clivewon  RUNNING      48:57   5:00:00      1 eduhkhpc3
+              4400 shared_cp                                       fmriprep_072 clivewon  RUNNING      48:57   5:00:00      1 eduhkhpc3
+              4401 shared_cp                                       fmriprep_077 clivewon  RUNNING      48:57   5:00:00      1 eduhkhpc3
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
