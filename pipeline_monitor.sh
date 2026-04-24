@@ -180,8 +180,9 @@ echo "EC Job ID: $ec_job_id"
 echo "=== XCP-D Jobs submitted: FC=${fc_job_id}, FC+GSR=${fgsr_job_id}, EC=${ec_job_id} ==="
 
 # Save job IDs for monitoring
-echo "${fc_job_id} ${fgsr_job_id} ${ec_job_id}" > /home/clivewong/proj/longevity/xcpd_job_ids.txt
-echo "Job IDs saved to xcpd_job_ids.txt"
+mkdir -p /home/clivewong/proj/longevity/tmp
+echo "${fc_job_id} ${fgsr_job_id} ${ec_job_id}" > /home/clivewong/proj/longevity/tmp/xcpd_job_ids.txt
+echo "Job IDs saved to tmp/xcpd_job_ids.txt"
 
 ###############################################################################
 # Phase 6: Monitor XCP-D until all jobs complete

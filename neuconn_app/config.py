@@ -129,9 +129,10 @@ def get_project_root(config: Optional[Dict[str, Any]] = None) -> Path:
 def derive_project_paths(project_root: Path) -> Dict[str, str]:
     """Derive all project paths from PROJECT_ROOT."""
     derivatives = project_root / "derivatives"
-    preprocessing = derivatives / "preprocessing"
-    fmriprep = preprocessing / "fmriprep"
-    xcpd = preprocessing / "xcpd"
+    func_preprocessing = derivatives / "func" / "preprocessing"
+    fmriprep = func_preprocessing / "fmriprep"
+    xcpd = func_preprocessing / "xcpd"
+    dwi_preprocessing = derivatives / "dwi" / "preprocessing"
     subject_level = derivatives / "subject_level"
     group_level = derivatives / "group_level"
     qc = derivatives / "qc"
@@ -144,13 +145,17 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
         "bids_dir": str(project_root / "bids"),
         "neuconn_app_dir": str(app_root),
         "derivatives_dir": str(derivatives),
-        "preprocessing_dir": str(preprocessing),
+        "func_preprocessing_dir": str(func_preprocessing),
+        "preprocessing_dir": str(func_preprocessing),
         "fmriprep_dir": str(fmriprep),
         "legacy_fmriprep_dir": str(project_root / "fmriprep"),
         "xcpd_dir": str(xcpd),
         "xcpd_fc_dir": str(xcpd / "fc"),
         "xcpd_fc_gsr_dir": str(xcpd / "fc_gsr"),
         "xcpd_ec_dir": str(xcpd / "ec"),
+        "dwi_preprocessing_dir": str(dwi_preprocessing),
+        "qsiprep_dir": str(dwi_preprocessing / "qsiprep"),
+        "qsirecon_dir": str(dwi_preprocessing / "qsirecon"),
         "subject_level_dir": str(subject_level),
         "subject_level_fc_dir": str(subject_level / "fc"),
         "subject_level_fc_gsr_dir": str(subject_level / "fc_gsr"),
@@ -367,7 +372,8 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
     _setdefault_nested(hydrated, ["hpc", "singularity_images", "fmripost_aroma"], "")
     _setdefault_nested(hydrated, ["hpc", "singularity_images", "qsiprep"], "")
     _setdefault_nested(hydrated, ["hpc", "singularity_images", "qsirecon"], "")
-    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_cpus"], 16)
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_cpus"], 0)
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_max_cpus"], 15)
     _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_memory"], "64GB")
     _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_time"], "12:00:00")
 

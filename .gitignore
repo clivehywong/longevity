@@ -17,6 +17,8 @@ __pycache__/
 atlases/xcpd_project_atlases/
 .playwright-mcp/
 test_screenshots/
+tmp
+xcpd_job_ids.txt
 # Loose session screenshots
 *.png
 *.jpg

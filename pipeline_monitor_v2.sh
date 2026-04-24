@@ -229,7 +229,8 @@ ec_out=$($HPC "cd ${XCPD_SCRIPTS} && sbatch xcpd_ec_v2_4subs.sh" 2>&1)
 EC_JOB=$(echo "$ec_out" | grep -oE '[0-9]+$' | head -1)
 echo "EC: ${ec_out} -> job ${EC_JOB}"
 
-echo "${FC_JOB} ${FGSR_JOB} ${EC_JOB}" > /home/clivewong/proj/longevity/xcpd_job_ids.txt
+mkdir -p /home/clivewong/proj/longevity/tmp
+echo "${FC_JOB} ${FGSR_JOB} ${EC_JOB}" > /home/clivewong/proj/longevity/tmp/xcpd_job_ids.txt
 echo "XCP-D job IDs saved: FC=${FC_JOB} FC+GSR=${FGSR_JOB} EC=${EC_JOB}"
 
 ###############################################################################

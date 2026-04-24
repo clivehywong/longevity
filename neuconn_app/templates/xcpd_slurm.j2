@@ -76,7 +76,7 @@ fi
 {% endif %}
 
 # Get subject ID from the per-pipeline sublist file
-SUBID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" {{ sublist_file }})
+SUBID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "{{ sublist_file }}")
 
 if [ -z "$SUBID" ]; then
     echo "ERROR: Could not get subject ID for array task ${SLURM_ARRAY_TASK_ID}" >&2

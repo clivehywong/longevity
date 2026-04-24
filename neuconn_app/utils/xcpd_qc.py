@@ -13,7 +13,7 @@ import streamlit as st
 
 from utils.pipeline_state import append_pipeline_log, set_approval, set_step_status
 from utils.subject_level_fc import load_connectome_table
-from utils.xcpd import collect_qc_reports, download_xcpd_outputs_from_hpc
+from utils.xcpd import collect_qc_reports, download_xcpd_outputs_from_hpc, find_first_xcpd_report_html
 
 
 def get_xcpd_subject_status(xcpd_output_dir: Path, subjects: List[str]) -> pd.DataFrame:
@@ -21,9 +21,9 @@ def get_xcpd_subject_status(xcpd_output_dir: Path, subjects: List[str]) -> pd.Da
 
     For each subject the function checks for:
     1. A ``status`` sentinel file written by NeuConn after a run completes.
-    2. Presence of any XCP-D HTML file anywhere under the subject directory
-       (``sub_dir.rglob("*.html")``) as a fallback indicator that XCP-D itself
-       finished successfully.
+    2. Presence of the first matching XCP-D HTML report under the subject
+       directory as a fallback indicator that XCP-D itself finished
+       successfully.
 
     Returns a DataFrame with columns: subject, status, details.
     """
@@ -40,10 +40,9 @@ def get_xcpd_subject_status(xcpd_output_dir: Path, subjects: List[str]) -> pd.Da
             else:
                 rows.append({"subject": sub, "status": "⚠️ unknown", "details": content})
         elif sub_dir.exists():
-            # Fallback: check for any XCP-D output HTML report
-            html_files = list(sub_dir.rglob("*.html"))
-            if html_files:
-                rows.append({"subject": sub, "status": "✅ completed (no status file)", "details": str(html_files[0])})
+            report_html = find_first_xcpd_report_html(sub_dir)
+            if report_html is not None:
+                rows.append({"subject": sub, "status": "✅ completed (no status file)", "details": str(report_html)})
             else:
                 rows.append({"subject": sub, "status": "🔄 in progress / incomplete", "details": "Output dir exists but no HTML found"})
         else:
@@ -316,4 +315,3 @@ def compute_qc_fc_summary(config: Dict) -> float | None:
     if len(fd_values) < 3:
         return None
     return float(abs(pd.Series(fd_values).corr(pd.Series(edge_means))))
-

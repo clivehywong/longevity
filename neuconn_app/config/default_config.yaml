@@ -65,10 +65,10 @@ hpc:
   remote_paths:
     base: "/home/username/project"
     bids: "${base}/bids"
-    fmriprep: "${base}/derivatives/preprocessing/fmriprep"
-    xcpd_fc: "${base}/derivatives/preprocessing/xcpd/fc"
-    xcpd_fc_gsr: "${base}/derivatives/preprocessing/xcpd/fc_gsr"
-    xcpd_ec: "${base}/derivatives/preprocessing/xcpd/ec"
+    fmriprep: "${base}/derivatives/func/preprocessing/fmriprep"
+    xcpd_fc: "${base}/derivatives/func/preprocessing/xcpd/fc"
+    xcpd_fc_gsr: "${base}/derivatives/func/preprocessing/xcpd/fc_gsr"
+    xcpd_ec: "${base}/derivatives/func/preprocessing/xcpd/ec"
     work: "${base}/work"
 
   singularity_images:

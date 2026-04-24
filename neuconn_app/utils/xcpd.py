@@ -1356,6 +1356,27 @@ def collect_qc_reports(output_dir: Path) -> Dict[str, List[Path]]:
     }
 
 
+def find_first_xcpd_report_html(output_dir: Path) -> Optional[Path]:
+    """Return the first XCP-D HTML report found under ``output_dir``.
+
+    Prefer the canonical executive/summary report patterns before falling back
+    to any HTML file. This avoids materializing large recursive glob results
+    just to answer an existence check.
+    """
+    if not output_dir.exists():
+        return None
+
+    for pattern in (
+        "**/*_desc-about_bold.html",
+        "**/*_desc-summary_bold.html",
+        "**/*.html",
+    ):
+        match = next(output_dir.glob(pattern), None)
+        if match is not None:
+            return match
+    return None
+
+
 def parse_xcpd_progress(
     log_file: Optional[Path],
     stored_total: Optional[int] = None,
@@ -1535,7 +1556,7 @@ def download_xcpd_outputs_from_hpc(
     if paths.get(output_dir_key):
         local_out_dir = Path(paths[output_dir_key])
     else:
-        local_out_dir = Path(paths.get("xcpd_dir", "derivatives/preprocessing/xcpd")) / pipeline_name
+        local_out_dir = Path(paths.get("xcpd_dir", "derivatives/func/preprocessing/xcpd")) / pipeline_name
     local_out_dir.mkdir(parents=True, exist_ok=True)
 
     # Use the same pipeline → remote path mapping as build_remote_xcpd_command
@@ -1546,7 +1567,7 @@ def download_xcpd_outputs_from_hpc(
     else:
         remote_xcpd_dir = hpc_cfg.remote_xcpd_ec
     if not remote_xcpd_dir:
-        remote_xcpd_dir = f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline_name}"
+        remote_xcpd_dir = f"{hpc_cfg.remote_base}/derivatives/func/preprocessing/xcpd/{pipeline_name}"
 
     rsync_cmd = ["rsync", "-avz", "--no-perms", "--timeout=60"]
     _ssh_opts = []
@@ -1588,7 +1609,8 @@ def download_xcpd_outputs_from_hpc(
 def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
     """Remove XCP-D output, work directory, and SLURM script from HPC.
 
-    Cleans the remote output directory (``derivatives/preprocessing/xcpd/<pipeline>``),
+    Cleans the remote output directory
+    (``derivatives/func/preprocessing/xcpd/<pipeline>``),
     work directory, SLURM scripts, and log files.
     Raises ``RuntimeError`` if the HPC connection fails.
     """
@@ -1613,7 +1635,7 @@ def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
     else:
         remote_output = hpc_cfg.remote_xcpd_ec
     if not remote_output:
-        remote_output = f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline_name}"
+        remote_output = f"{hpc_cfg.remote_base}/derivatives/func/preprocessing/xcpd/{pipeline_name}"
 
     conn = None
     try:

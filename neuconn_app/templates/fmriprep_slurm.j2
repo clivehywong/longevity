@@ -28,17 +28,18 @@ fi
 # Configuration
 BIDS_DIR="{{ remote_bids }}"
 OUT_DIR="{{ remote_fmriprep }}"
-WORK_DIR="{{ remote_work }}/sub-${SUBID}"
 IMG="{{ singularity_image }}"
 LICENSE="{{ freesurfer_license }}"
 
 # Get subject ID from array task
-SUBID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" {{ remote_base }}/sublist.txt)
+SUBID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "{{ remote_base }}/sublist.txt")
 
 if [ -z "$SUBID" ]; then
     echo "ERROR: Could not get subject ID for array task ${SLURM_ARRAY_TASK_ID}"
     exit 1
 fi
+
+WORK_DIR="{{ remote_work }}/sub-${SUBID}"
 
 echo "======================================"
 echo "Processing subject: ${SUBID}"

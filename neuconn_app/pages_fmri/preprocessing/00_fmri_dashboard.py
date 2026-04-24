@@ -20,6 +20,13 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from utils.xcpd import find_first_xcpd_report_html
+
+
+def _has_fmriprep_confounds(fmriprep_dir: Path, sub: str) -> bool:
+    sub_dir = fmriprep_dir / sub
+    return sub_dir.exists() and next(sub_dir.rglob("*desc-confounds_timeseries.tsv"), None) is not None
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -27,15 +34,12 @@ def _fmriprep_status(fmriprep_dir: Path, sub: str) -> str:
     """Return traffic-light emoji for fMRIPrep completion.
 
     fMRIPrep writes its subject-level HTML report as ``sub-XXX.html`` at the
-    root of the output directory, not inside the per-subject folder.  We also
-    accept the presence of ``dataset_description.json`` as a secondary
-    completeness indicator.
+    root of the output directory, not inside the per-subject folder.
     """
     # Primary: root-level subject report, e.g. fmriprep/sub-033.html
     if (fmriprep_dir / f"{sub}.html").exists():
         return "✅"
-    # Secondary: dataset_description.json presence (run started and wrote outputs)
-    if (fmriprep_dir / "dataset_description.json").exists() and (fmriprep_dir / sub).exists():
+    if _has_fmriprep_confounds(fmriprep_dir, sub):
         return "✅"
     if (fmriprep_dir / sub).exists():
         return "🔄"
@@ -54,9 +58,7 @@ def _xcpd_status(xcpd_out_dir: Path, sub: str) -> str:
             return "✅"
         if content.startswith("failed"):
             return "❌"
-    # Fallback: look for any HTML output
-    html_files = list(sub_dir.rglob("*.html"))
-    if html_files:
+    if find_first_xcpd_report_html(sub_dir) is not None:
         return "✅"
     return "🔄"
 
