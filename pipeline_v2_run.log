@@ -6959,3 +6959,81 @@ Some outputs still missing, sleeping 30 min...
   MISSING: ec/sub-077
 Some outputs still missing, sleeping 30 min...
 Some outputs still missing, sleeping 30 min...
+
+
+--- XCP-D Check #86 at Fri Apr 24 01:47:51 PM HKT 2026 ---
+--- XCP-D Check #86 at Fri Apr 24 01:47:51 PM HKT 2026 ---
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+             JOBID PARTITION                                               NAME     USER    STATE       TIME TIME_LIMI  NODES NODELIST(REASON)
+--- XCP-D output file counts ---
+--- XCP-D output file counts ---
+  fc/sub-066: 0 files
+  fc/sub-066: 0 files
+  fc/sub-068: 0 files
+  fc/sub-068: 0 files
+  fc/sub-072: 0 files
+  fc/sub-072: 0 files
+  fc/sub-077: 0 files
+  fc/sub-077: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-066: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-068: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-072: 0 files
+  fc_gsr/sub-077: 0 files
+  fc_gsr/sub-077: 0 files
+  ec/sub-066: 0 files
+  ec/sub-066: 0 files
+  ec/sub-068: 0 files
+  ec/sub-068: 0 files
+  ec/sub-072: 0 files
+  ec/sub-072: 0 files
+  ec/sub-077: 0 files
+  ec/sub-077: 0 files
+--- XCP-D sacct status ---
+--- XCP-D sacct status ---
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4345             FAILED      2:0   00:00:13 
+4345.batch       FAILED      2:0   00:00:13 
+4345.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4346             FAILED      2:0   00:00:13 
+4346.batch       FAILED      2:0   00:00:13 
+4346.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+4347             FAILED      2:0   00:00:13 
+4347.batch       FAILED      2:0   00:00:13 
+4347.extern   COMPLETED      0:0   00:00:13 
+  MISSING: fc/sub-066
+  MISSING: fc/sub-066
+  MISSING: fc/sub-068
+  MISSING: fc/sub-068
+  MISSING: fc/sub-072
+  MISSING: fc/sub-072
+  MISSING: fc/sub-077
+  MISSING: fc/sub-077
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-066
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-068
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-072
+  MISSING: fc_gsr/sub-077
+  MISSING: fc_gsr/sub-077
+  MISSING: ec/sub-066
+  MISSING: ec/sub-066
+  MISSING: ec/sub-068
+  MISSING: ec/sub-068
+  MISSING: ec/sub-072
+  MISSING: ec/sub-072
+  MISSING: ec/sub-077
+  MISSING: ec/sub-077
+Some outputs still missing, sleeping 30 min...
+Some outputs still missing, sleeping 30 min...
