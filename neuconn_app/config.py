@@ -127,11 +127,27 @@ def get_project_root(config: Optional[Dict[str, Any]] = None) -> Path:
 
 
 def derive_project_paths(project_root: Path) -> Dict[str, str]:
-    """Derive all project paths from PROJECT_ROOT."""
+    """Derive all project paths from PROJECT_ROOT.
+
+    Detects whether the project uses the modality-organized layout
+    (``derivatives/func/preprocessing/...``) or the legacy flat layout
+    (``derivatives/preprocessing/...``).  If the legacy directory exists and
+    the modality-organized one does not, paths point at the legacy location
+    so dashboards and pipelines find the actual outputs.
+    """
     derivatives = project_root / "derivatives"
+    legacy_preprocessing = derivatives / "preprocessing"
     func_preprocessing = derivatives / "func" / "preprocessing"
-    fmriprep = func_preprocessing / "fmriprep"
-    xcpd = func_preprocessing / "xcpd"
+
+    # Choose the active preprocessing directory: prefer modality-organized
+    # layout, but fall back to legacy if data lives there.
+    if not func_preprocessing.exists() and legacy_preprocessing.exists():
+        active_preprocessing = legacy_preprocessing
+    else:
+        active_preprocessing = func_preprocessing
+
+    fmriprep = active_preprocessing / "fmriprep"
+    xcpd = active_preprocessing / "xcpd"
     dwi_preprocessing = derivatives / "dwi" / "preprocessing"
     subject_level = derivatives / "subject_level"
     group_level = derivatives / "group_level"
@@ -145,8 +161,8 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
         "bids_dir": str(project_root / "bids"),
         "neuconn_app_dir": str(app_root),
         "derivatives_dir": str(derivatives),
-        "func_preprocessing_dir": str(func_preprocessing),
-        "preprocessing_dir": str(func_preprocessing),
+        "func_preprocessing_dir": str(active_preprocessing),
+        "preprocessing_dir": str(active_preprocessing),
         "fmriprep_dir": str(fmriprep),
         "legacy_fmriprep_dir": str(project_root / "fmriprep"),
         "xcpd_dir": str(xcpd),
@@ -259,8 +275,10 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
 
     paths = hydrated.setdefault("paths", {})
     derived_paths = derive_project_paths(project_root)
+    # Use setdefault so user-provided paths (from longevity.yaml) take
+    # precedence over derived defaults. Only fill in keys the user hasn't set.
     for key, value in derived_paths.items():
-        paths[key] = value
+        paths.setdefault(key, value)
 
     hydrated.setdefault("roi_config", {})
     hydrated["roi_config"].setdefault("path", derived_paths["roi_config_path"])
