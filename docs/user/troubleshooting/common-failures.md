@@ -8,6 +8,9 @@
 | `seed_based_connectivity.py` says no BOLD files found | Wrong space/path assumptions or missing fMRIPrep outputs | Verify `fmriprep/sub-*/ses-*/func/` contents and the expected MNI space |
 | Group analysis is too slow or fails | Permutation count is too high for the current environment | Reduce permutations for testing, then scale up deliberately |
 | Streamlit app fails to load config | Missing or invalid `~/neuconn_projects/<project>.yaml` overrides | Start from defaults or fix the YAML file |
+| `Slider min_value must be less than max_value` in fMRIPrep Submit | Only 1 subject selected; slider range collapses to [1,1] | Fixed in app code (single subject bypasses slider) |
+| `AttributeError: 'HPCConfig' object has no attribute 'singularity_image'` | HPC submit uses wrong attribute name for fMRIPrep singularity image | Fixed in `hpc.py` (`singularity_fmriprep` is the correct attribute) |
+| XCP-D fails with missing input (no `MNI152NLin6Asym:res-2` files) | fMRIPrep was run without that output space | Re-run fMRIPrep with `output_spaces` including `MNI152NLin6Asym:res-2` in config |
 
 ## Practical recovery order
 
