@@ -763,7 +763,7 @@ class HPCWorkflowManager:
             tmp_dst = f"{fsav_dst}/fsaverage.tmp"
             conn.execute(f"rm -rf {tmp_dst} {fsav_dst}/fsaverage 2>/dev/null || true")
             _, stderr_cp, rc_cp = conn.execute(
-                f"{singularity_bin} exec {self.config.singularity_image}"
+                f"{singularity_bin} exec {self.config.singularity_fmriprep}"
                 f" bash -c 'cp -a /opt/freesurfer/subjects/fsaverage {tmp_dst}'"
             )
             if rc_cp != 0:
