@@ -344,13 +344,17 @@ def render_subject_selection(config: Dict) -> Optional[List[str]]:
 
     # Batch size
     st.markdown("---")
-    batch_size = st.slider(
-        "Batch size (subjects per job submission):",
-        min_value=1,
-        max_value=min(len(selected), 16),
-        value=min(len(selected), 8),
-        help="Number of subjects to process in each batch. Smaller batches reduce HPC storage usage."
-    )
+    if len(selected) == 1:
+        batch_size = 1
+        st.info("Batch size: 1 (single subject selected)")
+    else:
+        batch_size = st.slider(
+            "Batch size (subjects per job submission):",
+            min_value=1,
+            max_value=min(len(selected), 16),
+            value=min(len(selected), 8),
+            help="Number of subjects to process in each batch. Smaller batches reduce HPC storage usage."
+        )
 
     # Store batch size in session state
     st.session_state.hpc_batch_size = batch_size
