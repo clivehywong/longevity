@@ -6,27 +6,23 @@
     "timestamp": "2026-04-07T12:15:52.122413"
   },
   "sub-066_ses-02_rest_bold": {
-    "notes": "Missing Volume",
-    "reviewer": "user",
-    "status": "\u274c Fail",
-    "timestamp": "2026-04-11T21:26:23.987589"
+    "status": "pass",
+    "updated_at": "2026-04-22T18:22:24.313474",
+    "reason": "Corrected BOLD data uploaded and processed by fMRIPrep"
   },
   "sub-068_ses-02_rest_bold": {
-    "notes": "Missing Volume",
-    "reviewer": "user",
-    "status": "\u274c Fail",
-    "timestamp": "2026-04-11T21:27:20.365435"
+    "status": "pass",
+    "updated_at": "2026-04-22T18:22:24.313490",
+    "reason": "Corrected BOLD data uploaded and processed by fMRIPrep"
   },
   "sub-072_ses-02_rest_bold": {
-    "notes": "Missing Volume",
-    "reviewer": "user",
-    "status": "\u274c Fail",
-    "timestamp": "2026-04-11T21:29:32.376043"
+    "status": "pass",
+    "updated_at": "2026-04-22T18:22:24.313493",
+    "reason": "Corrected BOLD data uploaded and processed by fMRIPrep"
   },
   "sub-077_ses-02_rest_bold": {
-    "notes": "Missing Volume",
-    "reviewer": "user",
-    "status": "\u274c Fail",
-    "timestamp": "2026-04-11T21:28:33.626644"
+    "status": "pass",
+    "updated_at": "2026-04-22T18:22:24.313496",
+    "reason": "Corrected BOLD data uploaded and processed by fMRIPrep"
   }
 }

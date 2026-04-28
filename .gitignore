@@ -17,3 +17,18 @@ __pycache__/
 atlases/xcpd_project_atlases/
 .playwright-mcp/
 test_screenshots/
+tmp
+xcpd_job_ids.txt
+
+# Session artifacts (ephemeral files, not tracked)
+*.log
+*.out
+*.pid
+tmp/*.sh
+*_monitor*.sh
+pipeline_*.log
+pipeline_*.pid
+
+# Loose session screenshots
+*.png
+*.jpg

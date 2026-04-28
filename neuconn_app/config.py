@@ -127,14 +127,32 @@ def get_project_root(config: Optional[Dict[str, Any]] = None) -> Path:
 
 
 def derive_project_paths(project_root: Path) -> Dict[str, str]:
-    """Derive all project paths from PROJECT_ROOT."""
+    """Derive all project paths from PROJECT_ROOT.
+
+    Detects whether the project uses the modality-organized layout
+    (``derivatives/func/preprocessing/...``) or the legacy flat layout
+    (``derivatives/preprocessing/...``).  If the legacy directory exists and
+    the modality-organized one does not, paths point at the legacy location
+    so dashboards and pipelines find the actual outputs.
+    """
     derivatives = project_root / "derivatives"
-    preprocessing = derivatives / "preprocessing"
-    fmriprep = preprocessing / "fmriprep"
-    xcpd = preprocessing / "xcpd"
+    legacy_preprocessing = derivatives / "preprocessing"
+    func_preprocessing = derivatives / "func" / "preprocessing"
+
+    # Choose the active preprocessing directory: prefer modality-organized
+    # layout, but fall back to legacy if data lives there.
+    if not func_preprocessing.exists() and legacy_preprocessing.exists():
+        active_preprocessing = legacy_preprocessing
+    else:
+        active_preprocessing = func_preprocessing
+
+    fmriprep = active_preprocessing / "fmriprep"
+    xcpd = active_preprocessing / "xcpd"
+    dwi_preprocessing = derivatives / "dwi" / "preprocessing"
     subject_level = derivatives / "subject_level"
     group_level = derivatives / "group_level"
     qc = derivatives / "qc"
+    pipeline_runs = derivatives / "pipeline_runs"
     app_root = project_root / "neuconn_app"
     atlas_resources = app_root / "resources"
 
@@ -143,13 +161,17 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
         "bids_dir": str(project_root / "bids"),
         "neuconn_app_dir": str(app_root),
         "derivatives_dir": str(derivatives),
-        "preprocessing_dir": str(preprocessing),
+        "func_preprocessing_dir": str(active_preprocessing),
+        "preprocessing_dir": str(active_preprocessing),
         "fmriprep_dir": str(fmriprep),
         "legacy_fmriprep_dir": str(project_root / "fmriprep"),
         "xcpd_dir": str(xcpd),
         "xcpd_fc_dir": str(xcpd / "fc"),
         "xcpd_fc_gsr_dir": str(xcpd / "fc_gsr"),
         "xcpd_ec_dir": str(xcpd / "ec"),
+        "dwi_preprocessing_dir": str(dwi_preprocessing),
+        "qsiprep_dir": str(dwi_preprocessing / "qsiprep"),
+        "qsirecon_dir": str(dwi_preprocessing / "qsirecon"),
         "subject_level_dir": str(subject_level),
         "subject_level_fc_dir": str(subject_level / "fc"),
         "subject_level_fc_gsr_dir": str(subject_level / "fc_gsr"),
@@ -160,9 +182,10 @@ def derive_project_paths(project_root: Path) -> Dict[str, str]:
         "group_level_ec_dir": str(group_level / "ec"),
         "qc_dir": str(qc),
         "fd_inspection_dir": str(qc / "fd_inspection"),
-        "xcpd_fc_qc_dir": str(qc / "xcpd_fc"),
-        "xcpd_fc_gsr_qc_dir": str(qc / "xcpd_fc_gsr"),
-        "xcpd_ec_qc_dir": str(qc / "xcpd_ec"),
+        "pipeline_runs_dir": str(pipeline_runs),
+        "xcpd_fc_runs_dir": str(pipeline_runs / "xcpd_fc"),
+        "xcpd_fc_gsr_runs_dir": str(pipeline_runs / "xcpd_fc_gsr"),
+        "xcpd_ec_runs_dir": str(pipeline_runs / "xcpd_ec"),
         "excluded_dir": str(project_root / "bids_excluded"),
         "atlases_dir": str(project_root / "atlases"),
         "atlas_resources_dir": str(atlas_resources),
@@ -252,8 +275,10 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
 
     paths = hydrated.setdefault("paths", {})
     derived_paths = derive_project_paths(project_root)
+    # Use setdefault so user-provided paths (from longevity.yaml) take
+    # precedence over derived defaults. Only fill in keys the user hasn't set.
     for key, value in derived_paths.items():
-        paths[key] = value
+        paths.setdefault(key, value)
 
     hydrated.setdefault("roi_config", {})
     hydrated["roi_config"].setdefault("path", derived_paths["roi_config_path"])
@@ -365,7 +390,8 @@ def ensure_project_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
     _setdefault_nested(hydrated, ["hpc", "singularity_images", "fmripost_aroma"], "")
     _setdefault_nested(hydrated, ["hpc", "singularity_images", "qsiprep"], "")
     _setdefault_nested(hydrated, ["hpc", "singularity_images", "qsirecon"], "")
-    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_cpus"], 16)
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_cpus"], 0)
+    _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_max_cpus"], 15)
     _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_memory"], "64GB")
     _setdefault_nested(hydrated, ["hpc", "slurm", "xcpd_time"], "12:00:00")
 

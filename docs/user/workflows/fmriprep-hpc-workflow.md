@@ -45,6 +45,19 @@ bash script/batch_fmriprep.sh cleanup 1
 
 It explicitly excludes `*_space-fsnative_*` files during download to reduce storage use.
 
+## NeuConn app submission (alternative to script)
+
+The **fMRI Analysis → fMRIPrep Submit** page in the NeuConn app provides an HPC submission UI:
+
+1. Open the page and expand **Test HPC Connection** to confirm the SSH tunnel is working.
+2. Under **Subject Selection**, choose a session filter and a selection method:
+   - **Select all** — all available subjects (optionally excluding already-processed ones)
+   - **Select incomplete** — auto-selects subjects present in BIDS that do NOT yet have fMRIPrep output (useful for catching new subjects after partial runs)
+   - **Select specific subjects** — manual pick from a multiselect
+   - **Select range** — numeric ID range
+3. Set **Batch size** and proceed to **Upload & Submit**.
+4. Monitor the job in the **Monitor** tab, and download results in **Download & Cleanup**.
+
 ## After preprocessing
 
 Once `fmriprep/` is populated locally, move on to [`connectivity-analysis.md`](connectivity-analysis.md).

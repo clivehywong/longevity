@@ -22,6 +22,26 @@ from datetime import datetime
 from typing import Dict, Optional
 
 
+_QC_STATUS_MAP = {
+    'pass': '✅ Pass',
+    'review': '⚠️ Review',
+    'fail': '❌ Fail',
+}
+
+
+def _normalize_qc_entry(entry: Dict) -> Dict:
+    normalized = dict(entry)
+    status = normalized.get('status')
+    if isinstance(status, str):
+        normalized['status'] = _QC_STATUS_MAP.get(status.strip().lower(), status)
+    if 'reason' in normalized and 'notes' not in normalized:
+        normalized['notes'] = normalized['reason']
+    if 'updated_at' in normalized and 'timestamp' not in normalized:
+        normalized['timestamp'] = normalized['updated_at']
+    normalized.setdefault('reviewer', 'user')
+    return normalized
+
+
 def get_qc_database_path(bids_dir: Path) -> Path:
     """Get path to QC database JSON file."""
     return bids_dir.parent / "qc_status.json"
@@ -33,7 +53,13 @@ def load_qc_database(bids_dir: Path) -> Dict:
 
     if db_path.exists():
         with open(db_path, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {
+                key: _normalize_qc_entry(value) if isinstance(value, dict) else value
+                for key, value in data.items()
+            }
+        return {}
     else:
         return {}
 

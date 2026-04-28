@@ -12,13 +12,22 @@ paths:
   bids_dir: "${project_root}/bids"
   neuconn_app_dir: "${project_root}/neuconn_app"
   derivatives_dir: "${project_root}/derivatives"
-  preprocessing_dir: "${derivatives_dir}/preprocessing"
-  fmriprep_dir: "${preprocessing_dir}/fmriprep"
+
+  # fMRI preprocessing (func modality)
+  func_preprocessing_dir: "${derivatives_dir}/func/preprocessing"
+  fmriprep_dir: "${func_preprocessing_dir}/fmriprep"
   legacy_fmriprep_dir: "${project_root}/fmriprep"
-  xcpd_dir: "${preprocessing_dir}/xcpd"
+  xcpd_dir: "${func_preprocessing_dir}/xcpd"
   xcpd_fc_dir: "${xcpd_dir}/fc"
   xcpd_fc_gsr_dir: "${xcpd_dir}/fc_gsr"
   xcpd_ec_dir: "${xcpd_dir}/ec"
+
+  # dMRI preprocessing (dwi modality)
+  dwi_preprocessing_dir: "${derivatives_dir}/dwi/preprocessing"
+  qsiprep_dir: "${dwi_preprocessing_dir}/qsiprep"
+  qsirecon_dir: "${dwi_preprocessing_dir}/qsirecon"
+
+  # Subject- and group-level outputs
   subject_level_dir: "${derivatives_dir}/subject_level"
   subject_level_fc_dir: "${subject_level_dir}/fc"
   subject_level_fc_gsr_dir: "${subject_level_dir}/fc_gsr"
@@ -27,11 +36,17 @@ paths:
   group_level_fc_dir: "${group_level_dir}/fc"
   group_level_fc_gsr_dir: "${group_level_dir}/fc_gsr"
   group_level_ec_dir: "${group_level_dir}/ec"
+
+  # QC reports (visual inspection outputs — FD plots, etc.)
   qc_dir: "${derivatives_dir}/qc"
   fd_inspection_dir: "${qc_dir}/fd_inspection"
-  xcpd_fc_qc_dir: "${qc_dir}/xcpd_fc"
-  xcpd_fc_gsr_qc_dir: "${qc_dir}/xcpd_fc_gsr"
-  xcpd_ec_qc_dir: "${qc_dir}/xcpd_ec"
+
+  # Pipeline run artifacts (logs, SLURM scripts, manifests per pipeline run)
+  pipeline_runs_dir: "${derivatives_dir}/pipeline_runs"
+  xcpd_fc_runs_dir: "${pipeline_runs_dir}/xcpd_fc"
+  xcpd_fc_gsr_runs_dir: "${pipeline_runs_dir}/xcpd_fc_gsr"
+  xcpd_ec_runs_dir: "${pipeline_runs_dir}/xcpd_ec"
+
   excluded_dir: "${project_root}/bids_excluded"
   atlases_dir: "${project_root}/atlases"
   atlas_resources_dir: "${project_root}/neuconn_app/resources"
@@ -44,15 +59,16 @@ hpc:
   enabled: false
   host: "your-hpc-cluster.edu"
   user: "username"
+  port: 22
   ssh_key: null
 
   remote_paths:
     base: "/home/username/project"
     bids: "${base}/bids"
-    fmriprep: "${base}/derivatives/preprocessing/fmriprep"
-    xcpd_fc: "${base}/derivatives/preprocessing/xcpd/fc"
-    xcpd_fc_gsr: "${base}/derivatives/preprocessing/xcpd/fc_gsr"
-    xcpd_ec: "${base}/derivatives/preprocessing/xcpd/ec"
+    fmriprep: "${base}/derivatives/func/preprocessing/fmriprep"
+    xcpd_fc: "${base}/derivatives/func/preprocessing/xcpd/fc"
+    xcpd_fc_gsr: "${base}/derivatives/func/preprocessing/xcpd/fc_gsr"
+    xcpd_ec: "${base}/derivatives/func/preprocessing/xcpd/ec"
     work: "${base}/work"
 
   singularity_images:
@@ -75,7 +91,8 @@ hpc:
     max_concurrent_jobs: 4
     batch_size: 4
     poll_interval: 300
-    xcpd_cpus: 16
+    xcpd_cpus: 0
+    xcpd_max_cpus: 15
     xcpd_memory: "64GB"
     xcpd_time: "12:00:00"
 
@@ -125,9 +142,9 @@ xcpd:
     high_pass: 0.01
     low_pass: 0.08
     smoothing: 6.0
-    atlases: ["LongevitySchaefer200", "Tian"]
+    atlases: ["4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
+    file_format: "nifti"
     output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
@@ -137,6 +154,8 @@ xcpd:
     bandpass_filter: true
     head_radius: "auto"
     min_coverage: 0.5
+    nprocs: 8        # Nipype parallel workers — match SLURM cpus-per-task
+    omp_nthreads: 1  # OMP threads per worker
   # FC-GSR: same as FC but with global signal regression (36P) for comparison
   fc_gsr:
     mode: "linc"
@@ -149,9 +168,9 @@ xcpd:
     high_pass: 0.01
     low_pass: 0.08
     smoothing: 6.0
-    atlases: ["LongevitySchaefer200", "Tian"]
+    atlases: ["4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
+    file_format: "nifti"
     output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
@@ -161,6 +180,8 @@ xcpd:
     bandpass_filter: true
     head_radius: "auto"
     min_coverage: 0.5
+    nprocs: 8
+    omp_nthreads: 1
   # EC: effective connectivity (no GSR, no smoothing, longer min_time)
   ec:
     mode: "linc"
@@ -173,10 +194,10 @@ xcpd:
     high_pass: 0.01
     low_pass: 0.10
     smoothing: 0.0
-    atlases: ["LongevitySchaefer200", "Tian"]
+    atlases: ["4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"]
     input_type: "fmriprep"
-    file_format: "cifti"
-    output_type: "interpolated"
+    file_format: "nifti"
+    output_type: "censored"
     output_layout: "bids"
     report_output_level: "session"
     output_run_wise_correlations: true
@@ -185,6 +206,8 @@ xcpd:
     bandpass_filter: true
     head_radius: "auto"
     min_coverage: 0.5
+    nprocs: 8
+    omp_nthreads: 1
 
 subject_exclusion:
   mean_fd_threshold: 0.5

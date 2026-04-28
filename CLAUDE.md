@@ -11,13 +11,32 @@ Longitudinal walking intervention study with resting-state fMRI. Data acquired a
 ```
 longevity/
 ├── bids/                # BIDS-formatted raw data (sub-033 to sub-082)
+├── script/              # Permanent analysis scripts (Python/Bash)
+├── tmp/                 # Temporary session artifacts (ephemeral, .gitignored)
+│   └── scripts/         # Temporary helper scripts with naming: _<purpose>_<timestamp>.sh
 ├── fmriprep/            # Preprocessed outputs (MNI 2mm + T1w space)
 ├── atlases/             # DiFuMo 256, Schaefer 400 parcellations
-├── script/              # Analysis scripts (Python/Bash)
 ├── docs/                # Documentation (guides, archived files)
 ├── .claude/memory/      # Persistent context for Claude
+├── .github/             # GitHub workflows and extensions (agent.md here)
 └── neuconn_app/         # Streamlit QC & analysis app (in development)
 ```
+
+### Directory Conventions
+
+**Permanent code** (tracked in git):
+- `script/` — Analysis workflows, data processing, connectivity pipelines
+- `neuconn_app/` — Streamlit application code
+
+**Temporary/session artifacts** (.gitignored):
+- `tmp/` — Session-specific files that should not be committed
+- `tmp/scripts/` — Temporary helper scripts with naming convention `_<purpose>_<timestamp>.sh`
+- Examples: `tmp/scripts/_monitor_fmriprep_20260424.sh`, `tmp/scripts/_download_outputs_20260424.sh`
+
+**Logs and runtime files** (.gitignored):
+- `*.log` — Script execution logs (e.g., `pipeline_v2_run.log`)
+- `*.out` — Standard output files (e.g., SLURM logs)
+- `*.pid` — Process ID files (e.g., `pipeline_v2_monitor.pid`)
 
 ## Current Status
 

@@ -545,6 +545,15 @@ def build_xcpd_command(
             raise FileNotFoundError(f"FreeSurfer license file not found: {fs_license}")
         command.extend(["--fs-license-file", fs_license])
 
+    # Concurrency limits — cap Nipype workers to the allocated CPUs so multiple
+    # simultaneous jobs on a shared node don't starve each other.
+    nprocs = xcpd_config.get("nprocs")
+    if nprocs:
+        command.extend(["--nprocs", str(nprocs)])
+    omp_nthreads = xcpd_config.get("omp_nthreads")
+    if omp_nthreads:
+        command.extend(["--omp-nthreads", str(omp_nthreads)])
+
     command.extend(atlas_cli_dataset_args(config, selected_atlases, str(dataset_root) if dataset_root else None))
     if selected_atlases:
         command.extend(["--atlases", *[str(atlas) for atlas in selected_atlases]])
@@ -568,6 +577,7 @@ def build_remote_xcpd_command(
     remote_dataset_root: Optional[str] = None,
     remote_fmriprep_dir: Optional[str] = None,
     work_dir: Optional[str] = None,
+    omit_work_dir: bool = False,
 ) -> List[str]:
     """Build the remote Singularity command for an XCP-D run."""
     hpc_cfg = HPCConfig.from_config(config)
@@ -632,10 +642,11 @@ def build_remote_xcpd_command(
             str(xcpd_config.get("report_output_level", "session")),
             "--output-run-wise-correlations",
             _bool_flag(xcpd_config.get("output_run_wise_correlations", True)),
-            "-w",
-            resolved_work_dir,
         ]
     )
+
+    if not omit_work_dir:
+        command.extend(["-w", resolved_work_dir])
 
     if xcpd_config.get("despike", True):
         command.append("--despike")
@@ -652,6 +663,15 @@ def build_remote_xcpd_command(
 
     if fs_license:
         command.extend(["--fs-license-file", fs_license])
+
+    # Concurrency limits — cap Nipype workers to the allocated CPUs so multiple
+    # simultaneous jobs on a shared node don't starve each other.
+    nprocs = xcpd_config.get("nprocs")
+    if nprocs:
+        command.extend(["--nprocs", str(nprocs)])
+    omp_nthreads = xcpd_config.get("omp_nthreads")
+    if omp_nthreads:
+        command.extend(["--omp-nthreads", str(omp_nthreads)])
 
     command.extend(atlas_cli_dataset_args(config, selected_atlases, remote_dataset_root))
     if selected_atlases:
@@ -676,8 +696,19 @@ def generate_xcpd_slurm_script(
     remote_dataset_root: Optional[str] = None,
     remote_fmriprep_dir: Optional[str] = None,
     work_dir: Optional[str] = None,
+    max_concurrent: Optional[int] = None,
+    partition: Optional[str] = None,
 ) -> str:
     """Render the XCP-D SLURM batch script using the xcpd_slurm.j2 template.
+
+    Uses a SLURM array job (``--array=1-N%max_concurrent``) so each subject
+    runs as an independent task.  The participant list is written to a separate
+    sublist file on the HPC before submission.
+
+    Args:
+        max_concurrent: Maximum simultaneous array tasks.  Defaults to
+            ``config['hpc']['slurm']['max_concurrent_jobs']`` (or 4).
+        partition: SLURM partition name.  Defaults to ``hpc_cfg.partition``.
 
     Returns the rendered script as a string.
     """
@@ -692,26 +723,49 @@ def generate_xcpd_slurm_script(
     else:
         remote_output = hpc_cfg.remote_xcpd_ec
 
-    # Build the full singularity command, then strip off the "singularity run -B … image"
-    # prefix to get just the XCP-D CLI arguments.
+    # Build xcpd_args WITHOUT --participant-label or -w — the template injects
+    # per-array-task subject and per-subject work directory at runtime.
     full_command = build_remote_xcpd_command(
         config,
         pipeline_name,
-        participant_labels=participant_labels,
+        participant_labels=None,   # omit here; array job picks subject from file
         session_ids=session_ids,
         remote_dataset_root=remote_dataset_root,
         remote_fmriprep_dir=remote_fmriprep_dir,
         work_dir=work_dir,
+        omit_work_dir=True,        # template adds per-subject -w at runtime
     )
-    # full_command = ["singularity", "run", "-B", "...", ..., image_path, fmriprep_dir, ...]
-    # Split at the image path to get post-image args; the template handles bind mounts separately.
     image_path = os.path.expanduser(hpc_cfg.singularity_xcpd or config["xcpd"]["singularity_image_path"])
     try:
         img_idx = full_command.index(image_path)
-        xcpd_args = " ".join(shlex.quote(p) for p in full_command[img_idx + 1:])
+        raw_args = full_command[img_idx + 1:]
     except ValueError:
-        # Fallback: use everything after the last bind-mount argument
-        xcpd_args = " ".join(shlex.quote(p) for p in full_command[2:])
+        raw_args = full_command[2:]
+
+    # Group args into logical pairs/singles for multiline rendering.
+    # Flags like --despike stand alone; flags with values stay paired.
+    xcpd_arg_lines: list[str] = []
+    i = 0
+    while i < len(raw_args):
+        token = raw_args[i]
+        if token.startswith("-"):
+            # Check if the next token is a value (not another flag)
+            if i + 1 < len(raw_args) and not raw_args[i + 1].startswith("-"):
+                # Collect all value tokens until the next flag
+                vals = []
+                j = i + 1
+                while j < len(raw_args) and not raw_args[j].startswith("-"):
+                    vals.append(shlex.quote(raw_args[j]))
+                    j += 1
+                xcpd_arg_lines.append(f"{shlex.quote(token)} {' '.join(vals)}")
+                i = j
+            else:
+                xcpd_arg_lines.append(shlex.quote(token))
+                i += 1
+        else:
+            # Positional arg (e.g. bids_dir, output_dir, analysis_level)
+            xcpd_arg_lines.append(shlex.quote(token))
+            i += 1
 
     bind_mounts = _build_remote_bind_mounts(config, hpc_cfg)
     fs_license = os.path.expanduser(hpc_cfg.freesurfer_license or "")
@@ -720,9 +774,21 @@ def generate_xcpd_slurm_script(
         if fs_license not in bind_mounts:
             bind_mounts.append(fs_license)
 
-    cpus = hpc_cfg.xcpd_cpus if hpc_cfg.xcpd_cpus else hpc_cfg.cpus
+    xcpd_cfg = config.get("xcpd", {}).get(pipeline_name, {})
+    nprocs = int(xcpd_cfg.get("nprocs") or 8)
+    omp_nthreads = int(xcpd_cfg.get("omp_nthreads") or 1)
+    cpus = nprocs * omp_nthreads or hpc_cfg.cpus
     memory = hpc_cfg.xcpd_memory if hpc_cfg.xcpd_memory else hpc_cfg.memory
     time_limit = hpc_cfg.xcpd_time_limit if hpc_cfg.xcpd_time_limit else hpc_cfg.time_limit
+
+    participants = list(_strip_bids_prefix(participant_labels, "sub-") or [])
+    num_subjects = len(participants) if participants else 1
+
+    slurm_cfg = config.get("hpc", {}).get("slurm", {})
+    _max_concurrent = max_concurrent if max_concurrent is not None else int(slurm_cfg.get("max_concurrent_jobs", 4))
+    _partition = partition if partition is not None else hpc_cfg.partition
+
+    sublist_file = f"{hpc_cfg.remote_base}/sublist_xcpd_{pipeline_name}.txt"
 
     templates_dir = Path(__file__).parent.parent / "templates"
     env = Environment(loader=FileSystemLoader(str(templates_dir)))
@@ -731,10 +797,12 @@ def generate_xcpd_slurm_script(
     return template.render(
         job_name=f"xcpd_{pipeline_name}",
         pipeline=pipeline_name,
-        partition=hpc_cfg.partition,
+        partition=_partition,
         cpus=cpus,
         memory=memory,
         time_limit=time_limit,
+        num_subjects=num_subjects,
+        max_concurrent=_max_concurrent,
         remote_base=hpc_cfg.remote_base,
         remote_output=remote_output,
         remote_fmriprep=remote_fmriprep_dir or hpc_cfg.remote_fmriprep,
@@ -743,18 +811,26 @@ def generate_xcpd_slurm_script(
         singularity_image=image_path,
         fs_license=hpc_cfg.freesurfer_license,
         bind_mounts=bind_mounts,
-        xcpd_args=xcpd_args,
-        participants=list(_strip_bids_prefix(participant_labels, "sub-") or []),
+        xcpd_arg_lines=xcpd_arg_lines,
+        participants=participants,
+        sublist_file=sublist_file,
     )
 
 
 
 def _run_artifact_paths(config: Dict[str, Any], pipeline_name: str) -> Dict[str, Any]:
-    """Create and return local run artifact paths for this pipeline."""
-    qc_dir_key = f"xcpd_{pipeline_name}_qc_dir"
-    qc_root = Path(config["paths"].get(qc_dir_key) or config["paths"]["xcpd_fc_qc_dir"])
-    qc_root.mkdir(parents=True, exist_ok=True)
-    run_dir = qc_root / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    """Create and return local run artifact paths for this pipeline.
+
+    Run artifacts (logs, SLURM scripts, manifests) are stored under
+    ``pipeline_runs_dir`` — separate from QC reports — so the naming
+    is not misleading.
+    """
+    runs_root = Path(
+        config["paths"].get("pipeline_runs_dir")
+        or (Path(config["paths"]["derivatives_dir"]) / "pipeline_runs")
+    ) / f"xcpd_{pipeline_name}"
+    runs_root.mkdir(parents=True, exist_ok=True)
+    run_dir = runs_root / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return {
         "run_dir": run_dir,
@@ -829,8 +905,18 @@ def start_remote_xcpd_run(
     pipeline_name: str,
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
+    dep_job_id: Optional[str] = None,
+    max_concurrent: Optional[int] = None,
+    partition: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Submit an XCP-D SLURM job on the configured HPC host."""
+    """Submit an XCP-D SLURM array job on the configured HPC host.
+
+    Args:
+        dep_job_id: If provided, submits with ``--dependency=afterok:{dep_job_id}``
+            so this job only starts after that predecessor succeeds.
+        max_concurrent: Maximum simultaneous array tasks (``--array=1-N%K``).
+        partition: SLURM partition to target.
+    """
     artifacts = _run_artifact_paths(config, pipeline_name)
     hpc_cfg = HPCConfig.from_config(config)
     preflight = run_xcpd_preflight(
@@ -852,6 +938,8 @@ def start_remote_xcpd_run(
         remote_dataset_root=remote_dataset_root,
         remote_fmriprep_dir=str(preflight["fmriprep_dir"]),
         work_dir=str(preflight["work_dir"]),
+        max_concurrent=max_concurrent,
+        partition=partition,
     )
 
     # Save script locally for inspection
@@ -859,17 +947,24 @@ def start_remote_xcpd_run(
     with open(local_script, "w") as f:
         f.write(script_content)
 
-    # Upload script to HPC and submit
+    # Upload sublist + script to HPC and submit
     remote_script = f"{hpc_cfg.remote_base}/xcpd_{pipeline_name}_job.sh"
+    sublist_file = f"{hpc_cfg.remote_base}/sublist_xcpd_{pipeline_name}.txt"
+    participants = list(_strip_bids_prefix(participant_labels, "sub-") or [])
+    sublist_content = "\n".join(participants)
 
     conn = None
     try:
         conn = HPCConnection(hpc_cfg)
         conn.connect()
+        conn.execute(f"mkdir -p {shlex.quote(f'{hpc_cfg.remote_base}/logs')}", timeout=30)
+        conn.write_file(sublist_content, sublist_file)
         conn.write_file(script_content, remote_script)
-        mkdir_cmd = f"mkdir -p {shlex.quote(f'{hpc_cfg.remote_base}/logs')}"
-        conn.execute(mkdir_cmd, timeout=30)
-        sbatch_cmd = f"sbatch {shlex.quote(remote_script)}"
+        sbatch_cmd = (
+            f"sbatch --dependency=afterok:{dep_job_id} {shlex.quote(remote_script)}"
+            if dep_job_id
+            else f"sbatch {shlex.quote(remote_script)}"
+        )
         stdout, stderr, exit_code = conn.execute(sbatch_cmd, timeout=60)
     finally:
         _safe_disconnect(conn)
@@ -879,18 +974,24 @@ def start_remote_xcpd_run(
 
     # sbatch stdout: "Submitted batch job 12345"
     job_id = stdout.strip().split()[-1]
-    remote_log_out = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_{job_id}.out"
-    remote_log_err = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_{job_id}.err"
+    # Array jobs use %A_%a in the SLURM template, producing files like
+    # xcpd_fc_4131_1.out.  Store the prefix so fetch/cleanup helpers can
+    # enumerate all per-task log files via glob.
+    remote_log_prefix = f"{hpc_cfg.remote_base}/logs/xcpd_{pipeline_name}_{job_id}"
+    remote_log_out = f"{remote_log_prefix}.out"
+    remote_log_err = f"{remote_log_prefix}.err"
 
     run_info = {
         "pipeline": pipeline_name,
         "job_id": job_id,
-        "status": "running",
+        "status": "queued",
         "backend": "hpc",
         "remote_script": remote_script,
+        "remote_sublist": sublist_file,
         "remote_log_out": remote_log_out,
         "remote_log_err": remote_log_err,
-        "started_at": datetime.now().isoformat(),
+        "remote_log_prefix": remote_log_prefix,
+        "submitted_at": datetime.now().isoformat(),
         "participant_labels": list(participant_labels or []),
         "session_ids": list(session_ids or []),
         "fmriprep_dir": str(preflight["fmriprep_dir"]),
@@ -903,9 +1004,73 @@ def start_remote_xcpd_run(
         json.dump(run_info, f, indent=2)
 
     set_run_info(config, f"xcpd_{pipeline_name}", run_info)
-    set_step_status(config, f"xcpd_{pipeline_name}", "running", f"SLURM job {job_id}")
+    set_step_status(config, f"xcpd_{pipeline_name}", "queued", f"SLURM job {job_id}")
     append_pipeline_log(config, f"Submitted XCP-D {pipeline_name.upper()} SLURM job {job_id}")
     return run_info
+
+
+def start_xcpd_parallel(
+    config: Dict[str, Any],
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+    nprocs: Optional[int] = None,
+    omp_nthreads: Optional[int] = None,
+    max_concurrent: Optional[int] = None,
+    partition: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Submit FC, FC+GSR, and EC as independent SLURM array jobs.
+
+    The three XCP-D variants only require fMRIPrep inputs and do not depend on
+    each other, so they can run in parallel. Returns a mapping of pipeline name
+    to ``run_info`` dict (as returned by :func:`start_remote_xcpd_run`).
+    """
+    if nprocs is not None:
+        config = dict(config)
+        config.setdefault("xcpd", {})
+        config["xcpd"] = dict(config.get("xcpd", {}))
+        config["xcpd"]["nprocs"] = nprocs
+        if omp_nthreads is not None:
+            config["xcpd"]["omp_nthreads"] = omp_nthreads
+
+    results: Dict[str, Dict[str, Any]] = {}
+    failures: Dict[str, str] = {}
+    for pipeline in _PIPELINE_ORDER:
+        try:
+            run_info = start_remote_xcpd_run(
+                config,
+                pipeline,
+                participant_labels=participant_labels,
+                session_ids=session_ids,
+                max_concurrent=max_concurrent,
+                partition=partition,
+            )
+            results[pipeline] = run_info
+        except Exception as exc:
+            failures[pipeline] = str(exc)
+    if failures:
+        raise XCPDParallelSubmissionError(results, failures)
+    return results
+
+
+def start_xcpd_chain(
+    config: Dict[str, Any],
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+    nprocs: Optional[int] = None,
+    omp_nthreads: Optional[int] = None,
+    max_concurrent: Optional[int] = None,
+    partition: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Backward-compatible wrapper for the former dependency-chain API."""
+    return start_xcpd_parallel(
+        config,
+        participant_labels=participant_labels,
+        session_ids=session_ids,
+        nprocs=nprocs,
+        omp_nthreads=omp_nthreads,
+        max_concurrent=max_concurrent,
+        partition=partition,
+    )
 
 
 def is_process_running(pid: int) -> bool:
@@ -934,20 +1099,89 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
             hpc_cfg = HPCConfig.from_config(config)
             conn = HPCConnection(hpc_cfg)
             conn.connect()
+            # Query both state and reason so we can distinguish pending types.
+            # For array jobs squeue returns one line per active task; take the
+            # highest-priority state: RUNNING > PENDING > others.
             stdout, _, _ = conn.execute(
-                f"squeue -j {shlex.quote(str(job_id))} -h -o %T 2>/dev/null",
+                f"squeue -j {shlex.quote(str(job_id))} -h -o '%T|%r' 2>/dev/null",
                 timeout=30,
             )
-            slurm_state = stdout.strip().upper()
+            raw = stdout.strip()
+            slurm_state = ""
+            slurm_reason = ""
+            if raw:
+                # Collect all states from array tasks
+                task_states: List[str] = []
+                task_reasons: List[str] = []
+                for task_line in raw.splitlines():
+                    task_line = task_line.strip()
+                    if not task_line:
+                        continue
+                    if "|" in task_line:
+                        st, rs = task_line.upper().split("|", 1)
+                    else:
+                        st, rs = task_line.upper(), ""
+                    task_states.append(st)
+                    task_reasons.append(rs)
+                # Prefer RUNNING > COMPLETING > PENDING > anything else
+                for pref in ("RUNNING", "COMPLETING", "PENDING"):
+                    if pref in task_states:
+                        idx = task_states.index(pref)
+                        slurm_state = pref
+                        slurm_reason = task_reasons[idx]
+                        break
+                if not slurm_state and task_states:
+                    slurm_state = task_states[0]
+                    slurm_reason = task_reasons[0]
+
             if not slurm_state:
-                # Job has left the queue; query sacct for final state
+                # Job has left the queue; query sacct for final state.
+                # For array jobs, check all task states and report the
+                # worst outcome (FAILED > CANCELLED > TIMEOUT > COMPLETED).
                 stdout, _, _ = conn.execute(
-                    f"sacct -j {shlex.quote(str(job_id))} -n -o State 2>/dev/null | head -1",
+                    f"sacct -j {shlex.quote(str(job_id))} -n -o State --parsable2 2>/dev/null",
                     timeout=30,
                 )
-                slurm_state = stdout.strip().upper()
-            if slurm_state in ("RUNNING", "PENDING", "COMPLETING"):
+                sacct_states = [s.strip().upper() for s in stdout.strip().splitlines() if s.strip()]
+                failure_states = {"FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"}
+                failed = [s for s in sacct_states if s in failure_states]
+                if failed:
+                    slurm_state = failed[0]
+                elif sacct_states:
+                    slurm_state = sacct_states[0]
+                slurm_reason = ""
+
+            if slurm_state == "PENDING":
+                # Detect unsatisfiable dependency early
+                if "DEPENDENCYNEVERSATISFIED" in slurm_reason.replace(" ", ""):
+                    run_info["status"] = "failed"
+                    run_info["completed_at"] = datetime.now().isoformat()
+                    run_info["slurm_state"] = slurm_state
+                    run_info["slurm_reason"] = slurm_reason
+                    state["runs"][run_key] = run_info
+                    state = set_run_info(config, run_key, run_info, state=state)
+                    state = set_step_status(config, f"xcpd_{pipeline_name}", "failed", "SLURM dependency never satisfied", state=state)
+                    append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} dependency never satisfied (upstream job failed/cancelled)", level="error", state=state)
+                    return state
+                # Update to queued state (heals old "running" status set at submission time)
+                if run_info.get("status") != "queued":
+                    run_info["status"] = "queued"
+                    run_info["slurm_reason"] = slurm_reason
+                    state["runs"][run_key] = run_info
+                    state = set_run_info(config, run_key, run_info, state=state)
+                    state = set_step_status(config, f"xcpd_{pipeline_name}", "queued", f"SLURM job {job_id} pending ({slurm_reason})", state=state)
                 return state
+
+            if slurm_state in ("RUNNING", "COMPLETING"):
+                # Promote from queued → running when SLURM confirms execution started
+                if run_info.get("status") == "queued":
+                    run_info["status"] = "running"
+                    run_info["started_at"] = run_info.get("started_at") or datetime.now().isoformat()
+                    state["runs"][run_key] = run_info
+                    state = set_run_info(config, run_key, run_info, state=state)
+                    state = set_step_status(config, f"xcpd_{pipeline_name}", "running", f"SLURM job {job_id} running", state=state)
+                return state
+
             if slurm_state in ("FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"):
                 run_info["status"] = "failed"
                 run_info["completed_at"] = datetime.now().isoformat()
@@ -980,7 +1214,8 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
 
     # Process is gone — determine success vs failure from log markers
     log_file = run_info.get("log_file")
-    progress = parse_xcpd_progress(Path(log_file) if log_file else None)
+    n_tasks = len(run_info.get("participant_labels") or []) or None
+    progress = parse_xcpd_progress(Path(log_file) if log_file else None, n_expected_tasks=n_tasks)
     if progress["has_error"] and not progress["is_done"]:
         run_info["status"] = "failed"
         run_info["completed_at"] = datetime.now().isoformat()
@@ -988,6 +1223,7 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
         state = set_run_info(config, run_key, run_info, state=state)
         state = set_step_status(config, f"xcpd_{pipeline_name}", "failed", "Error detected in log", state=state)
         append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} run failed (error in log)", level="error", state=state)
+        _write_subject_status_files(config, pipeline_name, run_info, success=False)
         return state
 
     run_info["status"] = "completed"
@@ -996,11 +1232,67 @@ def refresh_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str
     state = set_run_info(config, run_key, run_info, state=state)
     state = set_step_status(config, f"xcpd_{pipeline_name}", "completed", "Process finished", state=state)
     append_pipeline_log(config, f"XCP-D {pipeline_name.upper()} run finished", state=state)
+    _write_subject_status_files(config, pipeline_name, run_info, success=True)
     return state
 
 
+def _write_subject_status_files(
+    config: Dict[str, Any], pipeline_name: str, run_info: Dict[str, Any], success: bool
+) -> None:
+    """Write a ``status`` sentinel file inside each subject's XCP-D output dir.
+
+    These files let the UI quickly report per-subject completion without
+    parsing the full log.  The file contains ``completed <timestamp>`` or
+    ``failed <timestamp>``.
+    """
+    xcpd_dir_key = f"xcpd_{pipeline_name}_dir"
+    xcpd_output_dir_raw = (
+        config["paths"].get(xcpd_dir_key)
+        or config["paths"].get("xcpd_fc_dir", "")
+    )
+    if not xcpd_output_dir_raw:
+        return
+    xcpd_output_dir = Path(xcpd_output_dir_raw)
+    if not xcpd_output_dir.exists():
+        return
+    timestamp = run_info.get("completed_at", datetime.now().isoformat())
+    status_text = f"completed {timestamp}" if success else f"failed {timestamp}"
+    labels = run_info.get("participant_labels") or []
+    for sub in labels:
+        sub_id = sub if sub.startswith("sub-") else f"sub-{sub}"
+        sub_dir = xcpd_output_dir / sub_id
+        if sub_dir.exists():
+            try:
+                (sub_dir / "status").write_text(status_text)
+            except OSError:
+                pass
+
+
+_PIPELINE_ORDER = ["fc", "fc_gsr", "ec"]
+
+
+class XCPDParallelSubmissionError(RuntimeError):
+    """Raised when submit-all starts some XCP-D jobs but one or more fail."""
+
+    def __init__(self, results: Dict[str, Dict[str, Any]], failures: Dict[str, str]):
+        self.results = results
+        self.failures = failures
+        submitted = ", ".join(f"{p}: {info.get('job_id', '?')}" for p, info in results.items())
+        failed = ", ".join(f"{p}: {msg}" for p, msg in failures.items())
+        message_parts = []
+        if submitted:
+            message_parts.append(f"submitted [{submitted}]")
+        if failed:
+            message_parts.append(f"failed [{failed}]")
+        super().__init__("; ".join(message_parts) or "XCP-D parallel submission failed")
+
+
 def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, Any]) -> Dict[str, Any]:
-    """Terminate a running XCP-D process or cancel a SLURM job."""
+    """Terminate a running XCP-D process, or cancel a queued/running SLURM job.
+
+    For queued jobs: sets step status back to ``not_started`` so re-submission
+    is possible.  For running jobs: marks as ``failed``.
+    """
     run_key = f"xcpd_{pipeline_name}"
     run_info = state.get("runs", {}).get(run_key)
     if not run_info:
@@ -1009,6 +1301,7 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
     backend = run_info.get("backend", "local")
     job_id = run_info.get("job_id")
     pid = run_info.get("pid")
+    was_queued = run_info.get("status") == "queued"
 
     try:
         if backend == "hpc":
@@ -1025,7 +1318,11 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
                 if exit_code != 0:
                     raise RuntimeError(stderr or stdout or f"Cancel exited with status {exit_code}")
             except Exception as exc:
-                _safe_disconnect(conn)
+                run_info["status"] = "failed"
+                run_info["stopped_at"] = datetime.now().isoformat()
+                run_info["stop_error"] = str(exc)
+                state["runs"][run_key] = run_info
+                set_run_info(config, run_key, run_info, state=state)
                 set_step_status(
                     config,
                     f"xcpd_{pipeline_name}",
@@ -1045,11 +1342,15 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
         elif pid:
             os.killpg(int(pid), signal.SIGTERM)
 
-        run_info["status"] = "stopped"
+        run_info["status"] = "cancelled" if was_queued else "stopped"
         run_info["stopped_at"] = datetime.now().isoformat()
         state["runs"][run_key] = run_info
         set_run_info(config, run_key, run_info, state=state)
-        set_step_status(config, f"xcpd_{pipeline_name}", "failed", "Stopped by user", state=state)
+        if was_queued:
+            # Allow re-submission by resetting the step gate
+            set_step_status(config, f"xcpd_{pipeline_name}", "not_started", "Cancelled by user", state=state)
+        else:
+            set_step_status(config, f"xcpd_{pipeline_name}", "failed", "Stopped by user", state=state)
         append_pipeline_log(config, f"Stopped XCP-D {pipeline_name.upper()} run", level="warning", state=state)
     except ProcessLookupError:
         pass
@@ -1077,8 +1378,46 @@ def collect_qc_reports(output_dir: Path) -> Dict[str, List[Path]]:
     }
 
 
-def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = None) -> Dict[str, Any]:
+def find_first_xcpd_report_html(output_dir: Path) -> Optional[Path]:
+    """Return the first XCP-D HTML report found under ``output_dir``.
+
+    Prefer the canonical executive/summary report patterns before falling back
+    to any HTML file. This avoids materializing large recursive glob results
+    just to answer an existence check.
+    """
+    if not output_dir.exists():
+        return None
+
+    for pattern in (
+        "**/*_desc-about_bold.html",
+        "**/*_desc-summary_bold.html",
+        "**/*.html",
+    ):
+        match = next(output_dir.glob(pattern), None)
+        if match is not None:
+            return match
+    return None
+
+
+def parse_xcpd_progress(
+    log_file: Optional[Path],
+    stored_total: Optional[int] = None,
+    n_expected_tasks: Optional[int] = None,
+) -> Dict[str, Any]:
     """Parse an XCP-D/nipype log file and return progress information.
+
+    For concatenated array-task logs (separated by ``=== filename ===``
+    headers), aggregates progress across all tasks: ``nodes_total`` is
+    ``per_task_graph_size * n_expected_tasks`` and ``nodes_done`` is the
+    sum across tasks.
+
+    Parameters
+    ----------
+    n_expected_tasks
+        Number of SLURM array tasks expected (i.e. number of subjects).
+        Used to compute a reliable ``nodes_total`` even when not all tasks
+        have started yet.  Falls back to the number of "workflow graph"
+        lines found in the log.
 
     Uses *stored_total* as a fallback when the "N nodes built" line has not
     yet been written to the local log (e.g. for HPC runs whose log was
@@ -1091,6 +1430,8 @@ def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = 
         "last_lines": [],
         "has_error": False,
         "is_done": False,
+        "task_count": 0,
+        "tasks_done": 0,
     }
     if not log_file or not Path(log_file).exists():
         return result
@@ -1102,20 +1443,37 @@ def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = 
     lines = content.splitlines()
     result["last_lines"] = lines[-50:]
 
+    # Track per-task graph sizes so we can sum for array jobs
+    per_task_nodes: int = 0
+    task_graph_count = 0
+
     for line in lines:
         m = re.search(r"workflow graph with (\d+) nodes", line)
         if m:
-            result["nodes_total"] = int(m.group(1))
+            per_task_nodes = int(m.group(1))
+            task_graph_count += 1
         if "[Node] Finished" in line:
             result["nodes_done"] += 1
         m = re.search(r'\[Node\] (?:Setting-up|Executing) "([^"]+)"', line)
         if m:
-            # Show only the short node name (last dotted component)
             result["current_node"] = m.group(1).split(".")[-1]
         if " ERROR " in line or "Traceback (most recent" in line or line.startswith("FATAL:") or " FATAL " in line:
             result["has_error"] = True
         if "Workflow finished" in line or "XCP-D finished successfully" in line:
-            result["is_done"] = True
+            result["tasks_done"] += 1
+
+    result["task_count"] = task_graph_count
+
+    if task_graph_count >= 1 and per_task_nodes:
+        # Use the expected task count (from run_info participant list) when
+        # available; fall back to the number of tasks whose logs we've seen.
+        effective_tasks = n_expected_tasks or task_graph_count
+        result["nodes_total"] = per_task_nodes * effective_tasks
+
+    # All expected tasks must finish for the overall run to be "done"
+    expected = n_expected_tasks or task_graph_count
+    if result["tasks_done"] > 0 and expected > 0 and result["tasks_done"] >= expected:
+        result["is_done"] = True
 
     return result
 
@@ -1123,28 +1481,83 @@ def parse_xcpd_progress(log_file: Optional[Path], stored_total: Optional[int] = 
 def fetch_hpc_xcpd_log(config: Dict[str, Any], run_info: Dict[str, Any]) -> Optional[Path]:
     """Download the full remote XCP-D SLURM log to the local log_file path.
 
+    For SLURM array jobs, per-task logs (e.g. ``xcpd_fc_4131_1.out``,
+    ``xcpd_fc_4131_2.out``) are concatenated into the single local file
+    with separators so the caller can see all tasks' output.
+
     Returns the local Path on success, None on failure.
     """
+    remote_log_prefix = run_info.get("remote_log_prefix")
     remote_log = run_info.get("remote_log_out")
     local_log = run_info.get("log_file")
-    if not remote_log or not local_log:
+    if not local_log:
+        return None
+    if not remote_log_prefix and not remote_log:
         return None
     hpc_cfg = HPCConfig.from_config(config)
     conn = None
     try:
         conn = HPCConnection(hpc_cfg)
         conn.connect()
-        stdout, _, exit_code = conn.execute(
-            f"cat {shlex.quote(remote_log)} 2>/dev/null",
-            timeout=120,
-        )
-        if stdout:
+
+        combined: List[str] = []
+
+        if remote_log_prefix:
+            # Enumerate array-task log files (sorted numerically).
+            # Use find -name to avoid shell glob expansion vulnerabilities.
+            prefix_dir = str(Path(remote_log_prefix).parent)
+            prefix_base = str(Path(remote_log_prefix).name)
+            stdout, _, _ = conn.execute(
+                f"find {shlex.quote(prefix_dir)} -maxdepth 1 "
+                f"\\( -name {shlex.quote(prefix_base + '_*.out')} "
+                f"-o -name {shlex.quote(prefix_base + '.out')} "
+                f"-o -name {shlex.quote(prefix_base + '_*.log')} "
+                f"-o -name {shlex.quote(prefix_base + '.log')} \\) "
+                f"2>/dev/null | sort -t_ -k3 -n",
+                timeout=30,
+            )
+            log_files = [f for f in stdout.strip().splitlines() if f.strip()]
+            if not log_files:
+                # Fallback: try the exact remote_log_out path
+                if remote_log:
+                    log_files = [remote_log]
+            for lf in log_files:
+                lf = lf.strip()
+                out, _, _ = conn.execute(
+                    f"cat {shlex.quote(lf)} 2>/dev/null",
+                    timeout=120,
+                )
+                if not out and lf.endswith(".out"):
+                    # The SLURM .out file is empty (NFS log write failure).
+                    # Check for the explicit .log file written by the job script
+                    # via `exec > /tmp/... && cp to NFS` pattern.
+                    explicit_log = str(Path(lf).with_suffix(".log"))
+                    out, _, _ = conn.execute(
+                        f"cat {shlex.quote(explicit_log)} 2>/dev/null",
+                        timeout=120,
+                    )
+                if out:
+                    fname = Path(lf).name
+                    combined.append(f"=== {fname} ===")
+                    combined.append(out)
+        elif remote_log:
+            out, _, _ = conn.execute(
+                f"cat {shlex.quote(remote_log)} 2>/dev/null",
+                timeout=120,
+            )
+            if out:
+                combined.append(out)
+
+        if combined:
             local_path = Path(local_log)
             local_path.parent.mkdir(parents=True, exist_ok=True)
-            local_path.write_text(stdout)
+            local_path.write_text("\n".join(combined))
             return local_path
     except Exception:
-        pass
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to fetch HPC log for job %s", run_info.get("job_id"), exc_info=True
+        )
     finally:
         _safe_disconnect(conn)
     return None
@@ -1165,7 +1578,7 @@ def download_xcpd_outputs_from_hpc(
     if paths.get(output_dir_key):
         local_out_dir = Path(paths[output_dir_key])
     else:
-        local_out_dir = Path(paths.get("xcpd_dir", "derivatives/preprocessing/xcpd")) / pipeline_name
+        local_out_dir = Path(paths.get("xcpd_dir", "derivatives/func/preprocessing/xcpd")) / pipeline_name
     local_out_dir.mkdir(parents=True, exist_ok=True)
 
     # Use the same pipeline → remote path mapping as build_remote_xcpd_command
@@ -1176,37 +1589,165 @@ def download_xcpd_outputs_from_hpc(
     else:
         remote_xcpd_dir = hpc_cfg.remote_xcpd_ec
     if not remote_xcpd_dir:
-        remote_xcpd_dir = f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline_name}"
+        remote_xcpd_dir = f"{hpc_cfg.remote_base}/derivatives/func/preprocessing/xcpd/{pipeline_name}"
 
-    rsync_cmd = ["rsync", "-avz", "--no-perms"]
+    rsync_cmd = ["rsync", "-avz", "--no-perms", "--timeout=60"]
+    _ssh_opts = []
+    if hpc_cfg.port and hpc_cfg.port != 22:
+        _ssh_opts += ["-p", str(hpc_cfg.port)]
     if hpc_cfg.ssh_key:
-        rsync_cmd.extend(["-e", f"ssh -i {Path(hpc_cfg.ssh_key).expanduser()}"])
+        _ssh_opts += ["-i", str(Path(hpc_cfg.ssh_key).expanduser())]
+    if _ssh_opts:
+        rsync_cmd.extend(["-e", "ssh " + " ".join(_ssh_opts)])
 
     subjects = [f"sub-{label}" if not label.startswith("sub-") else label
                 for label in (participant_labels or [])]
     if subjects:
-        # Include only selected subjects
+        # Include only selected subjects plus shared output dirs (logs, atlases).
+        # All includes must come before --exclude=* (first-match wins in rsync).
         for sub in subjects:
             rsync_cmd += [f"--include={sub}/", f"--include={sub}/**"]
-        rsync_cmd += ["--include=dataset_description.json", "--include=*.json",
-                      "--include=*.bib", "--include=*.html",
-                      "--exclude=*/"]
-    # Also always include top-level files (dataset_description, etc.)
-    rsync_cmd += [
-        "--include=dataset_description.json",
-        "--include=*.json",
-        "--include=*.bib",
-    ]
+        rsync_cmd += [
+            "--include=logs/", "--include=logs/**",
+            "--include=sourcedata/", "--include=sourcedata/atlases/",
+            "--include=sourcedata/atlases/**",
+            "--include=dataset_description.json", "--include=*.json",
+            "--include=*.bib", "--include=*.html",
+            "--exclude=*",  # strict: exclude all unmatched files and dirs
+        ]
+    # Without subject filtering, rsync mirrors everything — no excludes needed.
 
     rsync_cmd += [
         f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_xcpd_dir}/",
         f"{local_out_dir}/",
     ]
 
-    result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=7200)
     if result.returncode not in (0, 24):  # 24 = partial transfer (acceptable)
         raise RuntimeError(result.stderr or result.stdout or f"rsync exited {result.returncode}")
     return str(local_out_dir)
+
+
+def cleanup_xcpd_hpc_files(config: Dict[str, Any], pipeline_name: str) -> None:
+    """Remove XCP-D output, work directory, and SLURM script from HPC.
+
+    Cleans the remote output directory
+    (``derivatives/func/preprocessing/xcpd/<pipeline>``),
+    work directory, SLURM scripts, and log files.
+    Raises ``RuntimeError`` if the HPC connection fails.
+    """
+    from utils.pipeline_state import load_pipeline_state
+
+    state = load_pipeline_state(config)
+    run_key = f"xcpd_{pipeline_name}"
+    run_info = state.get("runs", {}).get(run_key, {})
+    hpc_cfg = HPCConfig.from_config(config)
+
+    work_dir = run_info.get("work_dir") or _remote_xcpd_work_dir(hpc_cfg, pipeline_name)
+    remote_script = run_info.get("remote_script")
+    remote_log_prefix = run_info.get("remote_log_prefix")
+    remote_log_out = run_info.get("remote_log_out")
+    remote_log_err = run_info.get("remote_log_err")
+
+    # Resolve the remote XCP-D output directory
+    if pipeline_name == "fc":
+        remote_output = hpc_cfg.remote_xcpd_fc
+    elif pipeline_name == "fc_gsr":
+        remote_output = hpc_cfg.remote_xcpd_fc_gsr
+    else:
+        remote_output = hpc_cfg.remote_xcpd_ec
+    if not remote_output:
+        remote_output = f"{hpc_cfg.remote_base}/derivatives/func/preprocessing/xcpd/{pipeline_name}"
+
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        # Remove output directory
+        if remote_output:
+            conn.execute(f"rm -rf {shlex.quote(remote_output)}", timeout=120)
+        # Remove work directory
+        if work_dir:
+            conn.execute(f"rm -rf {shlex.quote(work_dir)}", timeout=120)
+        # Remove SLURM script
+        if remote_script:
+            conn.execute(f"rm -f {shlex.quote(remote_script)}", timeout=30)
+        # Remove log files: for array jobs, use the prefix to match all
+        # per-task logs (e.g. xcpd_fc_4131_1.out, xcpd_fc_4131_2.out).
+        # Match exactly prefix.out, prefix.err (non-array legacy), and
+        # prefix_N.out, prefix_N.err (array tasks) to avoid deleting logs
+        # belonging to other jobs whose IDs share a common numeric prefix.
+        if remote_log_prefix:
+            prefix_dir = str(Path(remote_log_prefix).parent)
+            prefix_base = str(Path(remote_log_prefix).name)
+            find_cmd = (
+                f"find {shlex.quote(prefix_dir)} -maxdepth 1 "
+                f"\\( -name {shlex.quote(prefix_base + '.out')} "
+                f"-o -name {shlex.quote(prefix_base + '.err')} "
+                f"-o -name {shlex.quote(prefix_base + '.log')} "
+                f"-o -name {shlex.quote(prefix_base + '_*.out')} "
+                f"-o -name {shlex.quote(prefix_base + '_*.err')} "
+                f"-o -name {shlex.quote(prefix_base + '_*.log')} \\) "
+                f"2>/dev/null"
+            )
+            stdout, _, _ = conn.execute(find_cmd, timeout=30)
+            for lf in stdout.strip().splitlines():
+                lf = lf.strip()
+                if lf:
+                    conn.execute(f"rm -f {shlex.quote(lf)}", timeout=30)
+        else:
+            # Legacy: individual log paths
+            for remote_file in (remote_log_out, remote_log_err):
+                if remote_file:
+                    conn.execute(f"rm -f {shlex.quote(remote_file)}", timeout=30)
+        # Remove the sublist file
+        remote_sublist = run_info.get("remote_sublist")
+        if not remote_sublist:
+            # Fallback for runs submitted before remote_sublist was stored
+            remote_sublist = f"{hpc_cfg.remote_base}/sublist_xcpd_{pipeline_name}.txt"
+        conn.execute(f"rm -f {shlex.quote(remote_sublist)}", timeout=30)
+        append_pipeline_log(config, f"Cleaned up HPC files for XCP-D {pipeline_name.upper()}")
+    finally:
+        _safe_disconnect(conn)
+
+
+def check_fmriprep_on_hpc(
+    config: Dict[str, Any],
+    participant_labels: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    """Lightweight check: are fMRIPrep outputs present on HPC for the given subjects?
+
+    Returns a dict with:
+      - ``available``: True if the remote fMRIPrep directory exists
+      - ``remote_dir``: the remote path found (or None)
+      - ``missing_subjects``: list of ``sub-*`` labels not found remotely
+      - ``error``: error message string if the connection failed
+    """
+    hpc_cfg = HPCConfig.from_config(config)
+    labels = list(_strip_bids_prefix(participant_labels or [], "sub-"))
+    conn = None
+    try:
+        conn = HPCConnection(hpc_cfg)
+        conn.connect()
+        candidates = _deduplicate_paths([hpc_cfg.remote_fmriprep, hpc_cfg.remote_legacy_fmriprep])
+        fmriprep_dir: Optional[str] = None
+        for candidate in candidates:
+            if candidate and _remote_dir_exists(conn, candidate):
+                if _remote_file_exists(conn, str(Path(candidate) / "dataset_description.json")):
+                    fmriprep_dir = candidate
+                    break
+        if not fmriprep_dir:
+            return {"available": False, "remote_dir": None, "missing_subjects": [f"sub-{l}" for l in labels]}
+        missing = []
+        for label in labels:
+            sub_dir = f"{fmriprep_dir}/sub-{label}"
+            if not _remote_dir_exists(conn, sub_dir):
+                missing.append(f"sub-{label}")
+        return {"available": True, "remote_dir": fmriprep_dir, "missing_subjects": missing}
+    except Exception as exc:
+        return {"available": False, "remote_dir": None, "missing_subjects": [f"sub-{l}" for l in labels], "error": str(exc)}
+    finally:
+        _safe_disconnect(conn)
 
 
 def _sync_remote_xcpd_atlas_dataset(
@@ -1235,9 +1776,13 @@ def _sync_remote_xcpd_atlas_dataset(
         "rsync",
         "-avz",
     ]
+    _ssh_opts = []
+    if hpc_cfg.port and hpc_cfg.port != 22:
+        _ssh_opts += ["-p", str(hpc_cfg.port)]
     if hpc_cfg.ssh_key:
-        ssh_key = str(Path(hpc_cfg.ssh_key).expanduser())
-        rsync_cmd.extend(["-e", f"ssh -i {ssh_key}"])
+        _ssh_opts += ["-i", str(Path(hpc_cfg.ssh_key).expanduser())]
+    if _ssh_opts:
+        rsync_cmd.extend(["-e", "ssh " + " ".join(_ssh_opts)])
     rsync_cmd.extend([
         f"{str(local_dataset)}/",
         f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_dataset_root}/",
@@ -1289,9 +1834,14 @@ def sync_fmriprep_to_hpc(
         "--info=progress2",
         "--exclude=*_space-fsnative_*",
     ]
+    # Build ssh command with port and optional key
+    ssh_opts = []
+    if hpc_cfg.port and hpc_cfg.port != 22:
+        ssh_opts += ["-p", str(hpc_cfg.port)]
     if hpc_cfg.ssh_key:
-        ssh_key = str(Path(hpc_cfg.ssh_key).expanduser())
-        rsync_cmd.extend(["-e", f"ssh -i {ssh_key}"])
+        ssh_opts += ["-i", str(Path(hpc_cfg.ssh_key).expanduser())]
+    if ssh_opts:
+        rsync_cmd.extend(["-e", "ssh " + " ".join(ssh_opts)])
 
     if subjects:
         for sub in subjects:

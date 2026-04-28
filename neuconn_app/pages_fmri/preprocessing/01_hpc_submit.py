@@ -299,13 +299,27 @@ def render_subject_selection(config: Dict) -> Optional[List[str]]:
     # Selection method
     selection_method = st.radio(
         "Selection method:",
-        ["Select all", "Select specific subjects", "Select range"],
-        horizontal=True
+        ["Select all", "Select incomplete", "Select specific subjects", "Select range"],
+        horizontal=True,
+        help="'Select incomplete' picks all subjects that have not yet been processed by fMRIPrep.",
     )
 
     if selection_method == "Select all":
         selected = selectable
         st.info(f"All {len(selected)} subjects selected")
+
+    elif selection_method == "Select incomplete":
+        # All available subjects that have no fMRIPrep output, regardless of the exclude_processed checkbox
+        incomplete = [s for s in available if s not in processed]
+        selected = incomplete
+        if selected:
+            st.info(
+                f"**{len(selected)} incomplete** subject(s) selected (not yet processed by fMRIPrep): "
+                + ", ".join(selected)
+            )
+        else:
+            st.success("All available subjects have already been processed by fMRIPrep.")
+            return None
 
     elif selection_method == "Select specific subjects":
         selected = st.multiselect(
@@ -330,13 +344,17 @@ def render_subject_selection(config: Dict) -> Optional[List[str]]:
 
     # Batch size
     st.markdown("---")
-    batch_size = st.slider(
-        "Batch size (subjects per job submission):",
-        min_value=1,
-        max_value=min(len(selected), 16),
-        value=min(len(selected), 8),
-        help="Number of subjects to process in each batch. Smaller batches reduce HPC storage usage."
-    )
+    if len(selected) == 1:
+        batch_size = 1
+        st.info("Batch size: 1 (single subject selected)")
+    else:
+        batch_size = st.slider(
+            "Batch size (subjects per job submission):",
+            min_value=1,
+            max_value=min(len(selected), 16),
+            value=min(len(selected), 8),
+            help="Number of subjects to process in each batch. Smaller batches reduce HPC storage usage."
+        )
 
     # Store batch size in session state
     st.session_state.hpc_batch_size = batch_size

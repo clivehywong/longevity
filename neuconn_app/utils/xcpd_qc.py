@@ -13,18 +13,73 @@ import streamlit as st
 
 from utils.pipeline_state import append_pipeline_log, set_approval, set_step_status
 from utils.subject_level_fc import load_connectome_table
-from utils.xcpd import collect_qc_reports, download_xcpd_outputs_from_hpc
+from utils.xcpd import collect_qc_reports, download_xcpd_outputs_from_hpc, find_first_xcpd_report_html
 
 
-def ensure_xcpd_qc_dirs(config: Dict) -> Dict[str, Path]:
+def get_xcpd_subject_status(xcpd_output_dir: Path, subjects: List[str]) -> pd.DataFrame:
+    """Scan xcpd_output_dir for per-subject completion status.
+
+    For each subject the function checks for:
+    1. A ``status`` sentinel file written by NeuConn after a run completes.
+    2. Presence of the first matching XCP-D HTML report under the subject
+       directory as a fallback indicator that XCP-D itself finished
+       successfully.
+
+    Returns a DataFrame with columns: subject, status, details.
+    """
+    rows = []
+    for sub in subjects:
+        sub_dir = xcpd_output_dir / sub
+        status_file = sub_dir / "status"
+        if status_file.exists():
+            content = status_file.read_text().strip()
+            if content.startswith("completed"):
+                rows.append({"subject": sub, "status": "✅ completed", "details": content})
+            elif content.startswith("failed"):
+                rows.append({"subject": sub, "status": "❌ failed", "details": content})
+            else:
+                rows.append({"subject": sub, "status": "⚠️ unknown", "details": content})
+        elif sub_dir.exists():
+            report_html = find_first_xcpd_report_html(sub_dir)
+            if report_html is not None:
+                rows.append({"subject": sub, "status": "✅ completed (no status file)", "details": str(report_html)})
+            else:
+                rows.append({"subject": sub, "status": "🔄 in progress / incomplete", "details": "Output dir exists but no HTML found"})
+        else:
+            rows.append({"subject": sub, "status": "⚪ not started", "details": "No output directory"})
+    return pd.DataFrame(rows, columns=["subject", "status", "details"])
+
+
+def ensure_xcpd_run_dirs(config: Dict) -> Dict[str, Path]:
+    """Return (and create) per-pipeline run-artifact directories.
+
+    Keys ``xcpd_fc_runs_dir`` / ``xcpd_fc_gsr_runs_dir`` / ``xcpd_ec_runs_dir``
+    are preferred; legacy ``xcpd_fc_qc_dir`` keys are accepted as a fallback so
+    existing user configs keep working without modification.
+    """
     paths = config["paths"]
-    fc_dir = Path(paths["xcpd_fc_qc_dir"])
-    fc_gsr_dir = Path(paths.get("xcpd_fc_gsr_qc_dir", str(Path(paths["xcpd_fc_qc_dir"]).parent / "xcpd_fc_gsr")))
-    ec_dir = Path(paths["xcpd_ec_qc_dir"])
-    fc_dir.mkdir(parents=True, exist_ok=True)
-    fc_gsr_dir.mkdir(parents=True, exist_ok=True)
-    ec_dir.mkdir(parents=True, exist_ok=True)
+    pipeline_runs = Path(
+        paths.get("pipeline_runs_dir")
+        or (Path(paths["derivatives_dir"]) / "pipeline_runs")
+    )
+
+    def _resolve(new_key: str, legacy_key: str, sub: str) -> Path:
+        if new_key in paths:
+            return Path(paths[new_key])
+        if legacy_key in paths:
+            return Path(paths[legacy_key])
+        return pipeline_runs / sub
+
+    fc_dir = _resolve("xcpd_fc_runs_dir", "xcpd_fc_qc_dir", "xcpd_fc")
+    fc_gsr_dir = _resolve("xcpd_fc_gsr_runs_dir", "xcpd_fc_gsr_qc_dir", "xcpd_fc_gsr")
+    ec_dir = _resolve("xcpd_ec_runs_dir", "xcpd_ec_qc_dir", "xcpd_ec")
+    for d in (fc_dir, fc_gsr_dir, ec_dir):
+        d.mkdir(parents=True, exist_ok=True)
     return {"fc": fc_dir, "fc_gsr": fc_gsr_dir, "ec": ec_dir}
+
+
+# Keep legacy alias for any callers that haven't been updated yet.
+ensure_xcpd_qc_dirs = ensure_xcpd_run_dirs
 
 
 def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = None) -> None:
@@ -57,7 +112,8 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
                             st.success(f"FC outputs saved to {out}")
                             st.rerun()
                         except Exception as exc:
-                            st.error(f"Download failed: {exc}")
+                            st.error("Download failed")
+                            st.code(str(exc), language="text")
             with cols[1]:
                 if st.button("Download FC+GSR outputs", key="dl_fc_gsr_hpc"):
                     with st.spinner("Downloading FC+GSR outputs from HPC…"):
@@ -66,7 +122,8 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
                             st.success(f"FC+GSR outputs saved to {out}")
                             st.rerun()
                         except Exception as exc:
-                            st.error(f"Download failed: {exc}")
+                            st.error("Download failed")
+                            st.code(str(exc), language="text")
             with cols[2]:
                 if st.button("Download EC outputs", key="dl_ec_hpc"):
                     with st.spinner("Downloading EC outputs from HPC…"):
@@ -75,7 +132,8 @@ def render_xcpd_qc_reports(config: Dict, state: Dict, title: Optional[str] = Non
                             st.success(f"EC outputs saved to {out}")
                             st.rerun()
                         except Exception as exc:
-                            st.error(f"Download failed: {exc}")
+                            st.error("Download failed")
+                            st.code(str(exc), language="text")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -257,4 +315,3 @@ def compute_qc_fc_summary(config: Dict) -> float | None:
     if len(fd_values) < 3:
         return None
     return float(abs(pd.Series(fd_values).corr(pd.Series(edge_means))))
-
