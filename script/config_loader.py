@@ -368,6 +368,17 @@ class ConnectivityConfig:
         """Get study metadata."""
         return self.config.get('metadata', {})
     
+    def get_local_measures(self) -> Dict:
+        """
+        Get local measures configuration (fALFF, ReHo parameters).
+        
+        Returns
+        -------
+        dict
+            Local measures configuration with fALFF, ReHo, preprocessing, and output settings
+        """
+        return self.config.get('local_measures', {})
+    
     def get_output_path(
         self,
         analysis_type: str,

@@ -314,7 +314,7 @@ def render_fmri_analysis():
         # Level 3: Analysis type
         analysis = st.sidebar.selectbox(
             "Analysis:",
-            ["Local Measures", "Seed Connectivity", "Effective Connectivity"]
+            ["Local Measures", "Seed Connectivity", "Network Connectivity", "Effective Connectivity"]
         )
 
         import importlib.util
@@ -325,6 +325,9 @@ def render_fmri_analysis():
         elif analysis == "Seed Connectivity":
             page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "02_seed_connectivity.py"
             module_name = "fmri_subject_seed_connectivity"
+        elif analysis == "Network Connectivity":
+            page_path = Path(__file__).parent / "pages_connectivity" / "network_connectivity.py"
+            module_name = "network_connectivity"
         else:
             page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "03_effective_connectivity.py"
             module_name = "fmri_subject_effective_connectivity"

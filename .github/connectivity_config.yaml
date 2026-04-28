@@ -495,6 +495,44 @@ quality_control:
     unusual_artifact_pattern: true
 
 # ============================================================================
+# LOCAL MEASURES: fALFF and ReHo computation parameters
+# ============================================================================
+local_measures:
+  description: "Session-level voxelwise measures (fALFF and ReHo)"
+  
+  fALFF:
+    enabled: true
+    description: "Fractional Amplitude of Low-Frequency Fluctuations"
+    reference: "Zou et al. (2008) NeuroImage"
+    parameters:
+      low_freq_hz: 0.01           # Hz (lower bound of low-frequency band)
+      high_freq_hz: 0.1           # Hz (upper bound of low-frequency band)
+      power_calc_freq_max_hz: 0.5 # Hz (upper bound for total power calculation)
+      
+  ReHo:
+    enabled: true
+    description: "Regional Homogeneity using Kendall's W coefficient of concordance"
+    reference: "Zang et al. (2004) NeuroImage"
+    parameters:
+      neighborhood_type: "faces_edges_corners"  # 26 neighbors (3×3×3 cube)
+      # Alternative: "faces" (6 neighbors), "faces_edges" (18 neighbors)
+  
+  preprocessing:
+    confound_regression_strategy: "basic"  # "basic" = 6 motion + CSF + WM
+    detrending: true
+    standardize: false              # Don't standardize before filtering
+    bandpass_filter_type: "butterworth"
+    filter_order: 4
+    
+  output:
+    output_dir: "results/local_measures"
+    filename_pattern: "sub-{subject}_ses-{session}_{measure}.nii.gz"
+    save_log: true
+    log_pattern: "sub-{subject}_ses-{session}_local_measures.log"
+    save_summary: true
+    summary_pattern: "local_measures_summary.csv"
+
+# ============================================================================
 # REFERENCES: Citation and documentation links
 # ============================================================================
 references:
