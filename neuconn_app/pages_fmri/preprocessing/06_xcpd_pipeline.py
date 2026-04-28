@@ -28,6 +28,7 @@ from utils.pipeline_state import (
     set_step_status,
 )
 from utils.xcpd import (
+    XCPDParallelSubmissionError,
     build_xcpd_command,
     check_fmriprep_on_hpc,
     cleanup_xcpd_hpc_files,
@@ -37,7 +38,7 @@ from utils.xcpd import (
     parse_xcpd_progress,
     refresh_xcpd_run,
     start_remote_xcpd_run,
-    start_xcpd_chain,
+    start_xcpd_parallel,
     start_xcpd_run,
     stop_xcpd_run,
     sync_fmriprep_to_hpc,
@@ -433,6 +434,21 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
         help="Submit the XCP-D job to the configured HPC cluster via SSH instead of running locally.",
     )
 
+    submit_notice = st.session_state.pop("xcpd_parallel_submit_notice", None)
+    if submit_notice:
+        submitted = submit_notice.get("submitted", {})
+        failures = submit_notice.get("failures", {})
+        if submitted:
+            st.warning(
+                "Some XCP-D jobs were submitted before another pipeline failed: "
+                + ", ".join(f"{p}: {job_id}" for p, job_id in submitted.items())
+            )
+        if failures:
+            st.error(
+                "Failed pipelines: "
+                + "; ".join(f"{p}: {msg}" for p, msg in failures.items())
+            )
+
     # --- SLURM Resources (shared across pipelines) ---
     hpc_cfg_dict = config.get("hpc", {}).get("slurm", {})
     xcpd_max_cpus = int(hpc_cfg_dict.get("xcpd_max_cpus", 15))
@@ -617,24 +633,24 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
     fc_gsr_info = state.get("runs", {}).get("xcpd_fc_gsr", {})
     ec_info = state.get("runs", {}).get("xcpd_ec", {})
 
-    # --- Master "Submit all incomplete" chain button ---
+    # --- Master "Submit all incomplete" parallel button ---
     if run_on_hpc:
         any_active = any(
             info.get("status") in ("running", "queued")
             for info in (fc_info, fc_gsr_info, ec_info)
         )
-        chain_help = (
-            "Submit FC → FC+GSR → EC as a SLURM dependency chain for subjects that are "
-            "incomplete in *any* of the three pipelines. Each pipeline starts automatically "
-            "after the previous one succeeds."
+        submit_help = (
+            "Submit FC, FC+GSR, and EC as independent SLURM jobs for subjects that are "
+            "incomplete in *any* of the three pipelines. These variants do not depend on "
+            "each other, so they can run in parallel."
             if not any_active
             else "Cannot submit — one or more pipelines are currently running or queued."
         )
         if st.button(
-            "🚀 Submit all incomplete (FC → FC+GSR → EC chain)",
+            "🚀 Submit all incomplete (FC, FC+GSR, EC in parallel)",
             disabled=any_active,
-            help=chain_help,
-            key="submit_xcpd_chain_btn",
+            help=submit_help,
+            key="submit_xcpd_parallel_btn",
         ):
             # Union of subjects incomplete in any pipeline
             incomplete: set = set()
@@ -644,10 +660,10 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                 st.info("All subjects are complete across all pipelines — nothing to submit.")
             else:
                 labels = sorted(incomplete)
-                st.info(f"Submitting chain for {len(labels)} subjects: {', '.join(labels)}")
+                st.info(f"Submitting parallel XCP-D jobs for {len(labels)} subjects: {', '.join(labels)}")
                 try:
-                    with st.spinner("Submitting SLURM chain (FC → FC+GSR → EC)…"):
-                        chain_result = start_xcpd_chain(
+                    with st.spinner("Submitting SLURM jobs (FC, FC+GSR, EC in parallel)…"):
+                        parallel_result = start_xcpd_parallel(
                             config,
                             participant_labels=labels,
                             session_ids=sessions or None,
@@ -656,16 +672,32 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
                             max_concurrent=max_concurrent,
                             partition=partition,
                         )
-                    job_ids = {p: info["job_id"] for p, info in chain_result.items()}
+                    job_ids = {p: info["job_id"] for p, info in parallel_result.items()}
                     st.success(
-                        f"✅ SLURM chain submitted — "
-                        f"FC: {job_ids.get('fc')} → "
-                        f"FC+GSR: {job_ids.get('fc_gsr')} (dep) → "
-                        f"EC: {job_ids.get('ec')} (dep)"
+                        f"✅ SLURM jobs submitted in parallel — "
+                        f"FC: {job_ids.get('fc')}, "
+                        f"FC+GSR: {job_ids.get('fc_gsr')}, "
+                        f"EC: {job_ids.get('ec')}"
                     )
                     st.rerun()
-                except Exception as chain_err:
-                    st.error(f"Chain submission failed: {chain_err}")
+                except XCPDParallelSubmissionError as submit_err:
+                    if submit_err.results:
+                        job_ids = {
+                            p: info.get("job_id", "?")
+                            for p, info in submit_err.results.items()
+                        }
+                        st.session_state["xcpd_parallel_submit_notice"] = {
+                            "submitted": job_ids,
+                            "failures": submit_err.failures,
+                        }
+                        st.rerun()
+                    else:
+                        st.error(
+                            "Failed pipelines: "
+                            + "; ".join(f"{p}: {msg}" for p, msg in submit_err.failures.items())
+                        )
+                except Exception as submit_err:
+                    st.error(f"Parallel submission failed: {submit_err}")
 
     # --- Remove all preprocessed XCP-D outputs ---
     st.markdown("---")

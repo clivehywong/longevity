@@ -1009,7 +1009,7 @@ def start_remote_xcpd_run(
     return run_info
 
 
-def start_xcpd_chain(
+def start_xcpd_parallel(
     config: Dict[str, Any],
     participant_labels: Optional[Iterable[str]] = None,
     session_ids: Optional[Iterable[str]] = None,
@@ -1018,11 +1018,11 @@ def start_xcpd_chain(
     max_concurrent: Optional[int] = None,
     partition: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Submit FC → FC+GSR → EC as a SLURM dependency chain.
+    """Submit FC, FC+GSR, and EC as independent SLURM array jobs.
 
-    Each pipeline is submitted with ``--dependency=afterok:{prev_job_id}`` so
-    they run sequentially on the HPC.  Returns a mapping of pipeline name to
-    ``run_info`` dict (as returned by :func:`start_remote_xcpd_run`).
+    The three XCP-D variants only require fMRIPrep inputs and do not depend on
+    each other, so they can run in parallel. Returns a mapping of pipeline name
+    to ``run_info`` dict (as returned by :func:`start_remote_xcpd_run`).
     """
     if nprocs is not None:
         config = dict(config)
@@ -1033,20 +1033,44 @@ def start_xcpd_chain(
             config["xcpd"]["omp_nthreads"] = omp_nthreads
 
     results: Dict[str, Dict[str, Any]] = {}
-    prev_job_id: Optional[str] = None
+    failures: Dict[str, str] = {}
     for pipeline in _PIPELINE_ORDER:
-        run_info = start_remote_xcpd_run(
-            config,
-            pipeline,
-            participant_labels=participant_labels,
-            session_ids=session_ids,
-            dep_job_id=prev_job_id,
-            max_concurrent=max_concurrent,
-            partition=partition,
-        )
-        results[pipeline] = run_info
-        prev_job_id = run_info["job_id"]
+        try:
+            run_info = start_remote_xcpd_run(
+                config,
+                pipeline,
+                participant_labels=participant_labels,
+                session_ids=session_ids,
+                max_concurrent=max_concurrent,
+                partition=partition,
+            )
+            results[pipeline] = run_info
+        except Exception as exc:
+            failures[pipeline] = str(exc)
+    if failures:
+        raise XCPDParallelSubmissionError(results, failures)
     return results
+
+
+def start_xcpd_chain(
+    config: Dict[str, Any],
+    participant_labels: Optional[Iterable[str]] = None,
+    session_ids: Optional[Iterable[str]] = None,
+    nprocs: Optional[int] = None,
+    omp_nthreads: Optional[int] = None,
+    max_concurrent: Optional[int] = None,
+    partition: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Backward-compatible wrapper for the former dependency-chain API."""
+    return start_xcpd_parallel(
+        config,
+        participant_labels=participant_labels,
+        session_ids=session_ids,
+        nprocs=nprocs,
+        omp_nthreads=omp_nthreads,
+        max_concurrent=max_concurrent,
+        partition=partition,
+    )
 
 
 def is_process_running(pid: int) -> bool:
@@ -1247,14 +1271,27 @@ def _write_subject_status_files(
 _PIPELINE_ORDER = ["fc", "fc_gsr", "ec"]
 
 
+class XCPDParallelSubmissionError(RuntimeError):
+    """Raised when submit-all starts some XCP-D jobs but one or more fail."""
+
+    def __init__(self, results: Dict[str, Dict[str, Any]], failures: Dict[str, str]):
+        self.results = results
+        self.failures = failures
+        submitted = ", ".join(f"{p}: {info.get('job_id', '?')}" for p, info in results.items())
+        failed = ", ".join(f"{p}: {msg}" for p, msg in failures.items())
+        message_parts = []
+        if submitted:
+            message_parts.append(f"submitted [{submitted}]")
+        if failed:
+            message_parts.append(f"failed [{failed}]")
+        super().__init__("; ".join(message_parts) or "XCP-D parallel submission failed")
+
+
 def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, Any]) -> Dict[str, Any]:
     """Terminate a running XCP-D process, or cancel a queued/running SLURM job.
 
     For queued jobs: sets step status back to ``not_started`` so re-submission
     is possible.  For running jobs: marks as ``failed``.
-    When cancelling a SLURM job that has downstream queued dependents, those
-    are automatically cancelled too (SLURM does not clean them up automatically
-    when a dependency is unsatisfied).
     """
     run_key = f"xcpd_{pipeline_name}"
     run_info = state.get("runs", {}).get(run_key)
@@ -1280,27 +1317,12 @@ def stop_xcpd_run(config: Dict[str, Any], pipeline_name: str, state: Dict[str, A
                 stdout, stderr, exit_code = conn.execute(cancel_cmd, timeout=30)
                 if exit_code != 0:
                     raise RuntimeError(stderr or stdout or f"Cancel exited with status {exit_code}")
-
-                # Cascade: cancel any downstream pipelines that are queued
-                # (SLURM PENDING jobs with unsatisfied deps stay in queue forever)
-                try:
-                    pipeline_idx = _PIPELINE_ORDER.index(pipeline_name)
-                except ValueError:
-                    pipeline_idx = -1
-                if pipeline_idx >= 0:
-                    for downstream in _PIPELINE_ORDER[pipeline_idx + 1:]:
-                        ds_key = f"xcpd_{downstream}"
-                        ds_run = state.get("runs", {}).get(ds_key, {})
-                        if ds_run.get("status") in ("queued", "running") and ds_run.get("job_id"):
-                            conn.execute(f"scancel {shlex.quote(str(ds_run['job_id']))}", timeout=30)
-                            ds_run["status"] = "cancelled"
-                            ds_run["stopped_at"] = datetime.now().isoformat()
-                            state["runs"][ds_key] = ds_run
-                            set_run_info(config, ds_key, ds_run, state=state)
-                            set_step_status(config, ds_key, "not_started", "Cancelled — upstream pipeline stopped", state=state)
-                            append_pipeline_log(config, f"Cancelled downstream XCP-D {downstream.upper()} (dependency cancelled)", level="warning", state=state)
             except Exception as exc:
-                _safe_disconnect(conn)
+                run_info["status"] = "failed"
+                run_info["stopped_at"] = datetime.now().isoformat()
+                run_info["stop_error"] = str(exc)
+                state["runs"][run_key] = run_info
+                set_run_info(config, run_key, run_info, state=state)
                 set_step_status(
                     config,
                     f"xcpd_{pipeline_name}",

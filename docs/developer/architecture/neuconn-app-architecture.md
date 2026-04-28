@@ -152,10 +152,10 @@ hpc:
 2. Script is saved locally to `pipeline_runs_dir/xcpd_{pipeline}/run_TIMESTAMP/xcpd_{pipeline}_job.sh`
 3. A subject-list file (`sublist_xcpd_{pipeline}.txt`) is uploaded alongside the script
 4. Script is uploaded to the HPC via `HPCConnection.write_file()`
-5. `sbatch xcpd_{pipeline}_job.sh` is executed over SSH; all three pipelines may be chained with `--dependency=afterok`
+5. `sbatch xcpd_{pipeline}_job.sh` is executed over SSH; submit-all launches FC, FC+GSR, and EC as independent jobs because they all consume fMRIPrep derivatives directly
 6. The returned SLURM job ID is stored in run_info as `job_id`; a `remote_log_prefix` (e.g., `logs/xcpd_fc_4143`) is stored for log enumeration; initial status is **`queued`**
 7. `refresh_xcpd_run()` polls `squeue -j {job_id} -h -o '%T|%r'` across all array tasks, prioritising status as RUNNING > COMPLETING > PENDING, and transitions accordingly
-8. `stop_xcpd_run()` calls `scancel {job_id}` and cascades to downstream pipelines
+8. `stop_xcpd_run()` calls `scancel {job_id}` for the selected pipeline
 
 #### Per-subject work directories
 

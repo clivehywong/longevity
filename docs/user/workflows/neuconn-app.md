@@ -67,6 +67,10 @@ The sidebar has two levels:
 
 Click **🔄 Rescan** to recheck the filesystem after adding new subjects or running preprocessing.
 
+The **fMRIPrep QC Reports** page embeds each subject HTML report and inlines
+local SVG/image assets from the report directory so figures load inside the
+Streamlit viewer.
+
 ## Pipeline gates
 
 The sidebar shows two independent gate summaries:
@@ -107,6 +111,10 @@ The recommended default set is **4S256Parcels, 4S456Parcels, Glasser, Gordon, Ti
 Open the **Atlas reference** expander in the XCP-D Runs tab to see the full catalog with descriptions.
 
 For HPC runs, configure SSH host, **Port**, remote project root, and HPC Singularity image path in **Settings → HPC**.
+
+The **Submit all incomplete** action submits FC, FC+GSR, and EC as independent
+SLURM jobs. These three XCP-D variants all consume fMRIPrep derivatives directly
+and do not need a dependency chain between them.
 
 ### SSH tunnel shortcut
 
@@ -187,7 +195,7 @@ Log files follow the naming pattern `xcpd_{pipeline}_{JOBID}_{TASKID}.{out|err}`
 
 #### Disk quota management
 
-Each XCP-D pipeline produces a large work directory (`work/xcpd/{pipeline}/`) that holds Nipype intermediate files — roughly **10–15 GB per subject**, adding up to **400+ GB for 33 subjects**. Running all three pipelines (FC → FC+GSR → EC) in sequence without cleaning up intermediate work directories can exceed a 1.5 TB home-directory quota.
+Each XCP-D pipeline produces a large work directory (`work/xcpd/{pipeline}/`) that holds Nipype intermediate files — roughly **10–15 GB per subject**, adding up to **400+ GB for 33 subjects**. Running all three pipelines together without cleaning up intermediate work directories can exceed a 1.5 TB home-directory quota, even though the pipelines can be submitted in parallel when quota allows.
 
 **Recommended workflow to stay within quota:**
 

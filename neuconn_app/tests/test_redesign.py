@@ -390,15 +390,15 @@ def run_xcpd_queued_state(page: Page) -> None:
     fetch_log_btn = page.get_by_role("button").filter(has_text="Fetch HPC log")
     test("'📥 Fetch HPC log' button present", fetch_log_btn.count() > 0)
 
-    # T7 — "Submit all incomplete (chain)" button must be present
+    # T7 — "Submit all incomplete" parallel button must be present
     chain_btn = page.get_by_role("button").filter(has_text="Submit all incomplete")
-    test("'🚀 Submit all incomplete' chain button present (T7)", chain_btn.count() > 0)
+    test("'🚀 Submit all incomplete' parallel button present (T7)", chain_btn.count() > 0)
 
     # When pipelines are active the button must be disabled to prevent double-submit
     if chain_btn.count() > 0 and has_status:
         is_disabled = chain_btn.first.is_disabled()
         test(
-            "Chain button disabled while a pipeline is running/queued (T7)",
+            "Submit-all button disabled while a pipeline is running/queued (T7)",
             is_disabled,
             "button should be disabled to prevent double-submit",
         )

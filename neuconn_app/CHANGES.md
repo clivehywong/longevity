@@ -391,8 +391,11 @@ Major UI improvements: SSH port support for tunnels, pipeline gate split (fMRI v
 - **fMRIPrep Submit**: "Select incomplete" radio option auto-selects unprocessed subjects
 
 ### 8. Inline HTML report viewers
-- **fMRIPrep QC Reports** (`02_qc_reports.py`): scans `fmriprep_dir` and `legacy_fmriprep_dir` for `sub-*.html`; dropdown + ⬅/➡ navigation; embedded via `st.components.v1.html()`
+- **fMRIPrep QC Reports** (`02_qc_reports.py`): scans `fmriprep_dir` and `legacy_fmriprep_dir` for `sub-*.html`; dropdown + ⬅/➡ navigation; embedded via `st.components.v1.html()` with local SVG/image assets inlined so figures render inside the Streamlit iframe
 - **XCP-D QC Reports** (`07_xcpd_qc_reports.py`): two-tab layout — "📈 QC Metrics" (existing) + "📄 HTML Reports" (per-pipeline tabs FC/FC+GSR/EC, per-session navigation)
+
+### 8b. Parallel XCP-D submit-all
+- **XCP-D Runs** (`06_xcpd_pipeline.py`): "Submit all incomplete" now submits FC, FC+GSR, and EC as independent SLURM jobs instead of an FC → FC+GSR → EC dependency chain.
 
 ### 9. MNI152NLin6Asym atlas upgrade (`utils/xcpd_atlases.py`, `atlases/tian/`)
 - Downloaded correct Tian atlas files in MNI152NLin6Asym space (identical to FSL MNI152_T1_2mm)
