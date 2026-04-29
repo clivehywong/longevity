@@ -1,582 +1,318 @@
 """
-Seed-Based Connectivity Analysis
+Seed-Based Connectivity Viewer — driven by XCP-D outputs.
 
-Interactive page for exploring seed-based connectivity with:
-- Multi-atlas seed selection (DiFuMo256, Schaefer400)
-- Subject/session selection
-- Session-level: Papaya viewer for z-maps
-- Group-level: Statistical clusters with anatomical labels
-- Export functionality for results
-
-Architecture:
-- Subject-level tab: Individual z-maps with Papaya viewer
-- Group-level tab: Cluster statistics, effect sizes, CSV export
-- Sidebar: Atlas/seed/subject selection, filtering options
-
-Author: NeuConn
+Cascading seed selector: source → atlas → seed.
+Shows seed-to-voxel z-map in Papaya and seed-to-parcel bar chart.
+Pipeline selector persists via ``viewer_pipeline_seed_conn`` session-state key.
 """
 
 from __future__ import annotations
 
 import sys
-import json
-import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Optional
 
 import pandas as pd
-import numpy as np
 import streamlit as st
-import nibabel as nib
-from datetime import datetime
 
-# Add paths
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.bids import scan_bids_directory
-from utils.config import load_config
-from config import get_project_root, derive_project_paths
-from utils.papaya_wrapper import render_papaya_viewer_streamlit, get_nifti_stats
+from utils.papaya_wrapper import render_papaya_viewer_streamlit
+from utils.connectivity_viewer import (
+    KNOWN_MEASURES,
+    pipeline_picker,
+    subject_session_pickers,
+    list_available_seeds,
+    list_available_measures_seed,
+    load_seed_to_parcel,
+    seed_dir,
+)
 
-logger = logging.getLogger(__name__)
+PAGE_KEY = "seed_conn"
 
 
 # ============================================================================
-# Data Loading & Caching
+# Cached loaders
 # ============================================================================
 
-@st.cache_data
-def load_roi_config(project_root: Path) -> Dict:
-    """Load ROI configuration with seed definitions."""
-    config_path = project_root / "neuconn_app" / "roi_config.json"
-    if config_path.exists():
-        with open(config_path) as f:
-            return json.load(f)
-    return {}
+
+@st.cache_data(ttl=60)
+def _list_seeds(bids_root_str: str, pipeline: str, subject: str, session: str) -> list[str]:
+    return list_available_seeds(Path(bids_root_str), pipeline, subject, session)
 
 
-@st.cache_data
-def get_available_seeds(roi_config: Dict) -> Dict[str, str]:
-    """Extract seeds marked for connectivity analysis from ROI config."""
-    seeds = {}
-    for roi in roi_config.get("rois", []):
-        if roi.get("use_as_seed"):
-            seeds[roi["id"]] = roi["label"]
-    return seeds
+@st.cache_data(ttl=60)
+def _list_measures(
+    bids_root_str: str, pipeline: str, subject: str, session: str,
+    seed_id: str, atlas: str,
+) -> list[str]:
+    return list_available_measures_seed(
+        Path(bids_root_str), pipeline, subject, session, seed_id, atlas
+    )
 
 
-@st.cache_data
-def get_available_atlases() -> Dict[str, str]:
-    """Get available atlases for connectivity analysis."""
+@st.cache_data(ttl=60)
+def _load_s2p(
+    bids_root_str: str, pipeline: str, subject: str, session: str,
+    seed_id: str, atlas: str, measure: str,
+) -> Optional[pd.DataFrame]:
+    return load_seed_to_parcel(
+        bids_root_str, pipeline, subject, session, seed_id, atlas, measure
+    )
+
+
+# ============================================================================
+# Seed selector helpers
+# ============================================================================
+
+
+def _source_display(source: str) -> str:
     return {
-        "DiFuMo256": "DiFuMo 256 regions",
-        "Schaefer400": "Schaefer 400 regions",
-        "Combined": "Schaefer 200 + Tian subcortex",
-    }
+        "xcpd_atlas_parcel": "Atlas parcel (XCP-D)",
+        "custom_nifti_roi": "Custom NIfTI ROI",
+        "sphere": "Sphere (coordinates)",
+    }.get(source, source)
 
 
-@st.cache_data
-def find_subject_sessions(project_root: Path) -> Dict[str, List[str]]:
-    """Find all available subjects and their sessions."""
-    bids_dir = project_root / "bids"
-    subject_sessions = {}
-    
-    if bids_dir.exists():
-        for sub_dir in sorted(bids_dir.glob("sub-*")):
-            subject = sub_dir.name
-            sessions = sorted([
-                ses_dir.name.replace("ses-", "")
-                for ses_dir in sub_dir.glob("ses-*")
-                if ses_dir.is_dir()
-            ])
-            if sessions:
-                subject_sessions[subject] = sessions
-    
-    return subject_sessions
+def _build_seed_selector(bids_root: Path, pipeline: str) -> Optional[str]:
+    """Cascading source → atlas → seed selector from SeedCatalog.
 
-
-@st.cache_data
-def find_connectivity_maps(
-    results_dir: Path,
-    atlas: str,
-    seed: str,
-    subject: Optional[str] = None,
-    session: Optional[str] = None,
-) -> List[Path]:
-    """Find connectivity z-maps for given parameters."""
-    if subject and session:
-        # Subject-level map
-        pattern = f"**/seed_{seed}_*atlas_{atlas}*_zmap*.nii.gz"
-        maps = list(results_dir.glob(f"**/seed_based/**/{subject}_ses-{session}_*"))
-        return sorted([m for m in maps if m.is_file()])
-    else:
-        # Group-level map
-        pattern = f"**/group_seed_{seed}_*atlas_{atlas}*_zmap*.nii.gz"
-        maps = list(results_dir.glob(f"**/group_analysis/**/{pattern}"))
-        return sorted([m for m in maps if m.is_file()])
-
-
-@st.cache_data
-def find_group_stats_csv(
-    results_dir: Path,
-    atlas: str,
-    seed: str,
-) -> Optional[Path]:
-    """Find group-level statistics CSV for given seed+atlas."""
-    csv_path = results_dir / "group_analysis" / f"seed_{seed}_{atlas}_clusters.csv"
-    if csv_path.exists():
-        return csv_path
-    
-    # Alternative pattern
-    for csv in results_dir.glob(f"**/group_analysis/**/*{seed}*{atlas}*clusters.csv"):
-        return csv
-    
-    return None
-
-
-def load_group_stats(csv_path: Path) -> Optional[pd.DataFrame]:
-    """Load and parse group-level statistics."""
+    Returns the selected seed_id or None.
+    """
     try:
-        df = pd.read_csv(csv_path)
-        return df
-    except Exception as e:
-        logger.error(f"Error loading group stats {csv_path}: {e}")
+        from neuconn_app.utils.seed_catalog import SeedCatalog
+    except ImportError:
+        st.warning("SeedCatalog not available.")
         return None
 
+    catalog = SeedCatalog(bids_root, xcpd_pipeline=pipeline)
+    sources = catalog.list_sources()
+    if not sources:
+        st.warning("No seeds found in catalog.")
+        return None
 
-# ============================================================================
-# Sidebar Controls
-# ============================================================================
+    col_src, col_atlas, col_seed = st.columns([1, 2, 3])
 
-def render_sidebar_controls(
-    project_root: Path,
-    roi_config: Dict,
-) -> Tuple[str, str, str, Optional[str], Optional[str], str, Dict]:
-    """Render sidebar controls and return selections."""
-    
-    with st.sidebar:
-        st.header("📋 Analysis Controls")
-        
-        # Analysis level
-        analysis_level = st.radio(
-            "Analysis Level",
-            ["Subject-Level", "Group-Level"],
-            help="View individual or group statistics",
+    with col_src:
+        source = st.selectbox(
+            "Source",
+            options=sources,
+            format_func=_source_display,
+            key=f"seed_source_{PAGE_KEY}_{pipeline}",
         )
-        
-        st.divider()
-        
-        # Atlas selection
-        atlases = get_available_atlases()
-        atlas = st.selectbox(
-            "Select Atlas",
-            options=list(atlases.keys()),
-            format_func=lambda x: atlases[x],
-            help="Choose atlas for seed definition and target space",
-        )
-        
-        # Seed selection
-        seeds = get_available_seeds(roi_config)
-        if seeds:
-            seed = st.selectbox(
-                "Select Seed",
-                options=list(seeds.keys()),
-                format_func=lambda x: f"{x}: {seeds[x]}",
-                help="Choose brain region for seed connectivity",
+
+    atlas_for_source: Optional[str] = None
+    if source == "xcpd_atlas_parcel":
+        atlases = catalog.list_atlases()
+        with col_atlas:
+            atlas_for_source = st.selectbox(
+                "Atlas",
+                options=atlases,
+                key=f"seed_atlas_{PAGE_KEY}_{pipeline}",
             )
-        else:
-            st.warning("⚠️ No seeds configured in roi_config.json")
-            seed = "N/A"
-        
-        st.divider()
-        
-        # Subject/session selection (subject-level only)
-        subject, session = None, None
-        if analysis_level == "Subject-Level":
-            subject_sessions = find_subject_sessions(project_root)
-            if subject_sessions:
-                subject = st.selectbox(
-                    "Select Subject",
-                    options=list(subject_sessions.keys()),
-                    help="Choose subject for individual analysis",
-                )
-                
-                if subject:
-                    session_list = subject_sessions[subject]
-                    session = st.selectbox(
-                        "Select Session",
-                        options=session_list,
-                        format_func=lambda x: f"Session {x}",
-                        help="Choose session for this subject",
-                    )
-            else:
-                st.info("📁 No subjects found in BIDS directory")
-        
-        st.divider()
-        
-        # Display options
-        st.markdown("### Display Options")
-        
-        # Threshold controls
-        threshold_percentile = st.slider(
-            "Display Threshold (%)",
-            min_value=0,
-            max_value=99,
-            value=50,
-            help="Set minimum z-value to display",
-        )
-        
-        colormap = st.selectbox(
-            "Colormap",
-            ["Hot", "Cool", "Spectrum", "Jet", "Gray"],
-            help="Select color scheme for z-map",
-        )
-        
-        overlay_alpha = st.slider(
-            "Overlay Transparency",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.7,
-            step=0.1,
-            help="Transparency of connectivity map overlay",
-        )
-        
-        viewer_height = st.slider(
-            "Viewer Height (px)",
-            min_value=400,
-            max_value=1000,
-            value=600,
-            step=50,
-        )
-        
-        st.divider()
-        
-        # Info box
-        st.markdown("### About")
-        st.caption(
-            """
-            **Seed-based connectivity** maps show correlation between a seed 
-            region and all other voxels in the brain.
-            
-            **Z-maps** are Fisher z-transformed correlation coefficients.
-            Positive values = positive correlation.
-            """
-        )
-        
-        options = {
-            "threshold_percentile": threshold_percentile,
-            "colormap": colormap,
-            "overlay_alpha": overlay_alpha,
-            "viewer_height": viewer_height,
-        }
-    
-    return analysis_level, atlas, seed, subject, session, analysis_level, options
-
-
-# ============================================================================
-# Subject-Level Display
-# ============================================================================
-
-def render_subject_level(
-    project_root: Path,
-    atlas: str,
-    seed: str,
-    subject: str,
-    session: str,
-    options: Dict,
-) -> None:
-    """Render subject-level connectivity visualization."""
-    st.header(f"📊 Subject-Level Connectivity: {seed}")
-    
-    results_dir = project_root / "results"
-    
-    # Find connectivity maps
-    maps = find_connectivity_maps(results_dir, atlas, seed, subject, session)
-    
-    if not maps:
-        st.warning(
-            f"❌ No connectivity maps found for:\n"
-            f"- Subject: {subject}\n"
-            f"- Session: ses-{session}\n"
-            f"- Seed: {seed}\n"
-            f"- Atlas: {atlas}"
-        )
-        st.info(
-            "💡 Run the connectivity pipeline first using "
-            "`script/master_full_connectivity_workflow.sh`"
-        )
-        return
-    
-    # If multiple maps (z-map, p-value, etc.), let user select
-    if len(maps) > 1:
-        selected_map = st.selectbox(
-            "Select Map Type",
-            options=maps,
-            format_func=lambda x: x.name,
-        )
     else:
-        selected_map = maps[0]
-    
-    # Verify map exists
-    if not selected_map.exists():
-        st.error(f"Map file not found: {selected_map}")
-        return
-    
-    # Get stats for automatic scaling
-    try:
-        stats = get_nifti_stats(str(selected_map))
-        st.info(
-            f"📈 **Map Statistics**\n"
-            f"- Range: [{stats['min']:.3f}, {stats['max']:.3f}]\n"
-            f"- Mean: {stats['mean']:.3f}\n"
-            f"- 95th percentile: {stats['p95']:.3f}"
+        with col_atlas:
+            st.markdown("")  # placeholder
+
+    seeds = catalog.get_seeds(source=source, atlas=atlas_for_source)
+    if not seeds:
+        st.warning("No seeds for selected source/atlas.")
+        return None
+
+    seed_ids = [s.id for s in seeds]
+    seed_names = {s.id: s.name for s in seeds}
+
+    with col_seed:
+        selected_id = st.selectbox(
+            "Seed",
+            options=seed_ids,
+            format_func=lambda x: seed_names.get(x, x),
+            key=f"seed_id_{PAGE_KEY}_{pipeline}",
         )
-    except Exception as e:
-        logger.warning(f"Could not get NIfTI stats: {e}")
-    
-    # Render Papaya viewer
-    st.subheader("🧠 Brain Map Viewer")
+
+    return selected_id
+
+
+# ============================================================================
+# Voxel z-map viewer
+# ============================================================================
+
+
+def _render_zmap(
+    bids_root: Path, pipeline: str, subject: str, session: str, seed_id: str
+) -> None:
+    sdir = seed_dir(bids_root, pipeline, subject, session, seed_id)
+    if not sdir.exists():
+        st.info(
+            f"No outputs found for seed **{seed_id}**.  "
+            "Submit this seed from the 'Connectivity Submit' section first."
+        )
+        return
+
+    zmaps = sorted(sdir.glob("*_seed-to-voxel_zmap.nii.gz"))
+    if not zmaps:
+        st.info("Seed-to-voxel z-map not yet computed for this selection.")
+        return
+
+    zmap_path = zmaps[0]
     try:
         render_papaya_viewer_streamlit(
-            str(selected_map),
-            height=options["viewer_height"],
-            colormap=options["colormap"],
-            threshold_range=(options["threshold_percentile"], 100),
+            brain_map_path=str(zmap_path),
+            title="",
+            colormap="Hot",
+            height=500,
+            key=f"papaya_zmap_{pipeline}_{subject}_{session}_{seed_id[:20]}",
+            enable_export=True,
+            show_info=True,
         )
-    except Exception as e:
-        st.error(f"Error rendering map: {e}")
-        logger.exception(e)
-    
-    # Metadata and export
-    st.divider()
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📋 Map Details")
-        st.write(f"**Path:** `{selected_map.name}`")
-        st.write(f"**Subject:** {subject}")
-        st.write(f"**Session:** ses-{session}")
-        st.write(f"**Seed:** {seed}")
-        st.write(f"**Atlas:** {atlas}")
-    
-    with col2:
-        st.subheader("💾 Export")
-        # Download NIfTI
-        with open(selected_map, "rb") as f:
-            nifti_data = f.read()
-        st.download_button(
-            label="⬇️ Download NIfTI",
-            data=nifti_data,
-            file_name=f"{subject}_ses-{session}_{seed}_{atlas}_zmap.nii.gz",
-            mime="application/gzip",
-        )
+    except Exception as exc:
+        st.error(f"Viewer error: {exc}")
 
 
 # ============================================================================
-# Group-Level Display
+# Seed-to-parcel view
 # ============================================================================
 
-def render_group_level(
-    project_root: Path,
-    atlas: str,
-    seed: str,
-    options: Dict,
+
+def _render_seed_to_parcel(
+    bids_root: Path, pipeline: str, subject: str, session: str, seed_id: str
 ) -> None:
-    """Render group-level statistics and cluster visualization."""
-    st.header(f"🌍 Group-Level Analysis: {seed}")
-    
-    results_dir = project_root / "results"
-    
-    # Find group stats CSV
-    csv_path = find_group_stats_csv(results_dir, atlas, seed)
-    
-    if not csv_path:
-        st.warning(
-            f"❌ No group statistics found for:\n"
-            f"- Seed: {seed}\n"
-            f"- Atlas: {atlas}"
-        )
-        st.info(
-            "💡 Run group-level analysis using:\n"
-            "`bash script/master_full_connectivity_workflow.sh`"
-        )
+    sdir = seed_dir(bids_root, pipeline, subject, session, seed_id)
+    if not sdir.exists():
+        st.info("No seed-to-parcel outputs available for this selection.")
         return
-    
-    # Load statistics
-    stats_df = load_group_stats(csv_path)
-    if stats_df is None or stats_df.empty:
-        st.error(f"Could not load or parse statistics from {csv_path}")
+
+    # Discover available atlases from file names
+    tsv_files = sorted(sdir.glob("*_seed-to-parcel.tsv"))
+    if not tsv_files:
+        st.info("Seed-to-parcel TSV files not yet computed.")
         return
-    
-    # Tabs for different views
-    tab1, tab2, tab3 = st.tabs(["📊 Clusters", "📈 Statistics", "💾 Export"])
-    
-    with tab1:
-        st.subheader("Brain Clusters")
-        
-        # Display cluster table with key columns
-        cluster_cols = [col for col in stats_df.columns if col.lower() in 
-                       ["cluster", "voxels", "p_value", "t_stat", "z_stat",
-                        "anatomy", "region", "network"]]
-        
-        if cluster_cols:
-            display_df = stats_df[cluster_cols].copy()
-        else:
-            display_df = stats_df.head(10)
-        
-        # Format numeric columns
-        for col in display_df.select_dtypes(include=[np.number]).columns:
-            display_df[col] = display_df[col].apply(lambda x: f"{x:.4f}")
-        
-        st.dataframe(display_df, use_container_width=True, height=400)
-        
-        # Summary statistics
-        st.subheader("Cluster Summary")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            n_clusters = len(stats_df)
-            st.metric("Number of Clusters", n_clusters)
-        
-        with col2:
-            total_voxels = stats_df.get("voxels", pd.Series()).sum()
-            st.metric("Total Voxels", int(total_voxels) if not np.isnan(total_voxels) else "N/A")
-        
-        with col3:
-            # Significant clusters (p < 0.05)
-            sig_threshold = 0.05
-            if "p_value" in stats_df.columns:
-                n_sig = (stats_df["p_value"] < sig_threshold).sum()
-                st.metric("Significant Clusters (p<0.05)", n_sig)
-    
-    with tab2:
-        st.subheader("Statistical Summary")
-        
-        # Distribution plots
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if "p_value" in stats_df.columns:
-                st.write("**P-value Distribution**")
-                st.bar_chart(
-                    stats_df["p_value"].value_counts(bins=10, sort=False),
-                    use_container_width=True
-                )
-        
-        with col2:
-            if "t_stat" in stats_df.columns or "z_stat" in stats_df.columns:
-                stat_col = "t_stat" if "t_stat" in stats_df.columns else "z_stat"
-                st.write(f"**{stat_col.upper()} Distribution**")
-                st.bar_chart(
-                    stats_df[stat_col].value_counts(bins=10, sort=False),
-                    use_container_width=True
-                )
-        
-        # Detailed statistics
-        st.subheader("Descriptive Statistics")
-        numeric_cols = stats_df.select_dtypes(include=[np.number]).columns
-        summary = stats_df[numeric_cols].describe()
-        st.dataframe(summary, use_container_width=True)
-    
-    with tab3:
-        st.subheader("Export Results")
-        
-        # CSV download
-        csv_buffer = stats_df.to_csv(index=False)
-        st.download_button(
-            label="⬇️ Download CSV",
-            data=csv_buffer,
-            file_name=f"group_{seed}_{atlas}_clusters_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
+
+    import re
+    available_atlas_measure: dict[str, list[str]] = {}
+    for f in tsv_files:
+        m = re.search(r"_atlas-([^_]+)_measure-([^_]+)_seed-to-parcel\.tsv$", f.name)
+        if m:
+            atl, meas = m.group(1), m.group(2)
+            available_atlas_measure.setdefault(atl, []).append(meas)
+
+    if not available_atlas_measure:
+        st.info("No parseable seed-to-parcel TSV files found.")
+        return
+
+    col_a, col_m, col_n = st.columns([2, 2, 1])
+    with col_a:
+        atlas = st.selectbox(
+            "Atlas",
+            options=sorted(available_atlas_measure.keys()),
+            key=f"s2p_atlas_{PAGE_KEY}_{pipeline}_{subject}_{session}_{seed_id[:15]}",
         )
-        
-        # JSON export
-        json_buffer = stats_df.to_json(orient="records", indent=2)
-        st.download_button(
-            label="⬇️ Download JSON",
-            data=json_buffer,
-            file_name=f"group_{seed}_{atlas}_clusters_{datetime.now().strftime('%Y%m%d')}.json",
-            mime="application/json",
+    with col_m:
+        measures = available_atlas_measure.get(atlas, [])
+        measure = st.selectbox(
+            "Measure",
+            options=measures,
+            key=f"s2p_measure_{PAGE_KEY}_{pipeline}_{subject}_{session}_{seed_id[:15]}",
         )
-        
-        # Find and offer group map download
-        maps = find_connectivity_maps(results_dir, atlas, seed)
-        if maps:
-            st.write("**Available Group Maps:**")
-            for map_path in maps[:3]:  # Limit to 3 maps
-                with open(map_path, "rb") as f:
-                    map_data = f.read()
-                st.download_button(
-                    label=f"⬇️ {map_path.name}",
-                    data=map_data,
-                    file_name=map_path.name,
-                    mime="application/gzip",
-                    key=f"download_{map_path.name}"
-                )
+    with col_n:
+        top_n = st.number_input(
+            "Top N",
+            min_value=5,
+            max_value=100,
+            value=30,
+            key=f"s2p_topn_{PAGE_KEY}_{pipeline}_{subject}_{session}_{seed_id[:15]}",
+        )
+
+    df = _load_s2p(str(bids_root), pipeline, subject, session, seed_id, atlas, measure)
+    if df is None or df.empty:
+        st.warning("Could not load seed-to-parcel data.")
+        return
+
+    # Melt wide row → (parcel, value)
+    values = df.iloc[0]
+    parcel_df = pd.DataFrame({"parcel": values.index, "value": values.values})
+    parcel_df["value"] = pd.to_numeric(parcel_df["value"], errors="coerce")
+    parcel_df = parcel_df.dropna(subset=["value"])
+    top_df = parcel_df.nlargest(int(top_n), "value").sort_values("value")
+
+    try:
+        import plotly.express as px
+        fig = px.bar(
+            top_df, x="value", y="parcel", orientation="h",
+            title=f"Top {top_n} parcels — {measure} / {atlas}",
+            labels={"value": f"Seed → parcel ({measure})", "parcel": "Parcel"},
+            height=max(400, int(top_n) * 18),
+        )
+        fig.update_layout(margin=dict(l=10, r=10, t=40, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+    except ImportError:
+        st.bar_chart(top_df.set_index("parcel")["value"])
+
+    # Compare-across-measures expander
+    with st.expander("🔍 Compare top-10 parcels across measures"):
+        cols = st.columns(min(len(measures), 4))
+        for i, meas in enumerate(measures):
+            df_m = _load_s2p(
+                str(bids_root), pipeline, subject, session, seed_id, atlas, meas
+            )
+            if df_m is None or df_m.empty:
+                continue
+            vals = df_m.iloc[0]
+            pm = pd.DataFrame({"parcel": vals.index, "value": vals.values})
+            pm["value"] = pd.to_numeric(pm["value"], errors="coerce")
+            pm = pm.dropna().nlargest(10, "value")
+            with cols[i % len(cols)]:
+                st.markdown(f"**{meas}**")
+                st.dataframe(pm[["parcel", "value"]].reset_index(drop=True), height=250)
 
 
 # ============================================================================
-# Main Render Function
+# Main render
 # ============================================================================
 
-def render():
+
+def render() -> None:
     """Main page render function."""
-    
-    # Page config
-    st.set_page_config(
-        page_title="Seed-Based Connectivity",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-    
-    # Header
     st.header("🔗 Seed-Based Connectivity")
-    st.markdown(
-        """
-        Explore functional connectivity from seed regions to the whole brain.
-        
-        **Features:**
-        - 🌳 **Multi-atlas support**: DiFuMo256, Schaefer400, combined
-        - 🧠 **Seed selection**: Motor, cognitive, subcortical seeds
-        - 👤 **Subject-level**: Individual z-maps with Papaya viewer
-        - 🌍 **Group-level**: Statistical clusters, anatomical labels, effect sizes
-        - 📊 **Export**: Download results as NIfTI, CSV, or JSON
-        """
-    )
-    
-    # Get project configuration
-    try:
-        project_root = get_project_root()
-        roi_config = load_roi_config(project_root)
-    except Exception as e:
-        st.error(f"❌ Error loading configuration: {e}")
-        logger.exception(e)
-        return
-    
-    # Sidebar controls
-    try:
-        analysis_level, atlas, seed, subject, session, _, options = render_sidebar_controls(
-            project_root, roi_config
-        )
-    except Exception as e:
-        st.error(f"❌ Error in sidebar controls: {e}")
-        logger.exception(e)
-        return
-    
-    # Main content
-    try:
-        if analysis_level == "Subject-Level":
-            if subject and session:
-                render_subject_level(project_root, atlas, seed, subject, session, options)
-            else:
-                st.info("👈 Select subject and session in sidebar")
-        else:
-            render_group_level(project_root, atlas, seed, options)
-    
-    except Exception as e:
-        st.error(f"❌ Error rendering page: {e}")
-        logger.exception(e)
 
+    config = st.session_state.get("config", {})
+    bids_root = Path(
+        config.get("paths", {}).get("bids_dir", "")
+        or Path(__file__).resolve().parents[3]
+    )
+
+    # ── Top selector row ──────────────────────────────────────────────────
+    pipeline = pipeline_picker(PAGE_KEY)
+    subject, session = subject_session_pickers(bids_root, pipeline, PAGE_KEY)
+    if subject is None or session is None:
+        return
+
+    st.divider()
+
+    # ── Seed selector ─────────────────────────────────────────────────────
+    st.markdown("#### Seed selection")
+    seed_id = _build_seed_selector(bids_root, pipeline)
+    if seed_id is None:
+        return
+
+    st.caption(
+        f"Pipeline: **{pipeline}** | {subject} / {session} | Seed: `{seed_id}`"
+    )
+    st.divider()
+
+    # ── Tabs ──────────────────────────────────────────────────────────────
+    tab_vox, tab_parcel = st.tabs(["🧠 Voxel z-map", "📊 Seed-to-parcel"])
+
+    with tab_vox:
+        _render_zmap(bids_root, pipeline, subject, session, seed_id)
+
+    with tab_parcel:
+        _render_seed_to_parcel(bids_root, pipeline, subject, session, seed_id)
+
+
+# ============================================================================
+# Entry Point
+# ============================================================================
 
 if __name__ == "__main__":
     render()

@@ -1,519 +1,249 @@
 """
-Local Measures Visualization and Results Browser
+fALFF & ReHo Viewer — driven by XCP-D outputs.
 
-Interactive page for browsing fALFF and ReHo results:
-- Subject/session selection with dropdowns
-- Side-by-side fALFF + ReHo maps via Papaya viewer
-- Group-level statistics display
-- QC metrics (mean, std, range)
-- Export functionality for results
-
-Author: NeuConn
-License: MIT
+Displays ALFF/ReHo voxel maps via Papaya and parcellated values as
+sortable dataframes + bar charts.  Pipeline selector persists across
+reruns via ``viewer_pipeline_falff_reho`` session-state key.
 """
 
-import streamlit as st
+from __future__ import annotations
+
 import sys
 from pathlib import Path
+from typing import Optional
+
 import pandas as pd
-import numpy as np
-import os
-from typing import Optional, Dict, Any, Tuple
+import streamlit as st
 
-# Add utils to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "utils"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from papaya_wrapper import (
-    render_papaya_viewer_streamlit,
-    get_nifti_stats,
-)
+from utils.papaya_wrapper import render_papaya_viewer_streamlit
+from utils.xcpd_outputs import XcpdDiscovery
+from utils.connectivity_viewer import pipeline_picker, subject_session_pickers
+try:
+    from utils.seed_catalog import SeedCatalog
+    _HAS_SEED_CATALOG = True
+except ImportError:
+    _HAS_SEED_CATALOG = False
 
-
-# ============================================================================
-# Configuration & Paths
-# ============================================================================
-
-DERIVATIVES_BASE = Path("/home/clivewong/proj/longevity/derivatives")
-CONNECTIVITY_BASE = DERIVATIVES_BASE / "connectivity-difumo256"
-LOCAL_MEASURES_DIR = CONNECTIVITY_BASE / "subject-level" / "local_measures"
-SUMMARY_CSV = LOCAL_MEASURES_DIR / "local_measures_summary.csv"
+PAGE_KEY = "falff_reho"
 
 
 # ============================================================================
-# Data Loading Functions
+# Cached data loaders
 # ============================================================================
 
-@st.cache_data
-def load_summary_csv() -> Optional[pd.DataFrame]:
-    """Load local measures summary CSV."""
-    if not SUMMARY_CSV.exists():
+
+@st.cache_data(ttl=60)
+def _get_xcpd(bids_root_str: str, pipeline: str, subject: str, session: str):
+    """Cached XCP-D output discovery for a single subject/session."""
+    from neuconn_app.utils.xcpd_outputs import XcpdDiscovery
+    disc = XcpdDiscovery(Path(bids_root_str), pipeline=pipeline)
+    return disc.get(subject, session, pipeline)
+
+
+@st.cache_data(ttl=60)
+def _load_parcel_tsv(tsv_str: str) -> Optional[pd.DataFrame]:
+    """Load a parcellated stat TSV; return wide DataFrame (one row, parcel columns)."""
+    path = Path(tsv_str)
+    if not path.exists():
         return None
     try:
-        df = pd.read_csv(SUMMARY_CSV)
-        return df
-    except Exception as e:
-        st.error(f"Error loading summary CSV: {e}")
+        return pd.read_csv(path, sep="\t")
+    except Exception:
         return None
 
 
-@st.cache_data
-def get_available_subjects_sessions() -> Dict[str, list]:
-    """Get available subjects and sessions from summary."""
-    df = load_summary_csv()
-    if df is None or df.empty:
-        return {"subjects": [], "sessions": {}}
-    
-    subjects = sorted(df["subject"].unique().tolist())
-    sessions_by_subject = {}
-    for subj in subjects:
-        sessions = sorted(df[df["subject"] == subj]["session"].unique().tolist())
-        sessions_by_subject[subj] = sessions
-    
-    return {
-        "subjects": subjects,
-        "sessions": sessions_by_subject
-    }
-
-
-def get_local_measures_paths(subject: str, session: str) -> Dict[str, str]:
-    """Get fALFF and ReHo file paths for a subject-session."""
-    df = load_summary_csv()
-    if df is None or df.empty:
-        return {}
-    
-    row = df[(df["subject"] == subject) & (df["session"] == session)]
-    if row.empty:
-        return {}
-    
-    return {
-        "fALFF": row.iloc[0].get("fALFF_file", ""),
-        "ReHo": row.iloc[0].get("ReHo_file", ""),
-    }
-
-
-def get_stats_for_measure(subject: str, session: str, measure: str) -> Dict[str, Any]:
-    """Get statistics for a specific measure."""
-    df = load_summary_csv()
-    if df is None or df.empty:
-        return {}
-    
-    row = df[(df["subject"] == subject) & (df["session"] == session)]
-    if row.empty:
-        return {}
-    
-    row = row.iloc[0]
-    
-    stats = {}
-    if measure == "fALFF":
-        stats = {
-            "mean": row.get("fALFF_mean", 0),
-            "std": row.get("fALFF_std", 0),
-            "median": row.get("fALFF_median", 0),
-        }
-    elif measure == "ReHo":
-        stats = {
-            "mean": row.get("ReHo_mean", 0),
-            "std": row.get("ReHo_std", 0),
-            "median": row.get("ReHo_median", 0),
-        }
-    
-    return stats
-
-
 # ============================================================================
-# Computation Functions
+# Sub-page renderers
 # ============================================================================
 
-@st.cache_data
-def compute_group_stats() -> Dict[str, Any]:
-    """Compute group-level statistics for fALFF and ReHo."""
-    df = load_summary_csv()
-    if df is None or df.empty:
-        return {}
-    
-    group_stats = {
-        "fALFF": {
-            "mean": float(df["fALFF_mean"].mean()),
-            "std": float(df["fALFF_std"].mean()),
-            "min": float(df["fALFF_mean"].min()),
-            "max": float(df["fALFF_mean"].max()),
-            "n_subjects": len(df),
-        },
-        "ReHo": {
-            "mean": float(df["ReHo_mean"].mean()),
-            "std": float(df["ReHo_std"].mean()),
-            "min": float(df["ReHo_mean"].min()),
-            "max": float(df["ReHo_mean"].max()),
-            "n_subjects": len(df),
-        },
-    }
-    
-    return group_stats
 
-
-# ============================================================================
-# UI Components
-# ============================================================================
-
-def render_subject_session_selector() -> Tuple[Optional[str], Optional[str]]:
-    """Render subject and session selection dropdowns."""
-    col1, col2 = st.columns(2)
-    
-    metadata = get_available_subjects_sessions()
-    subjects = metadata.get("subjects", [])
-    
-    selected_subject = None
-    selected_session = None
-    
-    with col1:
-        if subjects:
-            selected_subject = st.selectbox(
-                "Select Subject",
-                options=subjects,
-                format_func=lambda x: f"{x.replace('sub-', '')}",
-                key="subject_selector"
-            )
-        else:
-            st.warning("No subjects found in local measures data")
-            return None, None
-    
-    with col2:
-        if selected_subject:
-            sessions = metadata["sessions"].get(selected_subject, [])
-            if sessions:
-                selected_session = st.selectbox(
-                    "Select Session",
-                    options=sessions,
-                    format_func=lambda x: x.replace("ses-", ""),
-                    key="session_selector"
-                )
-            else:
-                st.warning(f"No sessions found for {selected_subject}")
-                return selected_subject, None
-    
-    return selected_subject, selected_session
-
-
-def render_qc_metrics(subject: str, session: str):
-    """Render QC metrics for fALFF and ReHo."""
-    st.markdown("### 📊 QC Metrics")
-    
-    col1, col2 = st.columns(2)
-    
-    # fALFF metrics
-    with col1:
-        st.markdown("**fALFF**")
-        falff_stats = get_stats_for_measure(subject, session, "fALFF")
-        if falff_stats:
-            st.metric("Mean", f"{falff_stats.get('mean', 0):.4f}")
-            st.metric("Std Dev", f"{falff_stats.get('std', 0):.4f}")
-            st.metric("Median", f"{falff_stats.get('median', 0):.4f}")
-        else:
-            st.info("No fALFF stats available")
-    
-    # ReHo metrics
-    with col2:
-        st.markdown("**ReHo**")
-        reho_stats = get_stats_for_measure(subject, session, "ReHo")
-        if reho_stats:
-            st.metric("Mean", f"{reho_stats.get('mean', 0):.4f}")
-            st.metric("Std Dev", f"{reho_stats.get('std', 0):.4f}")
-            st.metric("Median", f"{reho_stats.get('median', 0):.4f}")
-        else:
-            st.info("No ReHo stats available")
-
-
-def render_group_statistics():
-    """Render group-level statistics display."""
-    st.markdown("### 👥 Group-Level Statistics")
-    
-    group_stats = compute_group_stats()
-    
-    if not group_stats:
-        st.info("No group statistics available")
+def _render_voxel_view(outputs, subject: str, session: str, pipeline: str) -> None:
+    """Show side-by-side ALFF + ReHo Papaya viewers."""
+    if not outputs.has_local_measures():
+        st.info(
+            "ALFF / ReHo voxel maps are not yet available for this selection.  "
+            "Run the XCP-D pipeline to generate them."
+        )
         return
-    
-    col1, col2 = st.columns(2)
-    
-    # fALFF group stats
-    with col1:
-        st.markdown("**fALFF Group Stats**")
-        falff = group_stats.get("fALFF", {})
-        st.metric("Mean (across subjects)", f"{falff.get('mean', 0):.4f}")
-        st.metric("Avg Std Dev", f"{falff.get('std', 0):.4f}")
-        st.metric("Range", f"{falff.get('min', 0):.4f} - {falff.get('max', 0):.4f}")
-        st.metric("N Subjects", falff.get("n_subjects", 0))
-    
-    # ReHo group stats
-    with col2:
-        st.markdown("**ReHo Group Stats**")
-        reho = group_stats.get("ReHo", {})
-        st.metric("Mean (across subjects)", f"{reho.get('mean', 0):.4f}")
-        st.metric("Avg Std Dev", f"{reho.get('std', 0):.4f}")
-        st.metric("Range", f"{reho.get('min', 0):.4f} - {reho.get('max', 0):.4f}")
-        st.metric("N Subjects", reho.get("n_subjects", 0))
-    
-    # Distribution info
-    with st.expander("📈 Show Distribution Details"):
-        df = load_summary_csv()
-        if df is not None and not df.empty:
-            tab1, tab2 = st.tabs(["fALFF", "ReHo"])
-            
-            with tab1:
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Q1", f"{df['fALFF_mean'].quantile(0.25):.4f}")
-                with col2:
-                    st.metric("Median", f"{df['fALFF_mean'].median():.4f}")
-                with col3:
-                    st.metric("Q3", f"{df['fALFF_mean'].quantile(0.75):.4f}")
-            
-            with tab2:
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Q1", f"{df['ReHo_mean'].quantile(0.25):.4f}")
-                with col2:
-                    st.metric("Median", f"{df['ReHo_mean'].median():.4f}")
-                with col3:
-                    st.metric("Q3", f"{df['ReHo_mean'].quantile(0.75):.4f}")
 
-
-def render_papaya_viewers(subject: str, session: str):
-    """Render side-by-side Papaya viewers for fALFF and ReHo."""
-    st.markdown("### 🧠 Brain Maps")
-    
-    paths = get_local_measures_paths(subject, session)
-    
-    if not paths or not paths.get("fALFF") or not paths.get("ReHo"):
-        st.warning("Maps not available for this subject-session")
-        return
-    
-    falff_path = paths["fALFF"]
-    reho_path = paths["ReHo"]
-    
-    # Verify files exist
-    if not os.path.exists(falff_path) or not os.path.exists(reho_path):
-        st.error("Map files not found on disk")
-        return
-    
-    # Create two columns for side-by-side viewers
     col1, col2 = st.columns(2)
-    
     with col1:
-        st.markdown("#### fALFF")
+        st.markdown("#### ALFF")
         try:
             render_papaya_viewer_streamlit(
-                brain_map_path=falff_path,
+                brain_map_path=str(outputs.alff_map),
                 title="",
                 colormap="Hot",
                 height=500,
-                key=f"papaya_falff_{subject}_{session}",
+                key=f"papaya_alff_{pipeline}_{subject}_{session}",
                 enable_export=True,
                 show_info=True,
             )
-        except Exception as e:
-            st.error(f"Error rendering fALFF viewer: {e}")
-    
+        except Exception as exc:
+            st.error(f"ALFF viewer error: {exc}")
+
     with col2:
         st.markdown("#### ReHo")
         try:
             render_papaya_viewer_streamlit(
-                brain_map_path=reho_path,
+                brain_map_path=str(outputs.reho_map),
                 title="",
                 colormap="Spectrum",
                 height=500,
-                key=f"papaya_reho_{subject}_{session}",
+                key=f"papaya_reho_{pipeline}_{subject}_{session}",
                 enable_export=True,
                 show_info=True,
             )
-        except Exception as e:
-            st.error(f"Error rendering ReHo viewer: {e}")
+        except Exception as exc:
+            st.error(f"ReHo viewer error: {exc}")
 
 
-def render_export_section(subject: str, session: str):
-    """Render export options for results."""
-    st.markdown("### 📥 Export Results")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("📊 Export Subject Stats as CSV"):
-            stats_data = {
-                "Subject": subject,
-                "Session": session,
-                **get_stats_for_measure(subject, session, "fALFF"),
-                **{f"ReHo_{k}": v for k, v in get_stats_for_measure(subject, session, "ReHo").items()},
-            }
-            csv_str = pd.DataFrame([stats_data]).to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=csv_str,
-                file_name=f"{subject}_{session}_local_measures.csv",
-                mime="text/csv",
-            )
-    
-    with col2:
-        if st.button("📋 Export Group Statistics"):
-            group_stats = compute_group_stats()
-            df = pd.DataFrame({
-                "Measure": ["fALFF", "ReHo"],
-                "Group Mean": [group_stats["fALFF"]["mean"], group_stats["ReHo"]["mean"]],
-                "Group Std": [group_stats["fALFF"]["std"], group_stats["ReHo"]["std"]],
-                "N Subjects": [group_stats["fALFF"]["n_subjects"], group_stats["ReHo"]["n_subjects"]],
-            })
-            csv_str = df.to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=csv_str,
-                file_name="group_local_measures_stats.csv",
-                mime="text/csv",
-            )
-    
-    with col3:
-        if st.button("📄 Export Full Summary"):
-            df = load_summary_csv()
-            if df is not None and not df.empty:
-                # Remove file paths for cleaner export
-                export_df = df.drop(columns=["fALFF_file", "ReHo_file"], errors="ignore")
-                csv_str = export_df.to_csv(index=False)
-                st.download_button(
-                    label="Download CSV",
-                    data=csv_str,
-                    file_name="all_subjects_local_measures_summary.csv",
-                    mime="text/csv",
-                )
-
-
-def render_results_table():
-    """Render browsable results table with filtering."""
-    st.markdown("### 📋 Results Browser")
-    
-    df = load_summary_csv()
-    if df is None or df.empty:
-        st.info("No results available")
+def _render_parcellated_view(
+    outputs, subject: str, session: str, pipeline: str
+) -> None:
+    """Show parcellated ALFF / ReHo as dataframe + bar chart."""
+    atlases = outputs.list_atlases()
+    if not atlases:
+        st.info("No parcellated outputs available for this subject/session/pipeline.")
         return
-    
-    # Create display dataframe without file paths
-    display_df = df.drop(columns=["fALFF_file", "ReHo_file"], errors="ignore").copy()
-    
-    # Add formatting
-    for col in ["fALFF_mean", "fALFF_std", "fALFF_median", "ReHo_mean", "ReHo_std", "ReHo_median"]:
-        if col in display_df.columns:
-            display_df[col] = display_df[col].apply(lambda x: f"{x:.4f}")
-    
-    # Search/filter
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        search_subject = st.text_input("Search subject (e.g., 'sub-033'):", "")
-    with col2:
-        show_n = st.number_input("Show rows:", min_value=5, max_value=len(display_df), value=10)
-    
-    # Filter results
-    if search_subject:
-        filtered_df = display_df[display_df["subject"].str.contains(search_subject, case=False)]
-    else:
-        filtered_df = display_df
-    
-    # Display table
-    st.dataframe(
-        filtered_df.head(show_n),
-        use_container_width=True,
-        hide_index=True,
-    )
-    
-    st.caption(f"Showing {min(show_n, len(filtered_df))} of {len(filtered_df)} results")
 
-
-# ============================================================================
-# Main Render Function
-# ============================================================================
-
-def render():
-    """Main page render function."""
-    st.set_page_config(
-        page_title="📊 fALFF & ReHo",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-    
-    st.header("📊 Local Measures: fALFF & ReHo")
-    
-    st.markdown("""
-    Browse fractional Amplitude of Low Frequency Fluctuations (fALFF) and Regional Homogeneity (ReHo) results:
-    
-    - **fALFF**: Measures the power of low-frequency oscillations relative to total power
-    - **ReHo**: Quantifies the synchronization of brain activity between neighboring voxels
-    
-    Select a subject and session to visualize brain maps and QC metrics.
-    """)
-    
-    # Sidebar configuration
-    with st.sidebar:
-        st.markdown("### Navigation")
-        page_section = st.radio(
-            "Go to section:",
-            ["Viewer", "Statistics", "Results Table"],
-            label_visibility="collapsed"
+    col_stat, col_atlas, col_net, col_n = st.columns([1, 2, 2, 1])
+    with col_stat:
+        stat = st.selectbox(
+            "Stat",
+            options=["ALFF", "ReHo"],
+            key=f"parcel_stat_{pipeline}_{subject}_{session}",
         )
-    
-    # Main content based on selection
-    if page_section == "Viewer":
-        render_viewer_section()
-    elif page_section == "Statistics":
-        render_statistics_section()
-    elif page_section == "Results Table":
-        render_table_section()
+    with col_atlas:
+        atlas = st.selectbox(
+            "Atlas",
+            options=atlases,
+            key=f"parcel_atlas_{pipeline}_{subject}_{session}",
+        )
+    with col_n:
+        top_n = st.number_input(
+            "Top N",
+            min_value=5,
+            max_value=100,
+            value=30,
+            key=f"parcel_topn_{pipeline}_{subject}_{session}",
+        )
 
-
-def render_viewer_section():
-    """Render the main viewer section."""
-    st.markdown("## 🔍 Brain Map Viewer")
-    
-    # Subject/session selector
-    subject, session = render_subject_session_selector()
-    
-    if not subject or not session:
-        st.info("Please select a subject and session to continue")
+    parcel_dict = outputs.alff_parcel if stat == "ALFF" else outputs.reho_parcel
+    tsv_path = parcel_dict.get(atlas)
+    if tsv_path is None:
+        st.warning(f"No {stat} parcellated file for atlas {atlas}.")
         return
-    
-    # Display selected
-    st.success(f"Selected: {subject} / {session}")
-    
-    # Tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs(["Maps", "QC Metrics", "Subject Stats", "Export"])
-    
-    with tab1:
-        render_papaya_viewers(subject, session)
-    
-    with tab2:
-        render_qc_metrics(subject, session)
-    
-    with tab3:
-        st.markdown("### 📈 Subject-Level Statistics")
-        col1, col2 = st.columns(2)
-        with col1:
-            falff_stats = get_stats_for_measure(subject, session, "fALFF")
-            st.markdown("**fALFF**")
-            st.json(falff_stats)
-        with col2:
-            reho_stats = get_stats_for_measure(subject, session, "ReHo")
-            st.markdown("**ReHo**")
-            st.json(reho_stats)
-    
-    with tab4:
-        render_export_section(subject, session)
+
+    df = _load_parcel_tsv(str(tsv_path))
+    if df is None or df.empty:
+        st.warning("Could not load parcellated file.")
+        return
+
+    # The TSV has one row; melt to (parcel, value)
+    values = df.iloc[0]
+    parcel_df = pd.DataFrame({"parcel": values.index, "value": values.values})
+    parcel_df["value"] = pd.to_numeric(parcel_df["value"], errors="coerce")
+    parcel_df = parcel_df.dropna(subset=["value"])
+
+    # Optional network filter
+    net_options: list[str] = ["(all)"]
+    if _HAS_SEED_CATALOG:
+        try:
+            from neuconn_app.utils.seed_catalog import SeedCatalog, _infer_network
+            networks = sorted(
+                {_infer_network(atlas, p) for p in parcel_df["parcel"]}
+                - {None}
+            )
+            net_options += networks
+        except Exception:
+            pass
+
+    with col_net:
+        selected_net = st.selectbox(
+            "Network",
+            options=net_options,
+            key=f"parcel_net_{pipeline}_{subject}_{session}",
+        )
+
+    if selected_net != "(all)" and _HAS_SEED_CATALOG:
+        try:
+            from neuconn_app.utils.seed_catalog import _infer_network
+            parcel_df = parcel_df[
+                parcel_df["parcel"].apply(
+                    lambda p: _infer_network(atlas, p) == selected_net
+                )
+            ]
+        except Exception:
+            pass
+
+    top_df = parcel_df.nlargest(int(top_n), "value").sort_values("value")
+
+    # Bar chart
+    try:
+        import plotly.express as px
+        fig = px.bar(
+            top_df,
+            x="value",
+            y="parcel",
+            orientation="h",
+            title=f"Top {top_n} parcels — {stat} / {atlas}",
+            labels={"value": stat, "parcel": "Parcel"},
+            height=max(400, int(top_n) * 18),
+        )
+        fig.update_layout(margin=dict(l=10, r=10, t=40, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+    except ImportError:
+        st.bar_chart(top_df.set_index("parcel")["value"])
+
+    with st.expander("📋 Full parcel table"):
+        st.dataframe(
+            parcel_df.sort_values("value", ascending=False).reset_index(drop=True),
+            use_container_width=True,
+        )
 
 
-def render_statistics_section():
-    """Render the group statistics section."""
-    st.markdown("## 👥 Group Statistics")
-    render_group_statistics()
+# ============================================================================
+# Main render
+# ============================================================================
 
 
-def render_table_section():
-    """Render the results table section."""
-    st.markdown("## 📋 Browse All Results")
-    render_results_table()
+def render() -> None:
+    """Main page render function."""
+    st.header("📊 Local Measures: fALFF & ReHo")
+
+    config = st.session_state.get("config", {})
+    bids_root = Path(
+        config.get("paths", {}).get("bids_dir", "")
+        or Path(__file__).resolve().parents[3]
+    )
+
+    # ── Top selector row ──────────────────────────────────────────────────
+    col_pl, col_sub, col_ses = st.columns([1, 2, 2])
+    with col_pl:
+        pipeline = pipeline_picker(PAGE_KEY)
+
+    subject, session = subject_session_pickers(bids_root, pipeline, PAGE_KEY)
+    if subject is None or session is None:
+        return
+
+    # ── XCP-D outputs ─────────────────────────────────────────────────────
+    outputs = _get_xcpd(str(bids_root), pipeline, subject, session)
+
+    st.caption(
+        f"Pipeline: **{pipeline}** | Subject: **{subject}** | Session: **{session}**"
+    )
+
+    # ── Voxel / Parcellated tabs ──────────────────────────────────────────
+    tab_vox, tab_parcel = st.tabs(["🧠 Voxel maps", "📊 Parcellated"])
+
+    with tab_vox:
+        _render_voxel_view(outputs, subject, session, pipeline)
+
+    with tab_parcel:
+        _render_parcellated_view(outputs, subject, session, pipeline)
 
 
 # ============================================================================
