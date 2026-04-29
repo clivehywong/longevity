@@ -36,10 +36,33 @@ Then read:
 
 ### 3. Run connectivity analysis
 
+The connectivity pipeline is now **XCP-D-driven**. After XCP-D completes, subject-level and group-level analysis scripts read XCP-D outputs directly.
+
 ```bash
-bash script/master_full_connectivity_workflow.sh --test
-bash script/master_full_connectivity_workflow.sh
+# Subject-level seed connectivity (XCP-D-driven)
+python script/compute_seed_connectivity_xcpd.py \
+    --bids-root /home/clivewong/proj/longevity \
+    --pipeline fc --atlas 4S256Parcels \
+    --measures pearson spearman \
+    --analysis seed --seed-id dlpfc_L \
+    --subjects sub-033 sub-034
+
+# Subject-level network (parcel × parcel) connectivity
+python script/compute_network_connectivity_xcpd.py \
+    --bids-root /home/clivewong/proj/longevity \
+    --pipeline fc --atlas 4S256Parcels \
+    --measures pearson partial_correlation
+
+# Group voxel stats (ALFF / ReHo / seed-to-voxel)
+python script/group_voxel_stats_xcpd.py \
+    --bids-root /home/clivewong/proj/longevity --pipeline fc
+
+# Group matrix stats (parcel × parcel)
+python script/group_matrix_stats.py \
+    --bids-root /home/clivewong/proj/longevity --pipeline fc
 ```
+
+> **Important:** `--bids-root` must be the **project root** (e.g., `/home/clivewong/proj/longevity`), not the `bids/` subdirectory, because XCP-D derivatives live at `<project_root>/derivatives/preprocessing/xcpd/`.
 
 Then read:
 
@@ -62,20 +85,22 @@ Then read:
 
 ### 5. Submit connectivity jobs from the UI
 
-After XCP-D is complete, use the **fMRI Analysis → Subject Level** and **Group Level** menus in the NeuConn app to submit connectivity jobs directly without editing scripts:
+After XCP-D is complete, use the **fMRI Analysis → Subject Level** and **Group Level** menus in the NeuConn app to submit connectivity jobs directly without editing scripts.
+
+**Pipeline selector** (fc / fc_gsr / ec) appears on every submit page. **Atlases** are the five XCP-D-native parcellations: 4S256Parcels, 4S456Parcels, Glasser, Gordon, Tian. **Measures** now include 8 options (pearson, spearman, partial_correlation, plv, wpli, coherence, amplitude_envelope_correlation, mutual_information).
 
 | App page | Analysis |
 |---|---|
-| Subject Level → Submit Local Measures | fALFF / ALFF / ReHo per subject/session |
-| Subject Level → Submit Seed Connectivity | Seed-based maps — cascading Atlas → Seed multi-select (priority, custom, atlas-parcel sources) |
-| Subject Level → Submit Network Connectivity | Network-parcel timeseries extraction |
-| Group Level → Submit Group Stats | GRF / TFCE / FDR second-level stats with manifest preflight |
+| Subject Level → 📊 Local Measures Coverage | Discovery dashboard — shows ALFF/ReHo/fALFF coverage per subject/session (no submission) |
+| Subject Level → 📤 Submit Seed Connectivity | Seed-based maps — pipeline + atlas + seed multi-select; 8 measures; produces seed-to-parcel TSV + seed-to-voxel NIfTI |
+| Subject Level → 📤 Submit Network Connectivity | Parcel × parcel relmat — pipeline + atlas + 8 measures |
+| Group Level → 📤 Submit Group Stats | Voxel branch (GRF/TFCE/FDR on ALFF/ReHo/seed-to-voxel) or Matrix branch (paired_t_fdr / NBS / TF-NBS) |
 
-All four pages use `ConnectivityWorkflowManager` to track submissions; state is persisted at `<bids_parent>/.neuconn/connectivity_workflow_state.json`.
+All pages use `ConnectivityWorkflowManager` to track submissions; state is persisted at `<bids_parent>/.neuconn/connectivity_workflow_state.json`.
 
 Then read:
 
-- [`docs/user/workflows/connectivity-analysis.md#submit-from-the-app`](docs/user/workflows/connectivity-analysis.md)
+- [`docs/user/workflows/connectivity-analysis.md`](docs/user/workflows/connectivity-analysis.md)
 - [`neuconn_app/pages_connectivity_submit/README.md`](neuconn_app/pages_connectivity_submit/README.md)
 
 ### 6. Run XCP-D post-processing pipeline

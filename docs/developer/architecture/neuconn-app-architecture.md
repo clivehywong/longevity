@@ -36,18 +36,40 @@ The app uses a custom navigation model rather than relying on Streamlit's defaul
 
 ### Connectivity submit pages (`pages_connectivity_submit/`)
 
-Four submit pages under **fMRI Analysis** expose the subject-level and group-level connectivity stages:
+Four pages under **fMRI Analysis** expose subject-level and group-level connectivity stages. All pages carry a **pipeline selector** (fc / fc_gsr / ec) and use XCP-D atlas names (4S256Parcels, 4S456Parcels, Glasser, Gordon, Tian).
 
 | File | Page | Session-state prefix |
 |---|---|---|
-| `01_submit_local_measures.py` | Submit Local Measures | `submit_local_` |
-| `02_submit_seed_connectivity.py` | Submit Seed Connectivity | `submit_seed_` |
-| `03_submit_network_connectivity.py` | Submit Network Connectivity | `submit_network_` |
-| `04_submit_group_stats.py` | Submit Group Stats | `submit_group_` |
+| `00_local_measures_coverage.py` | 📊 Local Measures Coverage | `submit_local_` |
+| `02_submit_seed_connectivity.py` | 📤 Submit Seed Connectivity | `submit_seed_` |
+| `03_submit_network_connectivity.py` | 📤 Submit Network Connectivity | `submit_network_` |
+| `04_submit_group_stats.py` | 📤 Submit Group Stats | `submit_group_` |
 
-`02_submit_seed_connectivity.py` implements a cascading **Atlas → Seed** multi-select: selecting an atlas populates a filtered seed list drawn from three sources (priority MNI-sphere seeds, custom ROI-config entries, atlas-parcel definitions). Changing the atlas resets the selection.
+`00_local_measures_coverage.py` is a read-only discovery dashboard — it calls `XcpdDiscovery` to enumerate per-subject ALFF/ReHo/fALFF files and displays coverage; it does **not** submit any HPC jobs.
 
-`04_submit_group_stats.py` runs a manifest preflight (reading `.manifest.json` from the subject-level output) to verify which subjects have completed outputs before building the HPC job.
+`02_submit_seed_connectivity.py` cascading **Pipeline → Atlas → Seed** multi-select with three seed sources:
+- `xcpd_atlas_parcel` — parcels from the selected XCP-D atlas
+- `custom_nifti_roi` — ROI NIfTI files from config
+- `sphere` — MNI coordinate + radius
+
+`04_submit_group_stats.py` has a **kind** toggle: **Voxel** (runs `group_voxel_stats_xcpd.py`, GRF/TFCE/FDR correction) or **Matrix** (runs `group_matrix_stats.py`, paired_t_fdr/NBS/TF-NBS).
+
+### Connectivity output tree
+
+```
+derivatives/connectivity/
+  {fc,fc_gsr,ec}/
+    sub-XX/ses-YY/
+      seed/<seed_id>/
+        *_atlas-<A>_measure-<M>_seed-to-parcel.tsv
+        *_seed-to-voxel_zmap.nii.gz
+      network/atlas-<A>/
+        *_measure-<M>_relmat.tsv
+        *_measure-<M>_relmat-z.tsv   # Fisher-z for correlation measures
+  group/
+    voxel/...     # group_voxel_stats_xcpd.py outputs
+    matrix/...    # group_matrix_stats.py outputs
+```
 
 
 
@@ -265,8 +287,10 @@ The "Software / Images" tab was separated from HPC Settings so local execution p
 | `utils/xcpd.py` | XCP-D local and HPC execution; SLURM script generation; status file writing |
 | `utils/xcpd_atlases.py` | Atlas catalog (16 XCP-D built-in + custom project atlases); CLI arg builder |
 | `utils/xcpd_qc.py` | XCP-D QC rendering helpers; `get_xcpd_subject_status()` |
-| `utils/seed_catalog.py` | Unified `SeedCatalog` merging priority seeds (`.github/connectivity_config.yaml`), custom ROIs (`roi_config.json`), and atlas parcels; `Seed` dataclass |
-| `utils/connectivity_workflow.py` | `ConnectivityWorkflowManager` — submission tracking and HPC orchestration for all four connectivity stages; state at `<bids_parent>/.neuconn/connectivity_workflow_state.json` |
+| `utils/xcpd_outputs.py` | `XcpdDiscovery` + `XcpdOutputs` — enumerate XCP-D derivative files (ALFF, ReHo, timeseries, relmat) per pipeline/atlas/subject |
+| `utils/seed_catalog.py` | `SeedCatalog` — now built on XCP-D atlas parcels; merges `xcpd_atlas_parcel`, `custom_nifti_roi`, and `sphere` seed sources |
+| `utils/connectivity_workflow.py` | `ConnectivityWorkflowManager` — submission tracking for all connectivity stages; emits `--analysis seed\|network --pipeline <p> --measures …`; state at `<bids_parent>/.neuconn/connectivity_workflow_state.json` |
+| `utils/connectivity_viewer.py` | Viewer helpers — load relmat/zmap outputs from the new derivatives tree |
 | `utils/image_cache.py` | cached QC-image lifecycle |
 | `utils/qa_image_generator.py` | image generation used by both app and CLI-style workflows |
 | `utils/pipeline_state.py` | pipeline gate summaries and state loading |

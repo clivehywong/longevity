@@ -45,10 +45,10 @@ The sidebar has two levels:
 | fMRIPrep QC Reports | Inline HTML viewer for fMRIPrep reports with dropdown + prev/next navigation |
 | XCP-D Pipeline | FD gating, XCP-D runs, post-QC, per-subject status |
 | XCP-D QC Reports | QC metrics table + inline HTML viewer for per-session XCP-D reports (FC / FC+GSR / EC tabs) |
-| Subject Level → Submit Local Measures | Submit fALFF / ALFF / ReHo HPC jobs per subject/session |
-| Subject Level → Submit Seed Connectivity | Submit seed-based correlation maps; cascading Atlas → Seed multi-select |
-| Subject Level → Submit Network Connectivity | Submit parcel-timeseries extraction and network correlation |
-| Group Level → Submit Group Stats | Submit second-level mixed-effects analysis (GRF / TFCE / FDR) with manifest preflight |
+| Subject Level → 📊 Local Measures Coverage | Read-only dashboard — ALFF / ReHo / fALFF coverage per subject/session (XCP-D outputs) |
+| Subject Level → 📤 Submit Seed Connectivity | Submit seed-based maps; pipeline selector + atlas + seed multi-select; 8 connectivity measures |
+| Subject Level → 📤 Submit Network Connectivity | Submit parcel × parcel relmat; pipeline selector + atlas + 8 measures |
+| Group Level → 📤 Submit Group Stats | Submit group stats — **Voxel** kind (GRF/TFCE/FDR) or **Matrix** kind (paired_t_fdr/NBS/TF-NBS) |
 
 ## Subject Data page
 
@@ -249,8 +249,9 @@ Open **fMRI Analysis → XCP-D Pipeline → Post-XCP-D QC tab**.
 
 After QC approval, open **fMRI Analysis → Subject Level**.
 
-- **Local Measures**: click **Refresh local-measure manifests** to index ALFF, fALFF, and ReHo outputs.
-- **Seed Connectivity**: click **Export atlas-based seed summaries** to compute seed timeseries and connectivity matrices.
+- **Local Measures Coverage**: read-only dashboard — shows ALFF, fALFF, and ReHo coverage (from XCP-D outputs) per subject/session. No jobs are submitted here.
+- **Seed Connectivity**: select pipeline (fc/fc_gsr/ec), atlas, seed(s), and measures; click **Submit** to run `compute_seed_connectivity_xcpd.py`.
+- **Network Connectivity**: select pipeline, atlas, and measures; submits `compute_network_connectivity_xcpd.py`.
 
 ## Where the app keeps state
 

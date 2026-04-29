@@ -6,9 +6,22 @@
 
 Replaced by XCP-D-driven pipeline. XCP-D already computes ALFF, ReHo, parcellated mean timeseries, and Pearson correlation matrices; the new pipeline reads those directly and adds richer measures (Spearman, partial corr, PLV, wPLI, coherence, AEC, MI).
 
-## Replacements
+## What replaced it
 
-See `script/compute_seed_connectivity_xcpd.py` and `script/compute_network_connectivity_xcpd.py` (forthcoming) for replacements.
+| Archived | Replacement |
+|---|---|
+| `compute_local_measures.py` | XCP-D produces ALFF / ReHo directly; `00_local_measures_coverage.py` shows coverage |
+| `compute_network_connectivity.py` | `script/compute_network_connectivity_xcpd.py` (8 measures, 5 atlases) |
+| `hpc_seed_connectivity*.sh` | `script/compute_seed_connectivity_xcpd.py` via `ConnectivityWorkflowManager` |
+| `hpc_*group*.sh` | `script/group_voxel_stats_xcpd.py` + `script/group_matrix_stats.py` |
+
+**New utility modules:**
+- `neuconn_app/utils/xcpd_outputs.py` — `XcpdDiscovery`, `XcpdOutputs`
+- `neuconn_app/utils/seed_catalog.py` — refactored for XCP-D atlas parcels
+- `neuconn_app/utils/connectivity_workflow.py` — `ConnectivityWorkflowManager`
+- `neuconn_app/utils/connectivity_viewer.py` — viewer helpers
+
+**Developer reference:** [`docs/developer/architecture/connectivity-pipeline.md`](../../../../docs/developer/architecture/connectivity-pipeline.md)
 
 ## File Index
 

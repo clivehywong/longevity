@@ -69,9 +69,24 @@ python script/qa_check_images.py bids/ qa_images_full/
 # HPC fMRIPrep submission (selective upload, auto-cleanup)
 bash script/batch_fmriprep.sh
 
-# Connectivity analysis
-bash script/master_full_connectivity_workflow.sh --test
+# Connectivity analysis (XCP-D-driven; --bids-root must be project root, not bids/)
+python script/compute_seed_connectivity_xcpd.py \
+    --bids-root /home/clivewong/proj/longevity --pipeline fc \
+    --atlas 4S256Parcels --measures pearson
+python script/compute_network_connectivity_xcpd.py \
+    --bids-root /home/clivewong/proj/longevity --pipeline fc \
+    --atlas 4S256Parcels --measures pearson
+python script/group_voxel_stats_xcpd.py --bids-root /home/clivewong/proj/longevity --pipeline fc
+python script/group_matrix_stats.py --bids-root /home/clivewong/proj/longevity --pipeline fc
 ```
+
+### Connectivity pipeline notes
+
+- The pipeline is **XCP-D-driven**: scripts read from `derivatives/preprocessing/xcpd/{fc,fc_gsr,ec}/`.
+- **`--bids-root` must be the project root**, not `bids/` — XCP-D derivatives are siblings of `bids/`.
+- 8-measure library: `script/connectivity_measures.py` (pearson, spearman, partial_correlation, plv, wpli, coherence, amplitude_envelope_correlation, mutual_information). Fisher-z applied automatically to correlation-type measures before group stats.
+- Legacy DiFuMo256 / Schaefer400 scripts are archived at `script/archive/old_pipeline_pre_xcpd/`.
+- Developer reference: `docs/developer/architecture/connectivity-pipeline.md`
 
 ## Documentation
 
