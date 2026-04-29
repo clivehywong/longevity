@@ -49,7 +49,12 @@ def render() -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}pipeline", "fc")
 
     config = _get_config()
-    bids_root = config.get("paths", {}).get("bids_root", "bids")
+    bids_root = (
+        config.get("paths", {}).get("project_root")
+        or config.get("project_root")
+        or config.get("paths", {}).get("bids_root")
+        or "."
+    )
 
     # --- Pipeline selector ---
     pipeline = st.selectbox(
