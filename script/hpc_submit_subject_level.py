@@ -2,10 +2,11 @@
 """
 HPC Subject-Level Job Submission Wrapper for SLURM Array Parallelization
 
-Submits SLURM job arrays for all subjects across all session-level analyses:
-- Local measures (fALFF, ReHo)
-- Seed-based connectivity (all 17 seeds)
-- Network connectivity (DiFuMo256, Schaefer400)
+Submits SLURM job arrays for subject-session-level analyses driven by XCP-D:
+- Seed-based connectivity (compute_seed_connectivity_xcpd.py)
+- Network connectivity (compute_network_connectivity_xcpd.py)
+
+Local measures are now produced directly by XCP-D (no separate submission).
 
 Supports test mode, dry-run, and manifest tracking for group-level readiness.
 """
@@ -13,6 +14,7 @@ Supports test mode, dry-run, and manifest tracking for group-level readiness.
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -22,6 +24,224 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import yaml
+
+# ---------------------------------------------------------------------------
+# XCP-D pipeline constants
+# ---------------------------------------------------------------------------
+
+#: All 8 connectivity measures exported by the backends
+DEFAULT_XCPD_MEASURES = ",".join([
+    "pearson", "spearman", "partial_correlation", "plv",
+    "wpli", "coherence", "amplitude_envelope_correlation", "mutual_information",
+])
+
+#: 5 recommended XCP-D built-in atlases (mirrors xcpd_atlases.recommended_xcpd_atlases)
+DEFAULT_XCPD_ATLASES: List[str] = [
+    "4S256Parcels", "4S456Parcels", "Glasser", "Gordon", "Tian"
+]
+
+
+# ---------------------------------------------------------------------------
+# Public helpers: session-pair discovery + SLURM script generation
+# ---------------------------------------------------------------------------
+
+def build_xcpd_session_pairs(
+    bids_root: str | Path,
+    pipeline: str = "fc",
+    subjects: Optional[List[str]] = None,
+) -> List[Tuple[str, str]]:
+    """Return (subject, session) pairs available for *pipeline* in XCP-D outputs.
+
+    Scans ``bids_root/derivatives/preprocessing/xcpd/{pipeline}/`` for
+    ``sub-*/ses-*`` directories.  Falls back to scanning ``bids_root/bids/``
+    (or ``bids_root`` directly if it contains sub-* dirs) with the two
+    canonical sessions ``ses-01``/``ses-02`` when XCP-D outputs are absent.
+
+    Parameters
+    ----------
+    bids_root:
+        Project root (parent of ``bids/``).
+    pipeline:
+        XCP-D pipeline name (``fc``, ``fc_gsr``, ``ec``).
+    subjects:
+        Optional allow-list; when given only these subjects are included.
+    """
+    bids_root = Path(bids_root)
+    xcpd_pl_dir = bids_root / "derivatives" / "preprocessing" / "xcpd" / pipeline
+    pairs: List[Tuple[str, str]] = []
+
+    if xcpd_pl_dir.exists():
+        for sub_dir in sorted(xcpd_pl_dir.glob("sub-*")):
+            if not sub_dir.is_dir():
+                continue
+            sub = sub_dir.name
+            if subjects and sub not in subjects:
+                continue
+            for ses_dir in sorted(sub_dir.glob("ses-*")):
+                if ses_dir.is_dir():
+                    pairs.append((sub, ses_dir.name))
+        return pairs
+
+    # Fallback: scan BIDS tree
+    bids_dir = bids_root / "bids" if (bids_root / "bids").exists() else bids_root
+    for sub_dir in sorted(bids_dir.glob("sub-*")):
+        if not sub_dir.is_dir():
+            continue
+        sub = sub_dir.name
+        if subjects and sub not in subjects:
+            continue
+        for ses in ("ses-01", "ses-02"):
+            if (sub_dir / ses).exists():
+                pairs.append((sub, ses))
+    return pairs
+
+
+def generate_xcpd_subject_script(
+    analysis: str,
+    pipeline: str,
+    measures: str,
+    seeds: Optional[List[str]],
+    atlases: Optional[List[str]],
+    bids_root: str,
+    out_root: str,
+    session_pairs: List[Tuple[str, str]],
+    log_dir: str = "logs",
+    time_limit: str = "06:00:00",
+    mem: str = "16G",
+    cpus: int = 4,
+    partition: str = "cpu-long",
+    max_parallel: int = 20,
+    tr: float = 0.8,
+    force: bool = False,
+    test_mode: bool = False,
+) -> str:
+    """Generate a SLURM array bash script for XCP-D-driven subject-level analysis.
+
+    Parameters
+    ----------
+    analysis:
+        ``"seed"`` → ``compute_seed_connectivity_xcpd.py``
+        ``"network"`` → ``compute_network_connectivity_xcpd.py``
+    pipeline:
+        XCP-D pipeline name propagated to the backend (``--pipeline``).
+    measures:
+        Comma-separated connectivity measures propagated to ``--measures``.
+    seeds:
+        Seed specs (repeatable ``--seed`` flags) — required for seed analysis.
+    atlases:
+        Atlas names (repeatable ``--atlas`` flags) — for network analysis.
+        Defaults to :data:`DEFAULT_XCPD_ATLASES` when *None*.
+    bids_root:
+        Project root path embedded in the script.
+    out_root:
+        Output root embedded in the script (``--out-root``).
+    session_pairs:
+        Ordered list of ``(subject, session)`` tuples; determines array size.
+    log_dir:
+        SLURM log directory embedded in the ``#SBATCH`` directives.
+    time_limit, mem, cpus, partition, max_parallel:
+        SLURM resource parameters.
+    tr:
+        Repetition time in seconds (passed to backend as ``--tr``).
+    force:
+        When True append ``--force`` to the backend call.
+    test_mode:
+        When True restrict to the first 2 session pairs.
+    """
+    if analysis not in ("seed", "network"):
+        raise ValueError(f"analysis must be 'seed' or 'network', got {analysis!r}")
+
+    effective_pairs = session_pairs[:2] if test_mode else list(session_pairs)
+    if not effective_pairs:
+        raise ValueError("session_pairs is empty — nothing to submit")
+
+    n_jobs = len(effective_pairs)
+    limit = min(max_parallel, n_jobs)
+
+    subjects_arr = " ".join(f'"{sub}"' for sub, _ in effective_pairs)
+    sessions_arr = " ".join(f'"{ses}"' for _, ses in effective_pairs)
+
+    force_flag = " \\\n    --force" if force else ""
+
+    if analysis == "seed":
+        if not seeds:
+            raise ValueError("seeds list is required for analysis='seed'")
+        seed_lines = "\n    ".join(
+            f"--seed {shlex.quote(s)} \\" for s in seeds
+        )
+        backend = (
+            f"python3 script/compute_seed_connectivity_xcpd.py \\\n"
+            f"    --bids-root \"{bids_root}\" \\\n"
+            f"    --subject \"$SUBJECT\" \\\n"
+            f"    --session \"$SESSION\" \\\n"
+            f"    --pipeline {pipeline} \\\n"
+            f"    {seed_lines}\n"
+            f"    --measures {shlex.quote(measures)} \\\n"
+            f"    --out-root \"{out_root}\" \\\n"
+            f"    --tr {tr}{force_flag}"
+        )
+    else:  # network
+        effective_atlases = atlases if atlases else DEFAULT_XCPD_ATLASES
+        atlas_lines = "\n    ".join(
+            f"--atlas {a} \\" for a in effective_atlases
+        )
+        backend = (
+            f"python3 script/compute_network_connectivity_xcpd.py \\\n"
+            f"    --bids-root \"{bids_root}\" \\\n"
+            f"    --subject \"$SUBJECT\" \\\n"
+            f"    --session \"$SESSION\" \\\n"
+            f"    --pipeline {pipeline} \\\n"
+            f"    {atlas_lines}\n"
+            f"    --measures {shlex.quote(measures)} \\\n"
+            f"    --out-root \"{out_root}\" \\\n"
+            f"    --tr {tr}{force_flag}"
+        )
+
+    script = f"""#!/bin/bash
+# SLURM XCP-D Subject-Level {analysis.capitalize()} Connectivity Array
+# Generated: {datetime.now().isoformat()}
+# Pipeline: {pipeline}  Measures: {measures}
+
+#SBATCH --job-name={analysis}_connectivity
+#SBATCH --array=1-{n_jobs}%{limit}
+#SBATCH --time={time_limit}
+#SBATCH --mem={mem}
+#SBATCH --cpus-per-task={cpus}
+#SBATCH --partition={partition}
+#SBATCH --output={log_dir}/{analysis}_%A_%a.out
+#SBATCH --error={log_dir}/{analysis}_%A_%a.err
+
+set -euo pipefail
+
+# ---------- subject/session lookup (1-based SLURM index) ----------
+SUBJECTS_ARRAY=({subjects_arr})
+SESSIONS_ARRAY=({sessions_arr})
+IDX=$(( SLURM_ARRAY_TASK_ID - 1 ))
+SUBJECT="${{SUBJECTS_ARRAY[$IDX]}}"
+SESSION="${{SESSIONS_ARRAY[$IDX]}}"
+
+LOG_FILE="{log_dir}/{analysis}_${{SLURM_ARRAY_JOB_ID}}_${{SLURM_ARRAY_TASK_ID}}_${{SUBJECT}}_${{SESSION}}.log"
+
+log_info() {{ echo "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $*" | tee -a "$LOG_FILE"; }}
+log_error() {{ echo "[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $*" | tee -a "$LOG_FILE"; }}
+
+log_info "Starting {analysis} for $SUBJECT $SESSION (array task ${{SLURM_ARRAY_TASK_ID}}/${{SLURM_ARRAY_TASK_COUNT:-{n_jobs}}})"
+
+# ---------- manifest: expected marker ----------
+mkdir -p outputs/expected outputs/done
+touch "outputs/expected/${{SUBJECT}}_${{SESSION}}_{analysis}.expected"
+
+# ---------- backend ----------
+if {backend} \\
+    >> "$LOG_FILE" 2>&1; then
+    log_info "SUCCESS: {analysis} for $SUBJECT $SESSION"
+    touch "outputs/done/${{SUBJECT}}_${{SESSION}}_{analysis}.done"
+else
+    log_error "FAILED: {analysis} for $SUBJECT $SESSION"
+    exit 1
+fi
+"""
+    return script
 
 
 class SubjectLevelHPCSubmitter:
@@ -702,53 +922,225 @@ log_info "Completed all analyses for $SUBJECT"
 
 
 def main():
-    """CLI interface"""
+    """CLI interface.
+
+    When ``--analysis`` is given (``seed`` or ``network``) the script uses the
+    XCP-D-driven backends.  Without ``--analysis`` it falls back to the legacy
+    config-file-driven flow.
+    """
     parser = argparse.ArgumentParser(
         description="HPC Subject-Level Job Submission Wrapper for SLURM"
     )
 
+    # ---- XCP-D backend arguments (new) ----
+    parser.add_argument(
+        "--analysis",
+        choices=["seed", "network"],
+        default=None,
+        help="Analysis type for XCP-D backends: 'seed' or 'network'.  "
+             "When omitted the legacy config-driven flow is used.",
+    )
+    parser.add_argument(
+        "--pipeline",
+        choices=["fc", "fc_gsr", "ec"],
+        default="fc",
+        help="XCP-D pipeline (default: fc).",
+    )
+    parser.add_argument(
+        "--measures",
+        default=DEFAULT_XCPD_MEASURES,
+        help=(
+            "Comma-separated connectivity measures (default: all 8). "
+            "Propagated to --measures of the backend."
+        ),
+    )
+    parser.add_argument(
+        "--seed",
+        dest="seeds",
+        action="append",
+        default=None,
+        metavar="SPEC",
+        help=(
+            "Seed spec (repeatable). Formats: "
+            "atlas-<name>:<parcel> | sphere:<x>,<y>,<z>[,r=<mm>][,name=<n>] | "
+            "nifti:<path>[,name=<n>].  Required for --analysis seed."
+        ),
+    )
+    parser.add_argument(
+        "--atlas",
+        dest="atlases",
+        action="append",
+        default=None,
+        metavar="ATLAS",
+        help=(
+            "Atlas name (repeatable). Used for --analysis network. "
+            f"Defaults to: {', '.join(DEFAULT_XCPD_ATLASES)}"
+        ),
+    )
+    parser.add_argument(
+        "--bids-root",
+        default=".",
+        help="Project BIDS root (parent of bids/, default: current directory).",
+    )
+    parser.add_argument(
+        "--out-root",
+        default="derivatives/connectivity",
+        help="Output root for connectivity results (default: derivatives/connectivity).",
+    )
+    parser.add_argument(
+        "--subjects",
+        default=None,
+        help="Comma-separated subject IDs to include (default: all discovered).",
+    )
+    parser.add_argument(
+        "--tr",
+        type=float,
+        default=0.8,
+        help="Repetition time in seconds (default: 0.8).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Pass --force to backend (recompute existing outputs).",
+    )
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=20,
+        help="Maximum concurrent SLURM array tasks (default: 20).",
+    )
+
+    # ---- SLURM resource arguments ----
+    parser.add_argument("--time", default="06:00:00", help="SLURM wall time.")
+    parser.add_argument("--memory", default="16G", help="SLURM memory per task.")
+    parser.add_argument("--cpus", type=int, default=4, help="CPUs per task.")
+    parser.add_argument("--partition", default="cpu-long", help="SLURM partition.")
+
+    # ---- Legacy / shared arguments ----
     parser.add_argument(
         "--config",
         default=".github/connectivity_config.yaml",
-        help="Path to connectivity config YAML",
+        help="Path to connectivity config YAML (legacy flow).",
     )
     parser.add_argument(
         "--log-dir",
         default="logs",
-        help="Directory for SLURM logs",
+        help="Directory for SLURM logs.",
     )
     parser.add_argument(
         "--output-dir",
         default="results",
-        help="Base directory for results",
+        help="Base directory for results (legacy flow).",
     )
     parser.add_argument(
         "--test-mode",
         action="store_true",
-        help="Only submit jobs for 2 subjects (useful for testing)",
+        help="Restrict to 2 session pairs / subjects (useful for testing).",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print SLURM script without submitting",
+        help="Print the SLURM script without submitting.",
     )
     parser.add_argument(
         "--check-job",
-        help="Check status of submitted job (provide job ID)",
+        help="Check status of a previously submitted job (provide job ID).",
     )
     parser.add_argument(
         "--validate",
         action="store_true",
-        help="Validate requirements without submitting",
+        help="Validate requirements without submitting (legacy flow).",
     )
     parser.add_argument(
         "--summary",
         action="store_true",
-        help="Print submission summary",
+        help="Print submission summary (legacy flow).",
     )
 
     args = parser.parse_args()
 
+    # ------------------------------------------------------------------ #
+    # XCP-D-driven path (--analysis seed | network)                        #
+    # ------------------------------------------------------------------ #
+    if args.analysis is not None:
+        try:
+            subject_filter = (
+                [s.strip() for s in args.subjects.split(",") if s.strip()]
+                if args.subjects
+                else None
+            )
+            session_pairs = build_xcpd_session_pairs(
+                bids_root=args.bids_root,
+                pipeline=args.pipeline,
+                subjects=subject_filter,
+            )
+            if not session_pairs:
+                print(
+                    f"[WARNING] No (subject, session) pairs found for pipeline "
+                    f"'{args.pipeline}' under '{args.bids_root}'.",
+                    file=sys.stderr,
+                )
+                if args.dry_run:
+                    print("(dry-run: using placeholder pair for script preview)")
+                    session_pairs = [("sub-033", "ses-01")]
+                else:
+                    return 1
+
+            script = generate_xcpd_subject_script(
+                analysis=args.analysis,
+                pipeline=args.pipeline,
+                measures=args.measures,
+                seeds=args.seeds,
+                atlases=args.atlases,
+                bids_root=args.bids_root,
+                out_root=args.out_root,
+                session_pairs=session_pairs,
+                log_dir=args.log_dir,
+                time_limit=args.time,
+                mem=args.memory,
+                cpus=args.cpus,
+                partition=args.partition,
+                max_parallel=args.max_parallel,
+                tr=args.tr,
+                force=args.force,
+                test_mode=args.test_mode,
+            )
+
+            if args.dry_run:
+                print("\n" + "=" * 70)
+                print(f"DRY RUN: SLURM Script ({args.analysis} / {args.pipeline})")
+                print("=" * 70 + "\n")
+                print(script)
+                print("=" * 70 + "\n")
+                return 0
+
+            log_path = Path(args.log_dir)
+            log_path.mkdir(parents=True, exist_ok=True)
+            script_file = log_path / (
+                f"xcpd_{args.analysis}_{args.pipeline}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sh"
+            )
+            script_file.write_text(script)
+            script_file.chmod(0o755)
+
+            result = subprocess.run(
+                ["sbatch", str(script_file)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            )
+            job_id = result.stdout.strip().split()[-1]
+            print(f"Submitted XCP-D {args.analysis} array job: {job_id}")
+            print(f"Script: {script_file}")
+            return 0
+
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    # ------------------------------------------------------------------ #
+    # Legacy config-file-driven path (no --analysis)                       #
+    # ------------------------------------------------------------------ #
     try:
         submitter = SubjectLevelHPCSubmitter(
             config_file=args.config,
@@ -769,7 +1161,6 @@ def main():
             print(json.dumps(status, indent=2))
             return 0
 
-        # Submit job array
         job_id = submitter.submit_job_array(
             test_mode=args.test_mode,
             dry_run=args.dry_run,
@@ -777,8 +1168,8 @@ def main():
 
         return 0 if job_id or args.dry_run else 1
 
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
 

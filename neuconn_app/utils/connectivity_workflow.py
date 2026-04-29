@@ -30,6 +30,13 @@ VALID_ANALYSIS_TYPES = {
     "group_stats",
 }
 
+# Mapping from workflow analysis type to --analysis flag value in the
+# XCP-D-driven hpc_submit_subject_level.py
+_ANALYSIS_FLAG_MAP = {
+    "seed_connectivity": "seed",
+    "network_connectivity": "network",
+}
+
 VALID_STATUSES = {"submitted", "running", "completed", "failed", "cancelled"}
 
 
@@ -169,55 +176,130 @@ class ConnectivityWorkflowManager:
         options: Dict,
         subjects: List[str],
     ) -> str:
-        """Build the CLI command for script/hpc_submit_subject_level.py."""
+        """Build the CLI command for script/hpc_submit_subject_level.py.
+
+        ``local_measures`` is no longer submitted as a separate job (XCP-D
+        produces those outputs natively).  Passing ``local_measures`` raises
+        :class:`ValueError`.
+
+        The command uses the XCP-D-driven ``--analysis {seed|network}`` flag
+        together with ``--pipeline``, ``--measures``, repeated ``--seed`` /
+        ``--atlas`` flags, ``--bids-root``, and ``--out-root``.
+        """
         if analysis_type == "group_stats":
             raise ValueError("Use build_group_level_command for group_stats submissions")
         if analysis_type not in VALID_ANALYSIS_TYPES:
             raise ValueError(f"Unsupported analysis type: {analysis_type}")
+        if analysis_type == "local_measures":
+            raise ValueError(
+                "local_measures is now produced by XCP-D; no subject-level "
+                "submission is needed.  Use seed_connectivity or network_connectivity."
+            )
 
         options = options or {}
         script_path = self._script_path("hpc_submit_subject_level.py", options)
-        parts = ["python", shlex.quote(str(script_path)), "--analysis-type", shlex.quote(analysis_type)]
+        analysis_flag = _ANALYSIS_FLAG_MAP[analysis_type]
+        parts = ["python", shlex.quote(str(script_path)), "--analysis", shlex.quote(analysis_flag)]
 
-        option_map = [
-            ("config", "--config"),
-            ("log_dir", "--log-dir"),
-            ("output_dir", "--output-dir"),
-            ("atlas", "--atlas"),
-            ("seeds", "--seeds"),
-            ("confound_strategy", "--confound-strategy"),
-            ("high_pass", "--high-pass"),
-            ("low_pass", "--low-pass"),
-            ("smoothing_fwhm", "--smoothing-fwhm"),
+        # Core XCP-D flags
+        scalar_options = [
+            ("pipeline", "--pipeline"),
+            ("measures", "--measures"),
+            ("bids_root", "--bids-root"),
+            ("out_root", "--out-root"),
+            ("tr", "--tr"),
             ("max_parallel", "--max-parallel"),
             ("time", "--time"),
             ("memory", "--memory"),
             ("partition", "--partition"),
             ("cpus", "--cpus"),
-            ("sessions", "--sessions"),
+            ("log_dir", "--log-dir"),
+            ("output_dir", "--output-dir"),
         ]
-        for key, flag in option_map:
+        for key, flag in scalar_options:
             self._append_option(parts, flag, options.get(key))
 
+        # Subjects filter
         self._append_option(parts, "--subjects", subjects)
-        for key, flag in (("test_mode", "--test-mode"), ("validate", "--validate"), ("summary", "--summary")):
+
+        # Repeatable --seed flags (seed analysis)
+        seeds = options.get("seeds") or options.get("seed") or []
+        if isinstance(seeds, str):
+            seeds = [s.strip() for s in seeds.split(",") if s.strip()]
+        for seed in seeds:
+            if seed:
+                parts.extend(["--seed", shlex.quote(str(seed))])
+
+        # Repeatable --atlas flags (network analysis)
+        atlases = options.get("atlases") or options.get("atlas")
+        if atlases is not None:
+            if isinstance(atlases, str):
+                atlases = [a.strip() for a in atlases.split(",") if a.strip()]
+            for atlas in atlases:
+                if atlas:
+                    parts.extend(["--atlas", shlex.quote(str(atlas))])
+
+        # Boolean flags
+        for key, flag in (
+            ("test_mode", "--test-mode"),
+            ("dry_run", "--dry-run"),
+            ("force", "--force"),
+            ("validate", "--validate"),
+            ("summary", "--summary"),
+        ):
             if options.get(key) is True:
                 parts.append(flag)
 
         return " ".join(parts)
 
     def build_group_level_command(self, options: Dict) -> str:
-        """Build the CLI command for script/hpc_submit_group_level.py."""
+        """Build the CLI command for script/hpc_submit_group_level.py.
+
+        Supports both the new XCP-D-driven ``--kind {voxel,matrix}`` path and
+        the legacy path (no ``--kind``).
+        """
         options = options or {}
         script_path = self._script_path("hpc_submit_group_level.py", options)
         parts = ["python", shlex.quote(str(script_path))]
 
-        option_map = [
+        # New XCP-D routing flag
+        if options.get("kind"):
+            self._append_option(parts, "--kind", options.get("kind"))
+
+        # Shared XCP-D arguments
+        xcpd_option_map = [
+            ("bids_root", "--bids-root"),
+            ("pipeline", "--pipeline"),
+            ("measure", "--measure"),
+            ("contrast", "--contrast"),
+            ("method", "--method"),
+            ("group_csv", "--group-csv"),
+            ("out", "--out"),
+            # voxel-specific
+            ("mask", "--mask"),
+            # matrix-specific
+            ("matrix_kind", "--matrix-kind"),
+            ("atlas", "--atlas"),
+            ("seed_id", "--seed-id"),
+            ("threshold", "--threshold"),
+            ("alpha", "--alpha"),
+            ("n_permutations", "--n-permutations"),
+            # SLURM resources
+            ("time", "--time"),
+            ("memory", "--memory"),
+            ("partition", "--partition"),
+            ("cpus", "--cpus"),
+            ("log_dir", "--log-dir"),
+        ]
+        for key, flag in xcpd_option_map:
+            self._append_option(parts, flag, options.get(key))
+
+        # Legacy options (kept for backward compatibility)
+        legacy_option_map = [
             ("subject_job_id", "--subject-job-id"),
             ("config", "--config"),
             ("analysis_source", "--analysis-source"),
             ("measures", "--measures"),
-            ("atlas", "--atlas"),
             ("seeds", "--seeds"),
             ("network_grouping", "--network-grouping"),
             ("model_formula", "--model-formula"),
@@ -225,27 +307,21 @@ class ConnectivityWorkflowManager:
             ("correction_method", "--correction-method"),
             ("cluster_forming_p", "--cluster-forming-p"),
             ("cluster_p", "--cluster-p"),
-            ("n_permutations", "--n-permutations"),
             ("q_threshold", "--q-threshold"),
-            ("mask", "--mask"),
             ("custom_mask", "--custom-mask"),
             ("min_subjects_pct", "--min-subjects-pct"),
             ("manifest_path", "--manifest"),
-            ("group_csv", "--group-csv"),
-            ("time", "--time"),
-            ("memory", "--memory"),
-            ("partition", "--partition"),
-            ("cpus", "--cpus"),
             ("max_parallel", "--max-parallel"),
-            ("log_dir", "--log-dir"),
             ("project_dir", "--project-dir"),
             ("remote_project_dir", "--remote-project-dir"),
         ]
-        for key, flag in option_map:
+        for key, flag in legacy_option_map:
             self._append_option(parts, flag, options.get(key))
 
         if options.get("test_mode") is True:
             parts.append("--test-mode")
+        if options.get("dry_run") is True:
+            parts.append("--dry-run")
 
         return " ".join(parts)
 

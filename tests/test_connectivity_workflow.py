@@ -41,7 +41,7 @@ def make_submission(submission_id="sub-1", analysis_type="seed_connectivity"):
         analysis_type=analysis_type,
         job_id="12345",
         submitted_at="2026-04-29T12:00:00",
-        options={"atlas": "DiFuMo256"},
+        options={"atlas": "4S256Parcels"},
         subjects=["sub-033", "sub-034"],
         status="submitted",
         output_dir="/remote/results",
@@ -85,17 +85,17 @@ def test_add_update_and_list_by_type():
     assert [s.submission_id for s in state.list_by_type("network_connectivity")] == ["network"]
 
 
-def test_build_subject_level_command_omits_empty_values(tmp_path):
+def test_build_subject_level_command_seed_analysis(tmp_path):
+    """build_subject_level_command for seed_connectivity uses --analysis seed."""
     manager = ConnectivityWorkflowManager(make_config(tmp_path))
     cmd = manager.build_subject_level_command(
         "seed_connectivity",
         {
-            "atlas": "DiFuMo256",
-            "seeds": ["Anterior_Insula", "dACC"],
-            "confound_strategy": "36P",
-            "high_pass": 0.01,
-            "low_pass": 0.1,
-            "smoothing_fwhm": 6,
+            "pipeline": "fc",
+            "measures": "pearson,spearman",
+            "seeds": ["atlas-4S256Parcels:LH_Vis_1", "sphere:0,-52,26,r=6,name=PCC"],
+            "bids_root": "/data/bids",
+            "out_root": "derivatives/connectivity",
             "max_parallel": 20,
             "time": "06:00:00",
             "memory": "16G",
@@ -108,30 +108,136 @@ def test_build_subject_level_command_omits_empty_values(tmp_path):
     parts = shlex.split(cmd)
 
     assert parts[:2] == ["python", str(tmp_path / "project" / "script" / "hpc_submit_subject_level.py")]
-    assert "--analysis-type" in parts and parts[parts.index("--analysis-type") + 1] == "seed_connectivity"
-    assert "--seeds" in parts and parts[parts.index("--seeds") + 1] == "Anterior_Insula,dACC"
+    assert "--analysis" in parts and parts[parts.index("--analysis") + 1] == "seed"
+    assert "--pipeline" in parts and parts[parts.index("--pipeline") + 1] == "fc"
+    assert "--measures" in parts and parts[parts.index("--measures") + 1] == "pearson,spearman"
+    # repeated --seed flags
+    seed_indices = [i for i, p in enumerate(parts) if p == "--seed"]
+    assert len(seed_indices) == 2
+    assert parts[seed_indices[0] + 1] == "atlas-4S256Parcels:LH_Vis_1"
+    assert parts[seed_indices[1] + 1] == "sphere:0,-52,26,r=6,name=PCC"
     assert "--subjects" in parts and parts[parts.index("--subjects") + 1] == "sub-033,sub-034"
+    # old flag names must not appear
+    assert "--analysis-type" not in parts
+    assert "--seeds" not in parts
     assert "--output-dir" not in parts
     assert "--log-dir" not in parts
 
 
-@pytest.mark.parametrize("analysis_type", ["local_measures", "seed_connectivity", "network_connectivity"])
-def test_build_subject_level_command_for_supported_subject_analyses(tmp_path, analysis_type):
+def test_build_subject_level_command_network_analysis(tmp_path):
+    """build_subject_level_command for network_connectivity uses --analysis network."""
     manager = ConnectivityWorkflowManager(make_config(tmp_path))
     cmd = manager.build_subject_level_command(
-        analysis_type,
-        {"atlas": "Schaefer400", "seeds": None, "sessions": ["ses-01", "ses-02"]},
+        "network_connectivity",
+        {
+            "pipeline": "fc_gsr",
+            "atlases": ["4S256Parcels", "Glasser"],
+            "measures": "pearson",
+            "bids_root": "/data/bids",
+        },
         ["sub-033"],
     )
     parts = shlex.split(cmd)
 
-    assert parts[parts.index("--analysis-type") + 1] == analysis_type
-    assert parts[parts.index("--atlas") + 1] == "Schaefer400"
-    assert "--seeds" not in parts
-    assert parts[parts.index("--sessions") + 1] == "ses-01,ses-02"
+    assert parts[parts.index("--analysis") + 1] == "network"
+    assert parts[parts.index("--pipeline") + 1] == "fc_gsr"
+    # repeated --atlas flags
+    atlas_indices = [i for i, p in enumerate(parts) if p == "--atlas"]
+    assert len(atlas_indices) == 2
+    assert {parts[i + 1] for i in atlas_indices} == {"4S256Parcels", "Glasser"}
 
 
-def test_build_group_level_command_includes_tfce_options(tmp_path):
+def test_build_subject_level_command_local_measures_raises(tmp_path):
+    """local_measures is no longer submitted; raises ValueError."""
+    manager = ConnectivityWorkflowManager(make_config(tmp_path))
+    with pytest.raises(ValueError, match="local_measures"):
+        manager.build_subject_level_command("local_measures", {}, ["sub-033"])
+
+
+@pytest.mark.parametrize("analysis_type", ["seed_connectivity", "network_connectivity"])
+def test_build_subject_level_command_for_supported_analyses(tmp_path, analysis_type):
+    """seed_connectivity and network_connectivity both produce valid commands."""
+    manager = ConnectivityWorkflowManager(make_config(tmp_path))
+    options = {
+        "pipeline": "fc",
+        "measures": "pearson",
+        "bids_root": "/data",
+    }
+    if analysis_type == "seed_connectivity":
+        options["seeds"] = ["atlas-4S256Parcels:LH_Vis_1"]
+    else:
+        options["atlases"] = ["4S256Parcels"]
+
+    cmd = manager.build_subject_level_command(analysis_type, options, ["sub-033"])
+    parts = shlex.split(cmd)
+
+    expected_flag = "seed" if analysis_type == "seed_connectivity" else "network"
+    assert parts[parts.index("--analysis") + 1] == expected_flag
+    assert parts[parts.index("--pipeline") + 1] == "fc"
+    assert "--analysis-type" not in parts
+
+
+def test_build_group_level_command_voxel_kind(tmp_path):
+    """build_group_level_command with kind=voxel passes --kind voxel and related flags."""
+    manager = ConnectivityWorkflowManager(make_config(tmp_path))
+    cmd = manager.build_group_level_command(
+        {
+            "kind": "voxel",
+            "pipeline": "fc",
+            "measure": "alff",
+            "contrast": "ses-02_vs_ses-01",
+            "method": "tfce",
+            "n_permutations": 5000,
+            "group_csv": "group.csv",
+            "out": "results/group_voxel",
+            "mask": "/data/mask.nii.gz",
+            "test_mode": True,
+        }
+    )
+    parts = shlex.split(cmd)
+
+    assert parts[:2] == ["python", str(tmp_path / "project" / "script" / "hpc_submit_group_level.py")]
+    assert parts[parts.index("--kind") + 1] == "voxel"
+    assert parts[parts.index("--pipeline") + 1] == "fc"
+    assert parts[parts.index("--measure") + 1] == "alff"
+    assert parts[parts.index("--contrast") + 1] == "ses-02_vs_ses-01"
+    assert parts[parts.index("--method") + 1] == "tfce"
+    assert parts[parts.index("--n-permutations") + 1] == "5000"
+    assert parts[parts.index("--mask") + 1] == "/data/mask.nii.gz"
+    assert "--test-mode" in parts
+
+
+def test_build_group_level_command_matrix_kind(tmp_path):
+    """build_group_level_command with kind=matrix passes matrix-specific flags."""
+    manager = ConnectivityWorkflowManager(make_config(tmp_path))
+    cmd = manager.build_group_level_command(
+        {
+            "kind": "matrix",
+            "pipeline": "fc",
+            "matrix_kind": "network",
+            "atlas": "4S256Parcels",
+            "measure": "pearson",
+            "contrast": "ses-02_vs_ses-01",
+            "method": "nbs",
+            "threshold": 3.0,
+            "n_permutations": 1000,
+            "alpha": 0.05,
+            "group_csv": "group.csv",
+            "out": "results/group_matrix",
+        }
+    )
+    parts = shlex.split(cmd)
+
+    assert parts[parts.index("--kind") + 1] == "matrix"
+    assert parts[parts.index("--matrix-kind") + 1] == "network"
+    assert parts[parts.index("--atlas") + 1] == "4S256Parcels"
+    assert parts[parts.index("--method") + 1] == "nbs"
+    assert parts[parts.index("--threshold") + 1] == "3.0"
+    assert parts[parts.index("--alpha") + 1] == "0.05"
+
+
+def test_build_group_level_command_legacy_tfce_options(tmp_path):
+    """Legacy --correction-method / --n-permutations flags still work."""
     manager = ConnectivityWorkflowManager(make_config(tmp_path))
     cmd = manager.build_group_level_command(
         {
@@ -154,8 +260,14 @@ def test_dry_run_submit_returns_record_and_persists_under_bids_parent(tmp_path):
     manager = ConnectivityWorkflowManager(make_config(tmp_path))
 
     submission = manager.submit(
-        "local_measures",
-        {"max_parallel": 10, "memory": None},
+        "seed_connectivity",
+        {
+            "pipeline": "fc",
+            "measures": "pearson",
+            "seeds": ["atlas-4S256Parcels:LH_Vis_1"],
+            "max_parallel": 10,
+            "memory": None,
+        },
         ["sub-033"],
         dry_run=True,
     )

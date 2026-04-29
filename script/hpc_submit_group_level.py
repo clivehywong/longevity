@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -91,8 +92,17 @@ DEFAULT_ATLASES = [
     "Schaefer400",
 ]
 
-# Correction methods
+# Correction methods for voxel stats
 CORRECTION_METHODS = ["grf", "tfce", "fdr"]
+
+# Correction methods for matrix stats
+MATRIX_CORRECTION_METHODS = ["paired_t_fdr", "nbs", "tfnbs"]
+
+# Kind choices for the new --kind selector
+KIND_CHOICES = ["voxel", "matrix"]
+
+# Matrix sub-kind choices (--matrix-kind)
+MATRIX_KIND_CHOICES = ["network", "seed"]
 
 
 class JobStatus(Enum):
@@ -851,6 +861,199 @@ def wait_for_subject_level_jobs(
 
 
 # ============================================================================
+# XCP-D GROUP-LEVEL HELPERS
+# ============================================================================
+
+def build_xcpd_group_command(
+    kind: str,
+    bids_root: str,
+    pipeline: str,
+    measure: str,
+    contrast: str,
+    method: str,
+    group_csv: str,
+    out: str,
+    # voxel-specific
+    mask: Optional[str] = None,
+    n_permutations: Optional[int] = None,
+    # matrix-specific
+    matrix_kind: Optional[str] = None,
+    atlas: Optional[str] = None,
+    seed_id: Optional[str] = None,
+    threshold: Optional[float] = None,
+    alpha: Optional[float] = None,
+) -> str:
+    """Build the shell command that calls the appropriate XCP-D group backend.
+
+    Parameters
+    ----------
+    kind:
+        ``"voxel"`` → ``script/group_voxel_stats_xcpd.py``
+        ``"matrix"`` → ``script/group_matrix_stats.py``
+    bids_root, pipeline:
+        Propagated to ``--bids-root`` / ``--pipeline``.
+    measure:
+        Connectivity measure (e.g. ``pearson``, ``alff``).
+    contrast:
+        Contrast label (e.g. ``ses-02_vs_ses-01``).
+    method:
+        Statistical method:
+        - voxel: ``grf | tfce | fdr``
+        - matrix: ``paired_t_fdr | nbs | tfnbs``
+    group_csv:
+        Path to ``group.csv``.
+    out:
+        Output directory/file path.
+    mask:
+        (voxel only) Brain-mask NIfTI path.
+    n_permutations:
+        Number of permutations (both backends).
+    matrix_kind:
+        (matrix only) ``"network"`` or ``"seed"`` — forwarded as ``--kind`` to
+        ``group_matrix_stats.py``.
+    atlas:
+        (matrix only) Atlas name (``--atlas``).
+    seed_id:
+        (matrix only) Seed identifier (``--seed-id``).
+    threshold:
+        (matrix only) NBS/TFNBS edge threshold (``--threshold``).
+    alpha:
+        (matrix only) Significance level (``--alpha``).
+
+    Returns
+    -------
+    str
+        Multi-word shell command string (not yet submitted).
+    """
+    if kind not in KIND_CHOICES:
+        raise ValueError(f"kind must be one of {KIND_CHOICES}, got {kind!r}")
+
+    parts: List[str] = ["python3"]
+
+    if kind == "voxel":
+        parts.append("script/group_voxel_stats_xcpd.py")
+        parts += ["--bids-root", shlex.quote(bids_root)]
+        parts += ["--pipeline", shlex.quote(pipeline)]
+        parts += ["--measure", shlex.quote(measure)]
+        parts += ["--contrast", shlex.quote(contrast)]
+        parts += ["--method", shlex.quote(method)]
+        parts += ["--group-csv", shlex.quote(group_csv)]
+        parts += ["--out", shlex.quote(out)]
+        if mask:
+            parts += ["--mask", shlex.quote(mask)]
+        if n_permutations is not None:
+            parts += ["--n-permutations", str(n_permutations)]
+
+    else:  # matrix
+        parts.append("script/group_matrix_stats.py")
+        parts += ["--bids-root", shlex.quote(bids_root)]
+        parts += ["--pipeline", shlex.quote(pipeline)]
+        if matrix_kind:
+            parts += ["--kind", shlex.quote(matrix_kind)]
+        if atlas:
+            parts += ["--atlas", shlex.quote(atlas)]
+        if seed_id:
+            parts += ["--seed-id", shlex.quote(seed_id)]
+        parts += ["--measure", shlex.quote(measure)]
+        parts += ["--contrast", shlex.quote(contrast)]
+        parts += ["--method", shlex.quote(method)]
+        if threshold is not None:
+            parts += ["--threshold", str(threshold)]
+        if n_permutations is not None:
+            parts += ["--n-permutations", str(n_permutations)]
+        if alpha is not None:
+            parts += ["--alpha", str(alpha)]
+        parts += ["--group-csv", shlex.quote(group_csv)]
+        parts += ["--out", shlex.quote(out)]
+
+    return " ".join(parts)
+
+
+def generate_xcpd_group_script(
+    kind: str,
+    bids_root: str,
+    pipeline: str,
+    measure: str,
+    contrast: str,
+    method: str,
+    group_csv: str,
+    out: str,
+    log_dir: str = DEFAULT_LOGS_DIR,
+    subject_job_id: Optional[str] = None,
+    time_limit: Optional[str] = None,
+    mem: Optional[str] = None,
+    cpus: Optional[int] = None,
+    partition: Optional[str] = None,
+    # voxel-specific
+    mask: Optional[str] = None,
+    n_permutations: Optional[int] = None,
+    # matrix-specific
+    matrix_kind: Optional[str] = None,
+    atlas: Optional[str] = None,
+    seed_id: Optional[str] = None,
+    threshold: Optional[float] = None,
+    alpha: Optional[float] = None,
+) -> str:
+    """Generate a single SLURM job script for XCP-D group-level analysis.
+
+    The script is a non-array job that calls either ``group_voxel_stats_xcpd.py``
+    (kind=voxel) or ``group_matrix_stats.py`` (kind=matrix).
+    """
+    backend_cmd = build_xcpd_group_command(
+        kind=kind,
+        bids_root=bids_root,
+        pipeline=pipeline,
+        measure=measure,
+        contrast=contrast,
+        method=method,
+        group_csv=group_csv,
+        out=out,
+        mask=mask,
+        n_permutations=n_permutations,
+        matrix_kind=matrix_kind,
+        atlas=atlas,
+        seed_id=seed_id,
+        threshold=threshold,
+        alpha=alpha,
+    )
+
+    dependency_line = (
+        f"#SBATCH --dependency=afterok:{subject_job_id}\n"
+        if subject_job_id
+        else ""
+    )
+    time_line = f"#SBATCH --time={time_limit}\n" if time_limit else ""
+    mem_line = f"#SBATCH --mem={mem}\n" if mem else ""
+    cpus_line = f"#SBATCH --cpus-per-task={cpus}\n" if cpus else ""
+    part_line = f"#SBATCH --partition={partition}\n" if partition else ""
+
+    script = f"""#!/bin/bash
+# SLURM XCP-D Group-Level {kind.capitalize()} Statistics Job
+# Generated: {datetime.now().isoformat()}
+# Kind: {kind}  Pipeline: {pipeline}  Measure: {measure}  Method: {method}
+
+#SBATCH --job-name=group_{kind}_{pipeline}
+{dependency_line}{time_line}{mem_line}{cpus_line}{part_line}#SBATCH --output={log_dir}/group_{kind}_%j.out
+#SBATCH --error={log_dir}/group_{kind}_%j.err
+
+set -euo pipefail
+
+log_info() {{ echo "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $*"; }}
+log_error() {{ echo "[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $*"; }}
+
+log_info "Starting group-level {kind} analysis (pipeline={pipeline}, measure={measure}, method={method})"
+
+if {backend_cmd}; then
+    log_info "SUCCESS: group {kind} analysis completed"
+else
+    log_error "FAILED: group {kind} analysis"
+    exit 1
+fi
+"""
+    return script
+
+
+# ============================================================================
 # CLI ENTRY POINT
 # ============================================================================
 
@@ -862,96 +1065,194 @@ def _csv_list(value: Optional[str]) -> Optional[List[str]]:
 
 
 def main():
-    """Command-line interface"""
+    """Command-line interface.
+
+    When ``--kind voxel`` or ``--kind matrix`` is given the script uses the
+    XCP-D-driven backends.  Without ``--kind`` it falls back to the legacy
+    template-based flow (requires ``--subject-job-id``).
+    """
     parser = argparse.ArgumentParser(
         description="Submit group-level analysis jobs with SLURM parallelization"
     )
-    
+
+    # ---- XCP-D backend routing (new) ----
     parser.add_argument(
-        "--subject-job-id",
-        required=True,
-        help="SLURM job ID from subject-level submission (for dependency chaining)"
-    )
-    
-    parser.add_argument(
-        "--config",
+        "--kind",
+        choices=KIND_CHOICES,
         default=None,
-        help="Path to connectivity configuration YAML"
+        help=(
+            "Backend selector: 'voxel' → group_voxel_stats_xcpd.py; "
+            "'matrix' → group_matrix_stats.py.  "
+            "When omitted the legacy template-based flow is used."
+        ),
     )
 
+    # ---- Shared XCP-D arguments ----
+    parser.add_argument("--bids-root", default=".", help="BIDS project root.")
     parser.add_argument(
-        "--analysis-source",
-        choices=["local", "seed", "network", "local_measures", "seed_based", "network_connectivity"],
+        "--pipeline",
+        choices=["fc", "fc_gsr", "ec"],
+        default="fc",
+        help="XCP-D pipeline name (default: fc).",
+    )
+    parser.add_argument("--measure", default=None, help="Connectivity measure (e.g. pearson, alff).")
+    parser.add_argument("--contrast", default=None, help="Contrast label (e.g. ses-02_vs_ses-01).")
+    parser.add_argument("--method", default=None,
+                        help="Statistical method. Voxel: grf|tfce|fdr. Matrix: paired_t_fdr|nbs|tfnbs.")
+    parser.add_argument("--group-csv", default=None, help="Group definition CSV (required by XCP-D backends).")
+    parser.add_argument("--out", default=None, help="Output directory for XCP-D backend results.")
+
+    # ---- Voxel-specific ----
+    parser.add_argument("--mask", default=None, help="Brain mask NIfTI path (voxel stats).")
+
+    # ---- Matrix-specific ----
+    parser.add_argument(
+        "--matrix-kind",
+        choices=MATRIX_KIND_CHOICES,
         default=None,
-        help="Restrict group analysis to one upstream source"
+        help="Sub-kind for matrix stats: 'network' or 'seed'. Forwarded as --kind to group_matrix_stats.py.",
     )
-    parser.add_argument("--measures", default=None, help="Comma-separated local measures")
-    parser.add_argument("--atlas", default=None, help="Atlas for seed or network analysis")
-    parser.add_argument("--seeds", default=None, help="Comma-separated seed IDs")
-    parser.add_argument("--network-grouping", default=None, help="Network grouping: none, yeo7, or yeo17")
-    parser.add_argument("--model-formula", default=None, help="LME model formula")
-    parser.add_argument("--covariates", default=None, help="Comma-separated covariate columns")
-    
-    parser.add_argument(
-        "--correction-method",
-        choices=CORRECTION_METHODS,
-        default="grf",
-        help="Multiple comparison correction method"
-    )
-    parser.add_argument("--cluster-forming-p", type=float, default=None, help="GRF cluster-forming p threshold")
-    parser.add_argument("--cluster-p", type=float, default=None, help="GRF cluster p threshold")
-    
+    parser.add_argument("--atlas", default=None, help="Atlas name for matrix stats.")
+    parser.add_argument("--seed-id", default=None, help="Seed identifier for matrix stats.")
+    parser.add_argument("--threshold", type=float, default=None, help="Edge threshold for NBS/TFNBS.")
+    parser.add_argument("--alpha", type=float, default=None, help="Significance level for matrix stats.")
+
+    # ---- Common permutation / SLURM args ----
     parser.add_argument(
         "--n-permutations",
         type=int,
         default=1000,
-        help="Number of permutations for permutation testing"
+        help="Number of permutations for permutation testing.",
     )
-    parser.add_argument("--q-threshold", type=float, default=None, help="FDR q threshold")
-    parser.add_argument("--mask", default=None, help="Mask selection")
-    parser.add_argument("--custom-mask", default=None, help="Custom mask path")
-    parser.add_argument("--min-subjects-pct", type=float, default=None, help="Minimum ready subjects percentage")
-    parser.add_argument("--manifest", default=None, help="Subject-level manifest path")
-    parser.add_argument("--group-csv", default=None, help="Group definition CSV")
-    parser.add_argument("--time", dest="time_limit", default=None, help="Requested SLURM wall time")
-    parser.add_argument("--memory", default=None, help="Requested SLURM memory")
-    parser.add_argument("--partition", default=None, help="Requested SLURM partition")
-    parser.add_argument("--cpus", type=int, default=None, help="Requested CPUs per task")
-    parser.add_argument("--max-parallel", type=int, default=10, help="Maximum concurrent array tasks")
-    
+    parser.add_argument("--time", dest="time_limit", default=None, help="Requested SLURM wall time.")
+    parser.add_argument("--memory", default=None, help="Requested SLURM memory.")
+    parser.add_argument("--partition", default=None, help="Requested SLURM partition.")
+    parser.add_argument("--cpus", type=int, default=None, help="Requested CPUs per task.")
+
+    # ---- Legacy / shared arguments ----
+    parser.add_argument(
+        "--subject-job-id",
+        default=None,
+        help="SLURM job ID from subject-level submission (dependency chaining; required in legacy flow).",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to connectivity configuration YAML (legacy flow).",
+    )
+    parser.add_argument(
+        "--analysis-source",
+        choices=["local", "seed", "network", "local_measures", "seed_based", "network_connectivity"],
+        default=None,
+        help="Restrict group analysis to one upstream source (legacy flow).",
+    )
+    parser.add_argument("--measures", default=None, help="Comma-separated local measures (legacy).")
+    parser.add_argument("--seeds", default=None, help="Comma-separated seed IDs (legacy).")
+    parser.add_argument("--network-grouping", default=None, help="Network grouping: none, yeo7, or yeo17 (legacy).")
+    parser.add_argument("--model-formula", default=None, help="LME model formula (legacy).")
+    parser.add_argument("--covariates", default=None, help="Comma-separated covariate columns (legacy).")
+    parser.add_argument(
+        "--correction-method",
+        choices=CORRECTION_METHODS,
+        default="grf",
+        help="Multiple comparison correction method (legacy flow).",
+    )
+    parser.add_argument("--cluster-forming-p", type=float, default=None, help="GRF cluster-forming p threshold.")
+    parser.add_argument("--cluster-p", type=float, default=None, help="GRF cluster p threshold.")
+    parser.add_argument("--q-threshold", type=float, default=None, help="FDR q threshold.")
+    parser.add_argument("--custom-mask", default=None, help="Custom mask path (legacy).")
+    parser.add_argument("--min-subjects-pct", type=float, default=None, help="Minimum ready subjects percentage.")
+    parser.add_argument("--manifest", default=None, help="Subject-level manifest path.")
+    parser.add_argument("--max-parallel", type=int, default=10, help="Maximum concurrent array tasks.")
     parser.add_argument(
         "--test-mode",
         action="store_true",
-        help="Test mode: submit 1 job per analysis type"
+        help="Test mode: submit 1 job per analysis type.",
     )
-    
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Dry run: show what would be submitted without actually submitting"
+        help="Dry run: show what would be submitted without actually submitting.",
     )
-    
     parser.add_argument(
         "--log-dir",
         default=DEFAULT_LOGS_DIR,
-        help="Directory for logs"
+        help="Directory for logs.",
     )
-    
     parser.add_argument(
         "--project-dir",
         default=DEFAULT_PROJECT_DIR,
-        help="Local project directory"
+        help="Local project directory.",
     )
-    
     parser.add_argument(
         "--remote-project-dir",
         default=DEFAULT_REMOTE_PROJECT_DIR,
-        help="Remote project directory on HPC"
+        help="Remote project directory on HPC.",
     )
-    
+
     args = parser.parse_args()
-    
-    # Submit jobs
+
+    # ------------------------------------------------------------------ #
+    # XCP-D-driven path (--kind voxel | matrix)                           #
+    # ------------------------------------------------------------------ #
+    if args.kind is not None:
+        try:
+            script = generate_xcpd_group_script(
+                kind=args.kind,
+                bids_root=args.bids_root,
+                pipeline=args.pipeline,
+                measure=args.measure or "",
+                contrast=args.contrast or "",
+                method=args.method or ("grf" if args.kind == "voxel" else "paired_t_fdr"),
+                group_csv=args.group_csv or "group.csv",
+                out=args.out or f"results/group_{args.kind}",
+                log_dir=args.log_dir,
+                subject_job_id=args.subject_job_id,
+                time_limit=args.time_limit,
+                mem=args.memory,
+                cpus=args.cpus,
+                partition=args.partition,
+                mask=args.mask,
+                n_permutations=args.n_permutations if args.n_permutations != 1000 else None,
+                matrix_kind=args.matrix_kind,
+                atlas=args.atlas,
+                seed_id=args.seed_id,
+                threshold=args.threshold,
+                alpha=args.alpha,
+            )
+
+            if args.dry_run:
+                print("\n" + "=" * 70)
+                print(f"DRY RUN: SLURM Group {args.kind.capitalize()} Script")
+                print("=" * 70 + "\n")
+                print(script)
+                print("=" * 70 + "\n")
+                sys.exit(0)
+
+            log_path = Path(args.log_dir)
+            log_path.mkdir(parents=True, exist_ok=True)
+            script_file = log_path / (
+                f"xcpd_group_{args.kind}_{args.pipeline}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sh"
+            )
+            script_file.write_text(script)
+            script_file.chmod(0o755)
+
+            sbatch_cmd = ["sbatch", str(script_file)]
+            result = subprocess.run(sbatch_cmd, capture_output=True, text=True, timeout=30, check=True)
+            job_id = result.stdout.strip().split()[-1]
+            print(f"Submitted XCP-D group {args.kind} job: {job_id}")
+            sys.exit(0)
+
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    # ------------------------------------------------------------------ #
+    # Legacy template-based path (no --kind)                              #
+    # ------------------------------------------------------------------ #
+    if not args.subject_job_id:
+        parser.error("--subject-job-id is required in the legacy flow (or use --kind to select XCP-D backend)")
+
     job_id = submit_group_level_jobs(
         subject_job_id=args.subject_job_id,
         config_file=args.config,
@@ -983,7 +1284,7 @@ def main():
         project_dir=args.project_dir,
         remote_project_dir=args.remote_project_dir,
     )
-    
+
     sys.exit(0 if job_id else 1)
 
 
