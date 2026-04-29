@@ -45,6 +45,10 @@ The sidebar has two levels:
 | fMRIPrep QC Reports | Inline HTML viewer for fMRIPrep reports with dropdown + prev/next navigation |
 | XCP-D Pipeline | FD gating, XCP-D runs, post-QC, per-subject status |
 | XCP-D QC Reports | QC metrics table + inline HTML viewer for per-session XCP-D reports (FC / FC+GSR / EC tabs) |
+| Subject Level → Submit Local Measures | Submit fALFF / ALFF / ReHo HPC jobs per subject/session |
+| Subject Level → Submit Seed Connectivity | Submit seed-based correlation maps; cascading Atlas → Seed multi-select |
+| Subject Level → Submit Network Connectivity | Submit parcel-timeseries extraction and network correlation |
+| Group Level → Submit Group Stats | Submit second-level mixed-effects analysis (GRF / TFCE / FDR) with manifest preflight |
 
 ## Subject Data page
 

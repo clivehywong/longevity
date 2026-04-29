@@ -57,6 +57,28 @@ bash script/master_full_connectivity_workflow.sh
 | Group analysis | `results/group_analysis/` |
 | HTML report | `results/connectivity_report.html` |
 
+## Submit from the app
+
+The NeuConn app exposes the four main connectivity stages as interactive submit pages under **fMRI Analysis**:
+
+### Subject Level
+
+| Page | What it submits |
+|---|---|
+| Submit Local Measures | fALFF, ALFF, ReHo — choose subjects/sessions, TR, bandpass params |
+| Submit Seed Connectivity | Seed-based correlation maps — cascading **Atlas → Seed** multi-select with priority (MNI sphere), custom (ROI config), and atlas-parcel seed sources |
+| Submit Network Connectivity | Parcel timeseries extraction (DiFuMo256, Schaefer400, etc.) |
+
+### Group Level
+
+| Page | What it submits |
+|---|---|
+| Submit Group Stats | Second-level mixed-effects analysis — choose correction method (GRF cluster-based, TFCE permutation, FDR), set formula and thresholds; runs a manifest preflight before submission |
+
+Submission state (job IDs, status, options) is persisted at `<bids_parent>/.neuconn/connectivity_workflow_state.json` by `ConnectivityWorkflowManager`.
+
+See [`neuconn_app/pages_connectivity_submit/README.md`](../../neuconn_app/pages_connectivity_submit/README.md) for per-page option details.
+
 ## If you need narrower workflows
 
 Use the individual scripts behind the master workflow:

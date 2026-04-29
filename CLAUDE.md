@@ -38,6 +38,19 @@ longevity/
 - `*.out` — Standard output files (e.g., SLURM logs)
 - `*.pid` — Process ID files (e.g., `pipeline_v2_monitor.pid`)
 
+### App page session-state conventions
+
+Connectivity submit pages use per-page `st.session_state` key prefixes to avoid collisions:
+
+| Page | Prefix |
+|---|---|
+| Submit Local Measures | `submit_local_` |
+| Submit Seed Connectivity | `submit_seed_` |
+| Submit Network Connectivity | `submit_network_` |
+| Submit Group Stats | `submit_group_` |
+
+Always use these prefixes when adding new state keys in `pages_connectivity_submit/` pages.
+
 ## Current Status
 
 - **BIDS**: 44 subjects, 40 longitudinal (2 sessions each)

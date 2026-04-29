@@ -22,8 +22,8 @@ The app uses a custom navigation model rather than relying on Streamlit's defaul
 | `pages_fmri/` | fMRI preprocessing and analysis pages |
 | `pages_dmri/` | dMRI pages |
 | `pages_settings/` | settings UI |
+| `pages_connectivity_submit/` | Connectivity HPC submit pages (local measures, seed, network, group stats) |
 | `utils/` | shared behavior and state helpers |
-| `templates/` | SLURM Jinja2 templates (`fmriprep_slurm.j2`, `xcpd_slurm.j2`) |
 | `tests/` | Playwright smoke tests (`test_redesign.py`) |
 
 ### Key pages
@@ -34,7 +34,22 @@ The app uses a custom navigation model rather than relying on Streamlit's defaul
 | `pages_fmri/preprocessing/00_fmri_dashboard.py` | fMRI Dashboard — per-subject preprocessing status table |
 | `pages_fmri/preprocessing/06_xcpd_pipeline.py` | XCP-D Pipeline — FD gating, runs, QC, per-subject status |
 
-## Config model
+### Connectivity submit pages (`pages_connectivity_submit/`)
+
+Four submit pages under **fMRI Analysis** expose the subject-level and group-level connectivity stages:
+
+| File | Page | Session-state prefix |
+|---|---|---|
+| `01_submit_local_measures.py` | Submit Local Measures | `submit_local_` |
+| `02_submit_seed_connectivity.py` | Submit Seed Connectivity | `submit_seed_` |
+| `03_submit_network_connectivity.py` | Submit Network Connectivity | `submit_network_` |
+| `04_submit_group_stats.py` | Submit Group Stats | `submit_group_` |
+
+`02_submit_seed_connectivity.py` implements a cascading **Atlas → Seed** multi-select: selecting an atlas populates a filtered seed list drawn from three sources (priority MNI-sphere seeds, custom ROI-config entries, atlas-parcel definitions). Changing the atlas resets the selection.
+
+`04_submit_group_stats.py` runs a manifest preflight (reading `.manifest.json` from the subject-level output) to verify which subjects have completed outputs before building the HPC job.
+
+
 
 - Defaults start in `config/default_config.yaml`.
 - User/project overrides come from `~/neuconn_projects/<project>.yaml`.
@@ -250,7 +265,8 @@ The "Software / Images" tab was separated from HPC Settings so local execution p
 | `utils/xcpd.py` | XCP-D local and HPC execution; SLURM script generation; status file writing |
 | `utils/xcpd_atlases.py` | Atlas catalog (16 XCP-D built-in + custom project atlases); CLI arg builder |
 | `utils/xcpd_qc.py` | XCP-D QC rendering helpers; `get_xcpd_subject_status()` |
-| `utils/qc_database.py` | QC persistence helpers |
+| `utils/seed_catalog.py` | Unified `SeedCatalog` merging priority seeds (`.github/connectivity_config.yaml`), custom ROIs (`roi_config.json`), and atlas parcels; `Seed` dataclass |
+| `utils/connectivity_workflow.py` | `ConnectivityWorkflowManager` — submission tracking and HPC orchestration for all four connectivity stages; state at `<bids_parent>/.neuconn/connectivity_workflow_state.json` |
 | `utils/image_cache.py` | cached QC-image lifecycle |
 | `utils/qa_image_generator.py` | image generation used by both app and CLI-style workflows |
 | `utils/pipeline_state.py` | pipeline gate summaries and state loading |

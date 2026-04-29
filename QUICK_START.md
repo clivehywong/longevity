@@ -60,7 +60,25 @@ Then read:
 - [`docs/user/workflows/neuconn-app.md`](docs/user/workflows/neuconn-app.md)
 - [`docs/developer/architecture/neuconn-app-architecture.md`](docs/developer/architecture/neuconn-app-architecture.md)
 
-### 5. Run XCP-D post-processing pipeline
+### 5. Submit connectivity jobs from the UI
+
+After XCP-D is complete, use the **fMRI Analysis → Subject Level** and **Group Level** menus in the NeuConn app to submit connectivity jobs directly without editing scripts:
+
+| App page | Analysis |
+|---|---|
+| Subject Level → Submit Local Measures | fALFF / ALFF / ReHo per subject/session |
+| Subject Level → Submit Seed Connectivity | Seed-based maps — cascading Atlas → Seed multi-select (priority, custom, atlas-parcel sources) |
+| Subject Level → Submit Network Connectivity | Network-parcel timeseries extraction |
+| Group Level → Submit Group Stats | GRF / TFCE / FDR second-level stats with manifest preflight |
+
+All four pages use `ConnectivityWorkflowManager` to track submissions; state is persisted at `<bids_parent>/.neuconn/connectivity_workflow_state.json`.
+
+Then read:
+
+- [`docs/user/workflows/connectivity-analysis.md#submit-from-the-app`](docs/user/workflows/connectivity-analysis.md)
+- [`neuconn_app/pages_connectivity_submit/README.md`](neuconn_app/pages_connectivity_submit/README.md)
+
+### 6. Run XCP-D post-processing pipeline
 
 Requires the XCP-D Singularity image and FreeSurfer license — see the prerequisites section in the app workflow doc.
 
