@@ -464,8 +464,28 @@ class SlurmSubmitter:
 def submit_group_level_jobs(
     subject_job_id: str,
     config_file: Optional[str] = None,
+    analysis_source: Optional[str] = None,
+    measures: Optional[List[str]] = None,
+    atlas: Optional[str] = None,
+    seeds: Optional[List[str]] = None,
+    network_grouping: Optional[str] = None,
+    model_formula: Optional[str] = None,
+    covariates: Optional[List[str]] = None,
     correction_method: str = "grf",
+    cluster_forming_p: Optional[float] = None,
+    cluster_p: Optional[float] = None,
     n_permutations: int = 1000,
+    q_threshold: Optional[float] = None,
+    mask: Optional[str] = None,
+    custom_mask: Optional[str] = None,
+    min_subjects_pct: Optional[float] = None,
+    manifest_path: Optional[str] = None,
+    group_csv: Optional[str] = None,
+    time_limit: Optional[str] = None,
+    memory: Optional[str] = None,
+    partition: Optional[str] = None,
+    cpus: Optional[int] = None,
+    max_parallel: int = 10,
     test_mode: bool = False,
     dry_run: bool = False,
     log_dir: str = DEFAULT_LOGS_DIR,
@@ -501,6 +521,19 @@ def submit_group_level_jobs(
     logger.info(f"Subject-level job ID: {subject_job_id}")
     logger.info(f"Correction method: {correction_method}")
     logger.info(f"N permutations: {n_permutations}")
+    logger.info(f"Analysis source: {analysis_source or 'config/default'}")
+    logger.info(f"Measures: {measures or 'config/default'}")
+    logger.info(f"Atlas: {atlas or 'config/default'}")
+    logger.info(f"Seeds: {seeds or 'config/default'}")
+    logger.info(f"Network grouping: {network_grouping or 'none'}")
+    logger.info(f"Model formula: {model_formula or 'default downstream formula'}")
+    logger.info(f"Covariates: {covariates or 'auto/default'}")
+    logger.info(f"Mask: {mask or 'default'}")
+    logger.info(f"Custom mask: {custom_mask or 'N/A'}")
+    logger.info(f"Minimum subjects: {min_subjects_pct or 'default'}%")
+    logger.info(f"Manifest: {manifest_path or 'default'}")
+    logger.info(f"Group CSV: {group_csv or 'default'}")
+    logger.info(f"SLURM resources: time={time_limit or 'template'}, memory={memory or 'template'}, partition={partition or 'template'}, cpus={cpus or 'template'}, max_parallel={max_parallel}")
     logger.info(f"Test mode: {test_mode}")
     logger.info(f"Dry run: {dry_run}")
     logger.info("")
@@ -525,20 +558,30 @@ def submit_group_level_jobs(
     
     # Get analysis parameters from config or use defaults
     analysis_types = config.get("analyses", {}).get("types", ANALYSIS_TYPES)
-    seeds = config.get("seeds", DEFAULT_SEEDS)
-    atlases = config.get("atlases", DEFAULT_ATLASES)
+    source_map = {
+        "local": "local_measures",
+        "seed": "seed_based",
+        "network": "network_connectivity",
+    }
+    if analysis_source:
+        analysis_types = [source_map.get(analysis_source, analysis_source)]
+
+    selected_seeds = seeds or config.get("seeds", DEFAULT_SEEDS)
+    if isinstance(selected_seeds, dict):
+        selected_seeds = list(selected_seeds.keys())
+    atlases = [atlas] if atlas else config.get("atlases", DEFAULT_ATLASES)
     
     if test_mode:
-        seeds = seeds[:1]
+        selected_seeds = selected_seeds[:1]
         atlases = atlases[:1]
     
     logger.info(f"Analysis types: {analysis_types}")
-    logger.info(f"Seeds: {len(seeds)}")
+    logger.info(f"Seeds: {len(selected_seeds)}")
     logger.info(f"Atlases: {atlases}")
     logger.info("")
     
     # Build job array mapper
-    mapper = JobArrayMapper(analysis_types, seeds, atlases, logger)
+    mapper = JobArrayMapper(analysis_types, selected_seeds, atlases, logger)
     mapper.print_summary()
     logger.info("")
     
@@ -576,7 +619,7 @@ def submit_group_level_jobs(
         job_name=job_name,
         subject_job_id=subject_job_id,
         num_jobs=mapper.total_jobs,
-        max_parallel=10,
+        max_parallel=max_parallel,
         dry_run=dry_run,
     )
     
@@ -595,8 +638,16 @@ def submit_group_level_jobs(
         "test_mode": test_mode,
         "dry_run": dry_run,
         "analysis_types": analysis_types,
-        "num_seeds": len(seeds),
+        "num_seeds": len(selected_seeds),
         "num_atlases": len(atlases),
+        "measures": measures or [],
+        "atlas": atlas,
+        "seeds": selected_seeds,
+        "network_grouping": network_grouping,
+        "model_formula": model_formula,
+        "covariates": covariates or [],
+        "mask": mask,
+        "min_subjects_pct": min_subjects_pct,
     }
     
     log_file = project_path / log_dir / "group_level_submissions.jsonl"
@@ -803,6 +854,13 @@ def wait_for_subject_level_jobs(
 # CLI ENTRY POINT
 # ============================================================================
 
+def _csv_list(value: Optional[str]) -> Optional[List[str]]:
+    """Parse comma-separated CLI values into a list."""
+    if value is None:
+        return None
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def main():
     """Command-line interface"""
     parser = argparse.ArgumentParser(
@@ -820,6 +878,19 @@ def main():
         default=None,
         help="Path to connectivity configuration YAML"
     )
+
+    parser.add_argument(
+        "--analysis-source",
+        choices=["local", "seed", "network", "local_measures", "seed_based", "network_connectivity"],
+        default=None,
+        help="Restrict group analysis to one upstream source"
+    )
+    parser.add_argument("--measures", default=None, help="Comma-separated local measures")
+    parser.add_argument("--atlas", default=None, help="Atlas for seed or network analysis")
+    parser.add_argument("--seeds", default=None, help="Comma-separated seed IDs")
+    parser.add_argument("--network-grouping", default=None, help="Network grouping: none, yeo7, or yeo17")
+    parser.add_argument("--model-formula", default=None, help="LME model formula")
+    parser.add_argument("--covariates", default=None, help="Comma-separated covariate columns")
     
     parser.add_argument(
         "--correction-method",
@@ -827,6 +898,8 @@ def main():
         default="grf",
         help="Multiple comparison correction method"
     )
+    parser.add_argument("--cluster-forming-p", type=float, default=None, help="GRF cluster-forming p threshold")
+    parser.add_argument("--cluster-p", type=float, default=None, help="GRF cluster p threshold")
     
     parser.add_argument(
         "--n-permutations",
@@ -834,6 +907,17 @@ def main():
         default=1000,
         help="Number of permutations for permutation testing"
     )
+    parser.add_argument("--q-threshold", type=float, default=None, help="FDR q threshold")
+    parser.add_argument("--mask", default=None, help="Mask selection")
+    parser.add_argument("--custom-mask", default=None, help="Custom mask path")
+    parser.add_argument("--min-subjects-pct", type=float, default=None, help="Minimum ready subjects percentage")
+    parser.add_argument("--manifest", default=None, help="Subject-level manifest path")
+    parser.add_argument("--group-csv", default=None, help="Group definition CSV")
+    parser.add_argument("--time", dest="time_limit", default=None, help="Requested SLURM wall time")
+    parser.add_argument("--memory", default=None, help="Requested SLURM memory")
+    parser.add_argument("--partition", default=None, help="Requested SLURM partition")
+    parser.add_argument("--cpus", type=int, default=None, help="Requested CPUs per task")
+    parser.add_argument("--max-parallel", type=int, default=10, help="Maximum concurrent array tasks")
     
     parser.add_argument(
         "--test-mode",
@@ -871,8 +955,28 @@ def main():
     job_id = submit_group_level_jobs(
         subject_job_id=args.subject_job_id,
         config_file=args.config,
+        analysis_source=args.analysis_source,
+        measures=_csv_list(args.measures),
+        atlas=args.atlas,
+        seeds=_csv_list(args.seeds),
+        network_grouping=args.network_grouping,
+        model_formula=args.model_formula,
+        covariates=_csv_list(args.covariates),
         correction_method=args.correction_method,
+        cluster_forming_p=args.cluster_forming_p,
+        cluster_p=args.cluster_p,
         n_permutations=args.n_permutations,
+        q_threshold=args.q_threshold,
+        mask=args.mask,
+        custom_mask=args.custom_mask,
+        min_subjects_pct=args.min_subjects_pct,
+        manifest_path=args.manifest,
+        group_csv=args.group_csv,
+        time_limit=args.time_limit,
+        memory=args.memory,
+        partition=args.partition,
+        cpus=args.cpus,
+        max_parallel=args.max_parallel,
         test_mode=args.test_mode,
         dry_run=args.dry_run,
         log_dir=args.log_dir,
