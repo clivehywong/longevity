@@ -220,4 +220,10 @@ class XcpdDiscovery:
                         "atlases_present": out.list_atlases(),
                     }
                 )
-        return pd.DataFrame(records).set_index(["subject", "session"])
+        df = pd.DataFrame(records)
+        if df.empty:
+            return pd.DataFrame(
+                columns=["subject", "session", "alff_map", "reho_map",
+                         "denoised", "motion_tsv", "atlases_present"]
+            ).set_index(["subject", "session"])
+        return df.set_index(["subject", "session"])
