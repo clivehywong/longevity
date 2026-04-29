@@ -314,20 +314,37 @@ def render_fmri_analysis():
         # Level 3: Analysis type
         analysis = st.sidebar.selectbox(
             "Analysis:",
-            ["Local Measures", "Seed Connectivity", "Network Connectivity", "Effective Connectivity"]
+            [
+                "📊 Local Measures Viewer",
+                "🎯 Seed Connectivity Viewer",
+                "🕸️ Network Viewer",
+                "Effective Connectivity",
+                "📤 Submit Local Measures",
+                "📤 Submit Seed Connectivity",
+                "📤 Submit Network Connectivity",
+            ]
         )
 
         import importlib.util
 
-        if analysis == "Local Measures":
+        if analysis == "📊 Local Measures Viewer":
             page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "01_local_measures.py"
             module_name = "fmri_subject_local_measures"
-        elif analysis == "Seed Connectivity":
+        elif analysis == "🎯 Seed Connectivity Viewer":
             page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "02_seed_connectivity.py"
             module_name = "fmri_subject_seed_connectivity"
-        elif analysis == "Network Connectivity":
+        elif analysis == "🕸️ Network Viewer":
             page_path = Path(__file__).parent / "pages_connectivity" / "network_connectivity.py"
             module_name = "network_connectivity"
+        elif analysis == "📤 Submit Local Measures":
+            page_path = Path(__file__).parent / "pages_connectivity_submit" / "01_submit_local_measures.py"
+            module_name = "conn_submit_local_measures"
+        elif analysis == "📤 Submit Seed Connectivity":
+            page_path = Path(__file__).parent / "pages_connectivity_submit" / "02_submit_seed_connectivity.py"
+            module_name = "conn_submit_seed_connectivity"
+        elif analysis == "📤 Submit Network Connectivity":
+            page_path = Path(__file__).parent / "pages_connectivity_submit" / "03_submit_network_connectivity.py"
+            module_name = "conn_submit_network_connectivity"
         else:
             page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "03_effective_connectivity.py"
             module_name = "fmri_subject_effective_connectivity"
@@ -340,22 +357,31 @@ def render_fmri_analysis():
     elif stage == "👥 Group-Level":
         qc_approved = bool(state.get("approvals", {}).get("qc_gate", {}).get("approved"))
         subject_ready = state.get("steps", {}).get("subject_level", {}).get("status") == "completed"
-        if not qc_approved:
-            st.warning("Group-level analysis is locked until the Post-XCP-D QC gate is approved.")
-            return
-        if not subject_ready:
-            st.warning("Group-level analysis is locked until subject-level outputs are generated.")
-            return
 
-        # Level 3: Analysis type
+        # Level 3: Analysis type — submit page is always accessible; viewer pages are gate-locked
         analysis = st.sidebar.selectbox(
             "Analysis:",
-            ["Voxelwise", "ROI Analysis", "Graph Theory", "Visualization"]
+            ["📤 Submit Group Statistics", "Voxelwise", "ROI Analysis", "Graph Theory", "Visualization"]
         )
 
-        # All group-level pages are stubs
-        st.title(f"👥 fMRI Group-Level - {analysis}")
-        st.info("🚧 Implementation coming in Phases 8-11")
+        import importlib.util
+
+        if analysis == "📤 Submit Group Statistics":
+            page_path = Path(__file__).parent / "pages_connectivity_submit" / "04_submit_group_stats.py"
+            module_name = "conn_submit_group_stats"
+            spec = importlib.util.spec_from_file_location(module_name, page_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.render()
+        else:
+            if not qc_approved:
+                st.warning("Group-level analysis is locked until the Post-XCP-D QC gate is approved.")
+                return
+            if not subject_ready:
+                st.warning("Group-level analysis is locked until subject-level outputs are generated.")
+                return
+            st.title(f"👥 fMRI Group-Level - {analysis}")
+            st.info("🚧 Implementation coming in Phases 8-11")
 
 
 def render_dmri_analysis():
