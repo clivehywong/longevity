@@ -155,12 +155,12 @@ def _create_papaya_html(
     if overlay_colormaps is None:
         overlay_colormaps = ["spectrum"] * len(overlays or [])
 
-    # Create params JSON
-    params_json = json.dumps([images])
+    # Create params JSON — Papaya expects {images: [...]} not [[...]]
+    params_json = json.dumps({"images": images})
 
     html = f"""
-    <script src="https://papaya.readthedocs.io/viewer/papaya.js"></script>
-    <link rel="stylesheet" href="https://papaya.readthedocs.io/viewer/papaya.css">
+    <script src="https://cdn.jsdelivr.net/gh/rii-mango/Papaya@master/release/current/standard/papaya.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rii-mango/Papaya@master/release/current/standard/papaya.css">
 
     <div id="{container_id}" class="papaya" style="width: 100%; height: {height}px;"></div>
 
@@ -172,17 +172,19 @@ def _create_papaya_html(
     </div>
 
     <script>
-        // Initialize Papaya viewer
+        // Initialize Papaya viewer — params must be an object with named keys
         var params = {params_json};
-        var viewer = papaya.Container.addViewer("{container_id}", params);
+        papaya.Container.addViewer("{container_id}", params);
 
-        // Configure display settings after viewer loads
+        // Configure display settings after viewer and image finish loading
         setTimeout(function() {{
-            if (viewer && viewer.viewer) {{
-                var screenVolumes = viewer.viewer.screenVolumes;
+            // addViewer() returns undefined; access container via papayaContainers
+            var container = papayaContainers && papayaContainers[papayaContainers.length - 1];
+            if (container && container.viewer) {{
+                var screenVolumes = container.viewer.screenVolumes;
 
                 // Primary image settings
-                if (screenVolumes.length > 0) {{
+                if (screenVolumes && screenVolumes.length > 0) {{
                     var primary = screenVolumes[0];
                     primary.colorMap = "{colormap}";
                     primary.intensityMin = {min_thresh};
@@ -190,10 +192,9 @@ def _create_papaya_html(
                 }}
 
                 // Overlay settings
-                if (screenVolumes.length > 1) {{
+                if (screenVolumes && screenVolumes.length > 1) {{
                     for (var i = 1; i < screenVolumes.length; i++) {{
                         screenVolumes[i].alpha = {overlay_alpha};
-                        // Assign colormap from array
                         var colormaps = {json.dumps(overlay_colormaps)};
                         if (i - 1 < colormaps.length) {{
                             screenVolumes[i].colorMap = colormaps[i - 1];
@@ -201,15 +202,16 @@ def _create_papaya_html(
                     }}
                 }}
 
-                viewer.viewer.drawViewer(true);
+                container.viewer.drawViewer(true);
             }}
-        }}, 800);
+        }}, 1500);
 
         // Update coordinate display on mouse move
         document.addEventListener("mousemove", function(event) {{
-            if (viewer && viewer.viewer && viewer.viewer.currentCoord) {{
-                var coords = viewer.viewer.currentCoord;
-                var voxel = viewer.viewer.currentVoxel;
+            var container = papayaContainers && papayaContainers[papayaContainers.length - 1];
+            if (container && container.viewer && container.viewer.currentCoord) {{
+                var coords = container.viewer.currentCoord;
+                var voxel = container.viewer.currentVoxel;
                 var coordBox = document.getElementById("papayaCoords");
                 if (coordBox) {{
                     coordBox.innerHTML =
@@ -225,8 +227,9 @@ def _create_papaya_html(
 
         // Export function (accessible from Streamlit)
         window.papayaExport = function() {{
-            if (viewer && viewer.viewer && viewer.viewer.canvas) {{
-                var canvas = viewer.viewer.canvas;
+            var container = papayaContainers && papayaContainers[papayaContainers.length - 1];
+            if (container && container.viewer && container.viewer.canvas) {{
+                var canvas = container.viewer.canvas;
                 var link = document.createElement("a");
                 link.href = canvas.toDataURL("image/png");
                 link.download = "brain_view_" + new Date().getTime() + ".png";
