@@ -251,24 +251,6 @@ def query_atlasq_probabilistic(
         lines = result.stdout.strip().split('\n')
         results = []
 
-        # First check for label-format output (e.g., AAL3v1)
-        region_name = None
-        for line in lines:
-            if line.strip().startswith('name'):
-                parts = [p.strip() for p in line.split('|')]
-                if len(parts) >= 2:
-                    region_name = parts[1].strip()
-                    break
-
-        if region_name:
-            # Label format - single result with 100% confidence
-            results.append({
-                'region': region_name,
-                'index': 1,
-                'proportion': 1.0
-            })
-            return results[:top_n] if results else None
-
         # Try parsing as table format (probabilistic atlases)
         in_table = False
         for line in lines:
@@ -293,9 +275,9 @@ def query_atlasq_probabilistic(
                 continue
 
             try:
-                region = parts[1].strip()
-                index = int(parts[2].strip())
-                proportion = float(parts[4].strip())
+                region = parts[0].strip()
+                index = int(parts[1].strip())
+                proportion = float(parts[3].strip())
 
                 results.append({
                     'region': region,
@@ -304,6 +286,29 @@ def query_atlasq_probabilistic(
                 })
             except (ValueError, IndexError):
                 continue
+
+        if results:
+            return results[:top_n]
+
+        # Check for label-format output (e.g., AAL3v1). This must happen after
+        # table parsing so a probabilistic table header ("name | index | ...")
+        # is not mistaken for a label-format result named "index".
+        region_name = None
+        for line in lines:
+            if line.strip().startswith('name'):
+                parts = [p.strip() for p in line.split('|')]
+                if len(parts) >= 2 and parts[1].lower() != 'index':
+                    region_name = parts[1].strip()
+                    break
+
+        if region_name:
+            # Label format - single result with 100% confidence
+            results.append({
+                'region': region_name,
+                'index': 1,
+                'proportion': 1.0
+            })
+            return results[:top_n] if results else None
 
         return results[:top_n] if results else None
 
