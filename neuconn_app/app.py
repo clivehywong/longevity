@@ -319,7 +319,7 @@ def render_fmri_analysis():
                 "🎯 Seed Connectivity Viewer",
                 "🕸️ Network Viewer",
                 "Effective Connectivity",
-                "📤 Submit Local Measures",
+                "📊 Local Measures Coverage",
                 "📤 Submit Seed Connectivity",
                 "📤 Submit Network Connectivity",
             ]
@@ -336,9 +336,9 @@ def render_fmri_analysis():
         elif analysis == "🕸️ Network Viewer":
             page_path = Path(__file__).parent / "pages_connectivity" / "network_connectivity.py"
             module_name = "network_connectivity"
-        elif analysis == "📤 Submit Local Measures":
-            page_path = Path(__file__).parent / "pages_connectivity_submit" / "01_submit_local_measures.py"
-            module_name = "conn_submit_local_measures"
+        elif analysis == "📊 Local Measures Coverage":
+            page_path = Path(__file__).parent / "pages_connectivity_submit" / "01_local_measures_coverage.py"
+            module_name = "conn_local_measures_coverage"
         elif analysis == "📤 Submit Seed Connectivity":
             page_path = Path(__file__).parent / "pages_connectivity_submit" / "02_submit_seed_connectivity.py"
             module_name = "conn_submit_seed_connectivity"
