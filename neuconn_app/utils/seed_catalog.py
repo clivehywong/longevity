@@ -1,261 +1,316 @@
 """
-Unified seed catalog for connectivity UI selections.
+Unified seed catalog driven by XCP-D atlas parcels, custom NIfTI ROIs,
+and on-demand spheres-from-coordinates.
 
-This module merges the project's priority MNI sphere seeds, custom ROI
-definitions, and generic atlas parcel seeds behind a single Streamlit-friendly
-API.
+Sources:
+  xcpd_atlas_parcel  — every parcel in each XCP-D atlas discovered from probe-subject TSVs
+  custom_nifti_roi   — NIfTI masks listed in neuconn_app/roi_config.json
+  sphere             — generated on demand via Seed.sphere() / SeedCatalog.add_sphere()
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import logging
+import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-import yaml
-
+from typing import Literal
 
 LOGGER = logging.getLogger(__name__)
 
-PRIORITY_CONFIG = Path(".github/connectivity_config.yaml")
-ROI_CONFIG = Path("neuconn_app/roi_config.json")
 
-ATLAS_DISPLAY_NAMES = {
-    "Schaefer2018_200Parcels_7Networks_Tian_S2": "Schaefer200_Tian",
-}
-
+# ---------------------------------------------------------------------------
+# Seed dataclass
+# ---------------------------------------------------------------------------
 
 @dataclass
 class Seed:
     id: str
-    label: str
-    source: str
-    valid_atlases: List[str]
-    coordinates_mni: Optional[List[float]] = None
-    radius_mm: Optional[float] = None
-    atlas: Optional[str] = None
-    parcel_index: Optional[int] = None
-    networks: Optional[List[str]] = None
-    description: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    name: str
+    source: Literal["xcpd_atlas_parcel", "custom_nifti_roi", "sphere"]
+    atlas: str | None = None
+    parcel_index: int | None = None
+    parcel_label: str | None = None
+    network: str | None = None
+    nifti_path: Path | None = None
+    coords_mm: tuple[float, float, float] | None = None
+    radius_mm: float | None = None
 
+    @staticmethod
+    def sphere(name: str, x: float, y: float, z: float, radius_mm: float = 6.0) -> "Seed":
+        """Factory for a sphere seed at MNI coordinates."""
+        sid = (
+            f"sphere-{name.replace(' ', '_')}"
+            f"_x{int(x)}_y{int(y)}_z{int(z)}_r{int(radius_mm)}"
+        )
+        return Seed(
+            id=sid,
+            name=name,
+            source="sphere",
+            coords_mm=(float(x), float(y), float(z)),
+            radius_mm=float(radius_mm),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Network inference helpers
+# ---------------------------------------------------------------------------
+
+def _infer_network(atlas: str, label: str) -> str | None:
+    """
+    Best-effort network name from parcel label.
+
+    4S{N}Parcels: (LH|RH)_<Network>_<n>  →  <Network>
+                  <Struct>_Region<n>       →  <Struct>
+    Gordon:       {L|R}_{Network}_{n}     →  <Network>
+    Tian:         <Structure>-{...}        →  <Structure>  (first dash-segment)
+    Glasser:      no network in label     →  None
+    """
+    if atlas.startswith("4S") and atlas.endswith("Parcels"):
+        m = re.match(r"^(?:LH|RH)_([A-Za-z]+[A-Za-z0-9]*)_\d+$", label)
+        if m:
+            return m.group(1)
+        m2 = re.match(r"^([A-Za-z]+)_Region\d+$", label)
+        if m2:
+            return m2.group(1)
+        return None
+    if atlas == "Gordon":
+        m = re.match(r"^[LR]_([A-Za-z]+)_\d+$", label)
+        return m.group(1) if m else None
+    if atlas == "Tian":
+        parts = label.split("-")
+        return parts[0] if parts else None
+    # Glasser and unrecognised atlases: no reliable network mapping
+    return None
+
+
+def _read_tsv_columns(tsv_path: Path) -> list[str]:
+    """Read the column headers from the first line of a TSV file."""
+    try:
+        with open(tsv_path, "r") as fh:
+            return fh.readline().rstrip("\n").split("\t")
+    except Exception as exc:
+        LOGGER.warning("Failed to read TSV %s: %s", tsv_path, exc)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# SeedCatalog
+# ---------------------------------------------------------------------------
 
 class SeedCatalog:
-    """Merged catalog of all seed definitions available to the Streamlit UI."""
+    """Unified catalog of seeds for connectivity analysis."""
 
-    def __init__(self, repo_root: Path):
-        self.repo_root = Path(repo_root).expanduser().resolve()
-        self._seeds = self._load_all_seeds()
-        self._seed_by_id = {seed.id: seed for seed in self._seeds}
+    def __init__(
+        self,
+        bids_root: Path,
+        xcpd_pipeline: str = "fc",
+        probe_subject: str | None = None,
+        probe_session: str | None = None,
+    ):
+        self.bids_root = Path(bids_root).expanduser().resolve()
+        self.xcpd_pipeline = xcpd_pipeline
+        self._probe_subject = probe_subject
+        self._probe_session = probe_session
+        self._seeds: list[Seed] = []
+        self._seed_by_id: dict[str, Seed] = {}
+        self._load_all_seeds()
 
-    def list_atlases(self) -> List[str]:
-        """Return all atlases that have at least one seed."""
-        atlases = {atlas for seed in self._seeds for atlas in seed.valid_atlases}
-        return sorted(atlases)
+    # ------------------------------------------------------------------ #
+    # Internal loading
+    # ------------------------------------------------------------------ #
+
+    def _load_all_seeds(self) -> None:
+        seeds: list[Seed] = []
+        seeds.extend(self._load_xcpd_atlas_parcels())
+        seeds.extend(self._load_custom_nifti_rois())
+        self._seeds = seeds
+        self._seed_by_id = {s.id: s for s in seeds}
+
+    def _find_probe_tsv_dir(self) -> Path | None:
+        """Locate a func directory that contains atlas timeseries TSVs."""
+        xcpd_root = (
+            self.bids_root
+            / "derivatives"
+            / "preprocessing"
+            / "xcpd"
+            / self.xcpd_pipeline
+        )
+        if not xcpd_root.exists():
+            return None
+
+        # Try xcpd_outputs module (optional dependency created in a parallel branch)
+        try:
+            from neuconn_app.utils.xcpd_outputs import XcpdDiscovery  # type: ignore[import]
+
+            disc = XcpdDiscovery(xcpd_root)
+            tsv_dir = disc.find_timeseries_dir(
+                subject=self._probe_subject, session=self._probe_session
+            )
+            if tsv_dir and tsv_dir.exists():
+                return tsv_dir
+        except Exception:
+            pass
+
+        # Fallback: glob for any subject's timeseries TSVs
+        hits = sorted(xcpd_root.glob("**/func/*_atlas-*_stat-mean_timeseries.tsv"))
+        if hits:
+            return hits[0].parent
+        return None
+
+    def _load_xcpd_atlas_parcels(self) -> list[Seed]:
+        tsv_dir = self._find_probe_tsv_dir()
+        if tsv_dir is None:
+            LOGGER.warning("No XCP-D timeseries TSVs found under %s", self.bids_root)
+            return []
+
+        seeds: list[Seed] = []
+        for tsv_path in sorted(tsv_dir.glob("*_stat-mean_timeseries.tsv")):
+            m = re.search(r"_atlas-([^_]+)_stat-mean_timeseries\.tsv$", tsv_path.name)
+            if not m:
+                continue
+            atlas = m.group(1)
+            labels = _read_tsv_columns(tsv_path)
+            for idx, label in enumerate(labels):
+                seed_id = f"atlas-{atlas}_parcel-{label}"
+                seeds.append(
+                    Seed(
+                        id=seed_id,
+                        name=f"{atlas}: {label}",
+                        source="xcpd_atlas_parcel",
+                        atlas=atlas,
+                        parcel_index=idx,
+                        parcel_label=label,
+                        network=_infer_network(atlas, label),
+                    )
+                )
+        return seeds
+
+    def _load_custom_nifti_rois(self) -> list[Seed]:
+        """Load NIfTI ROI entries from neuconn_app/roi_config.json."""
+        config_path = self.bids_root / "neuconn_app" / "roi_config.json"
+        if not config_path.exists():
+            return []
+
+        try:
+            with open(config_path, "r") as fh:
+                roi_config = json.load(fh)
+        except Exception as exc:
+            LOGGER.warning("Failed to read roi_config.json %s: %s", config_path, exc)
+            return []
+
+        seeds: list[Seed] = []
+        for roi in roi_config.get("rois") or []:
+            nifti_str = roi.get("nifti_path")
+            if not nifti_str:
+                continue
+            nifti_path = Path(nifti_str)
+            if not nifti_path.is_absolute():
+                nifti_path = self.bids_root / nifti_path
+            roi_id = roi.get("id") or nifti_path.stem
+            name = roi.get("name") or roi.get("label") or roi_id
+            seeds.append(
+                Seed(
+                    id=f"custom_nifti-{roi_id}",
+                    name=name,
+                    source="custom_nifti_roi",
+                    nifti_path=nifti_path,
+                )
+            )
+        return seeds
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+
+    def list_sources(self) -> list[str]:
+        """Return all source types present in the catalog."""
+        return sorted({s.source for s in self._seeds})
+
+    def list_atlases(self) -> list[str]:
+        """Return all atlas names that have at least one parcel seed."""
+        return sorted({s.atlas for s in self._seeds if s.atlas})
+
+    def list_networks(self, atlas: str) -> list[str]:
+        """Return all inferred network names for the given atlas."""
+        return sorted(
+            {s.network for s in self._seeds if s.atlas == atlas and s.network is not None}
+        )
 
     def get_seeds(
         self,
-        atlas: Optional[str] = None,
-        source: Optional[str] = None,
-        network: Optional[str] = None,
-    ) -> List[Seed]:
-        """Get seeds, optionally filtered by atlas/source/network."""
+        *,
+        source: str | None = None,
+        atlas: str | None = None,
+        network: str | None = None,
+        query: str | None = None,
+    ) -> list[Seed]:
+        """Return seeds, optionally filtered by source / atlas / network / text query."""
         seeds = self._seeds
-        if atlas is not None:
-            seeds = [seed for seed in seeds if atlas in seed.valid_atlases]
         if source is not None:
-            seeds = [seed for seed in seeds if seed.source == source]
+            seeds = [s for s in seeds if s.source == source]
+        if atlas is not None:
+            seeds = [s for s in seeds if s.atlas == atlas]
         if network is not None:
+            seeds = [s for s in seeds if s.network == network]
+        if query is not None:
+            q = query.lower()
             seeds = [
-                seed
-                for seed in seeds
-                if network in (seed.networks or [])
-                or network == _metadata_network(seed.metadata)
+                s
+                for s in seeds
+                if q in s.id.lower()
+                or q in s.name.lower()
+                or (s.parcel_label and q in s.parcel_label.lower())
             ]
         return list(seeds)
 
-    def get_seed(self, seed_id: str) -> Optional[Seed]:
-        """Look up a seed by ID."""
-        return self._seed_by_id.get(seed_id)
+    def get_seed(self, seed_id: str) -> Seed:
+        """Look up a seed by its stable ID; raises KeyError if not found."""
+        try:
+            return self._seed_by_id[seed_id]
+        except KeyError:
+            raise KeyError(f"Seed not found: {seed_id!r}")
 
-    def group_by_network(self, atlas: str) -> Dict[str, List[Seed]]:
-        """Return {network_name: [seeds]} for an atlas (for grouped multiselect UI)."""
-        grouped: Dict[str, List[Seed]] = {}
+    def add_sphere(
+        self, name: str, x: float, y: float, z: float, radius_mm: float = 6.0
+    ) -> Seed:
+        """Create a sphere seed and register it in the catalog."""
+        seed = Seed.sphere(name, x, y, z, radius_mm)
+        if seed.id not in self._seed_by_id:
+            self._seeds.append(seed)
+            self._seed_by_id[seed.id] = seed
+        return self._seed_by_id[seed.id]
+
+    def group_by_network(self, atlas: str) -> dict[str, list[Seed]]:
+        """Return {network_name: [seeds]} for the given atlas (sorted by network name)."""
+        grouped: dict[str, list[Seed]] = {}
         for seed in self.get_seeds(atlas=atlas):
-            networks = seed.networks or [_metadata_network(seed.metadata)] or ["Unassigned"]
-            for network in networks:
-                grouped.setdefault(network, []).append(seed)
+            key = seed.network or "unknown"
+            grouped.setdefault(key, []).append(seed)
         return dict(sorted(grouped.items()))
 
-    def _load_all_seeds(self) -> List[Seed]:
-        seeds: List[Seed] = []
-        priority_config = self._load_priority_config()
-        seeds.extend(self._priority_seeds(priority_config))
-        seeds.extend(self._custom_roi_seeds())
-        seeds.extend(self._atlas_parcel_seeds(priority_config))
-        return seeds
 
-    def _load_priority_config(self) -> Dict[str, Any]:
-        config_path = self.repo_root / PRIORITY_CONFIG
-        if not config_path.exists():
-            LOGGER.warning("Priority seed config not found: %s", config_path)
-            return {}
-
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-        except Exception as exc:
-            LOGGER.warning("Failed to read priority seed config %s: %s", config_path, exc)
-            return {}
-
-    def _priority_seeds(self, config: Dict[str, Any]) -> List[Seed]:
-        loaded: List[Seed] = []
-        for seed_id, seed_config in (config.get("seeds") or {}).items():
-            coordinates = seed_config.get("coordinates_mni")
-            loaded.append(
-                Seed(
-                    id=str(seed_id),
-                    label=seed_config.get("region") or str(seed_id).replace("_", " "),
-                    source="priority",
-                    valid_atlases=list(seed_config.get("valid_atlases") or []),
-                    coordinates_mni=_float_list(coordinates) if coordinates else None,
-                    radius_mm=_optional_float(seed_config.get("radius_mm")),
-                    networks=list(seed_config.get("networks") or []),
-                    description=seed_config.get("description"),
-                    metadata={
-                        key: value
-                        for key, value in seed_config.items()
-                        if key
-                        not in {
-                            "region",
-                            "description",
-                            "coordinates_mni",
-                            "radius_mm",
-                            "valid_atlases",
-                            "networks",
-                        }
-                    },
-                )
-            )
-        return loaded
-
-    def _custom_roi_seeds(self) -> List[Seed]:
-        config_path = self.repo_root / ROI_CONFIG
-        if not config_path.exists():
-            LOGGER.warning("Custom ROI config not found: %s", config_path)
-            return []
-
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                roi_config = json.load(f)
-        except Exception as exc:
-            LOGGER.warning("Failed to read custom ROI config %s: %s", config_path, exc)
-            return []
-
-        default_atlas = (roi_config.get("atlases") or {}).get("combined")
-        loaded: List[Seed] = []
-        for roi in roi_config.get("rois") or []:
-            if not roi.get("use_as_seed", False):
-                continue
-
-            canonical_atlas = roi.get("atlas") or default_atlas
-            display_atlas = normalize_atlas_name(canonical_atlas) if canonical_atlas else None
-            roi_type = roi.get("type")
-            networks = []
-            if roi.get("network_filter"):
-                networks.append(str(roi["network_filter"]))
-
-            metadata = dict(roi)
-            if canonical_atlas:
-                metadata["canonical_atlas"] = canonical_atlas
-            if display_atlas:
-                metadata["display_atlas"] = display_atlas
-
-            loaded.append(
-                Seed(
-                    id=f"custom:{roi.get('id')}",
-                    label=roi.get("label") or str(roi.get("id")),
-                    source="custom",
-                    valid_atlases=[display_atlas] if display_atlas else [],
-                    coordinates_mni=_float_list(roi.get("mni_coords"))
-                    if roi.get("mni_coords")
-                    else None,
-                    radius_mm=_optional_float(roi.get("radius_mm")),
-                    atlas=display_atlas,
-                    networks=networks or None,
-                    description=roi.get("description"),
-                    metadata=metadata,
-                )
-            )
-        return loaded
-
-    def _atlas_parcel_seeds(self, config: Dict[str, Any]) -> List[Seed]:
-        """Create generic seed entries for atlas-native parcel-index selections."""
-        loaded: List[Seed] = []
-        schaefer400 = (config.get("atlases") or {}).get("Schaefer400")
-        if not schaefer400:
-            return loaded
-
-        n_rois = int(schaefer400.get("n_rois") or 0)
-        for parcel_index in range(1, n_rois + 1):
-            loaded.append(
-                Seed(
-                    id=f"atlas_parcel:Schaefer400:{parcel_index}",
-                    label=f"Schaefer400 Parcel {parcel_index}",
-                    source="atlas_parcel",
-                    valid_atlases=["Schaefer400"],
-                    atlas="Schaefer400",
-                    parcel_index=parcel_index,
-                    networks=["Atlas parcel"],
-                    description="Atlas-native Schaefer400 parcel seed",
-                    metadata={"atlas_config": schaefer400},
-                )
-            )
-        return loaded
-
-
-def normalize_atlas_name(atlas_name: Optional[str]) -> str:
-    """Map long atlas identifiers to UI-friendly canonical names."""
-    if not atlas_name:
-        return ""
-    return ATLAS_DISPLAY_NAMES.get(atlas_name, atlas_name)
-
+# ---------------------------------------------------------------------------
+# Convenience helpers
+# ---------------------------------------------------------------------------
 
 def load_default_catalog() -> SeedCatalog:
-    """Load using the project's standard config paths."""
+    """Load catalog using default project paths (bids_root = repo root)."""
     return SeedCatalog(Path(__file__).resolve().parents[2])
-
-
-def _float_list(values: Any) -> List[float]:
-    return [float(value) for value in values]
-
-
-def _optional_float(value: Any) -> Optional[float]:
-    return float(value) if value is not None else None
-
-
-def _metadata_network(metadata: Optional[Dict[str, Any]]) -> str:
-    if not metadata:
-        return "Unassigned"
-    return str(metadata.get("network_filter") or metadata.get("network") or "Unassigned")
 
 
 def _print_cli_summary(catalog: SeedCatalog) -> None:
     for atlas in catalog.list_atlases():
-        print(f"\n{atlas}")
-        print("-" * len(atlas))
-        by_source: Dict[str, List[Seed]] = {}
-        for seed in catalog.get_seeds(atlas=atlas):
-            by_source.setdefault(seed.source, []).append(seed)
-        for source, seeds in sorted(by_source.items()):
-            print(f"  {source}: {len(seeds)} seeds")
-            for seed in seeds[:10]:
-                network = ", ".join(seed.networks or ["Unassigned"])
-                print(f"    - {seed.id}: {seed.label} [{network}]")
-            if len(seeds) > 10:
-                print(f"    ... {len(seeds) - 10} more")
+        seeds = catalog.get_seeds(atlas=atlas)
+        networks = catalog.list_networks(atlas)
+        print(f"\n{atlas}  ({len(seeds)} parcels, {len(networks)} networks)")
+        print("-" * 60)
+        for net in networks[:5]:
+            n_seeds = len(catalog.get_seeds(atlas=atlas, network=net))
+            print(f"  {net}: {n_seeds} parcels")
+        if len(networks) > 5:
+            print(f"  ... {len(networks) - 5} more networks")
 
 
 if __name__ == "__main__":
