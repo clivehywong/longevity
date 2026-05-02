@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 import streamlit as st
 
@@ -42,6 +42,231 @@ except Exception:
     ]
 
 STATE_PREFIX = "submit_seed_"
+
+# ---------------------------------------------------------------------------
+# Pre-flight check infrastructure
+# ---------------------------------------------------------------------------
+
+_PREFLIGHT_ICON: dict[str, str] = {
+    "pass": "✅",
+    "fail": "❌",
+    "warn": "⚠️",
+    "skip": "⏭️",
+}
+
+
+class PreflightResult(NamedTuple):
+    name: str
+    status: str  # "pass" | "fail" | "warn" | "skip"
+    detail: str
+
+
+def _run_local_preflight(
+    bids_root: str, pipeline: str, subjects: list[str]
+) -> list[PreflightResult]:
+    """Checks that don't require an SSH connection."""
+    results: list[PreflightResult] = []
+    root = Path(bids_root)
+
+    mask_path = root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
+    if mask_path.exists():
+        results.append(PreflightResult("Brain mask (local)", "pass", str(mask_path)))
+    else:
+        results.append(PreflightResult(
+            "Brain mask (local)", "fail",
+            f"Not found: {mask_path}. "
+            "Download from FSL or regenerate with fslmaths."
+        ))
+
+    script_path = root / "script" / "compute_seed_connectivity_xcpd.py"
+    if script_path.exists():
+        results.append(PreflightResult("Compute script (local)", "pass", str(script_path)))
+    else:
+        results.append(PreflightResult(
+            "Compute script (local)", "warn",
+            f"Not found locally — HPC copy will be used: {script_path}"
+        ))
+
+    xcpd_dir = root / "derivatives" / "preprocessing" / "xcpd" / pipeline
+    if not xcpd_dir.exists():
+        results.append(PreflightResult(
+            f"XCP-D outputs ({pipeline})", "fail",
+            f"Pipeline directory not found: {xcpd_dir}"
+        ))
+    else:
+        missing = [s for s in subjects if not (xcpd_dir / s).exists()]
+        if not missing:
+            results.append(PreflightResult(
+                f"XCP-D outputs ({pipeline})", "pass",
+                f"All {len(subjects)} subject(s) found under {xcpd_dir}"
+            ))
+        elif len(missing) == len(subjects):
+            results.append(PreflightResult(
+                f"XCP-D outputs ({pipeline})", "fail",
+                f"No subjects found in {xcpd_dir}"
+            ))
+        else:
+            sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+            results.append(PreflightResult(
+                f"XCP-D outputs ({pipeline})", "warn",
+                f"{len(missing)}/{len(subjects)} subjects missing locally: {sample}"
+            ))
+
+    return results
+
+
+def _run_hpc_preflight(
+    bids_root: str, pipeline: str, subjects: list[str], config: dict
+) -> list[PreflightResult]:
+    """HPC-specific checks via SSH."""
+    results: list[PreflightResult] = []
+
+    try:
+        from utils.hpc import HPCConfig, HPCConnection  # noqa: PLC0415
+        hpc_cfg = HPCConfig.from_config(config)
+    except Exception as exc:
+        return [PreflightResult("HPC config", "fail", f"Could not load HPC config: {exc}")]
+
+    if not hpc_cfg.host or not hpc_cfg.user:
+        return [PreflightResult(
+            "HPC config", "fail",
+            "host or user not set — check longevity_config.yaml hpc section"
+        )]
+    results.append(PreflightResult("HPC config", "pass", f"{hpc_cfg.user}@{hpc_cfg.host}"))
+
+    remote_base = hpc_cfg.remote_base
+    if not remote_base:
+        return results + [PreflightResult(
+            "HPC remote base", "fail",
+            "remote_paths.base not configured"
+        )]
+
+    conn = HPCConnection(hpc_cfg)
+    try:
+        conn.connect()
+    except Exception as exc:
+        results.append(PreflightResult("SSH connection", "fail", str(exc)))
+        return results
+    results.append(PreflightResult("SSH connection", "pass", f"Connected to {hpc_cfg.host}"))
+
+    file_checks = [
+        ("Brain mask (HPC)",
+         f"{remote_base}/atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz"),
+        ("Compute script (HPC)",
+         f"{remote_base}/script/compute_seed_connectivity_xcpd.py"),
+        ("Submit script (HPC)",
+         f"{remote_base}/script/hpc_submit_subject_level.py"),
+    ]
+    for name, remote_path in file_checks:
+        try:
+            stdout, _, rc = conn.execute(
+                f"test -f {remote_path} && echo OK", timeout=15
+            )
+            if rc == 0 and "OK" in stdout:
+                results.append(PreflightResult(name, "pass", remote_path))
+            else:
+                results.append(PreflightResult(name, "fail",
+                                               f"Not found on HPC: {remote_path}"))
+        except Exception as exc:
+            results.append(PreflightResult(name, "fail", str(exc)))
+
+    xcpd_dir = f"{remote_base}/derivatives/preprocessing/xcpd/{pipeline}"
+    try:
+        stdout, _, rc = conn.execute(
+            f"test -d {xcpd_dir} && ls {xcpd_dir} | wc -l", timeout=15
+        )
+        if rc == 0:
+            count = stdout.strip().splitlines()[-1].strip()
+            results.append(PreflightResult(
+                f"XCP-D outputs ({pipeline}) on HPC", "pass",
+                f"{xcpd_dir} ({count} entries)"
+            ))
+        else:
+            results.append(PreflightResult(
+                f"XCP-D outputs ({pipeline}) on HPC", "fail",
+                f"Directory not found on HPC: {xcpd_dir}"
+            ))
+    except Exception as exc:
+        results.append(PreflightResult(f"XCP-D outputs ({pipeline}) on HPC", "fail", str(exc)))
+
+    if subjects:
+        first_sub = subjects[0]
+        sub_dir = f"{xcpd_dir}/{first_sub}"
+        try:
+            stdout, _, rc = conn.execute(f"test -d {sub_dir} && echo OK", timeout=15)
+            if rc == 0 and "OK" in stdout:
+                results.append(PreflightResult(
+                    f"Subject data ({first_sub}) on HPC", "pass", sub_dir
+                ))
+            else:
+                results.append(PreflightResult(
+                    f"Subject data ({first_sub}) on HPC", "warn",
+                    f"Not found on HPC: {sub_dir}"
+                ))
+        except Exception as exc:
+            results.append(PreflightResult(
+                f"Subject data ({first_sub}) on HPC", "fail", str(exc)
+            ))
+
+    try:
+        conn.disconnect()
+    except Exception:
+        pass
+
+    return results
+
+
+def _render_preflight_section(
+    bids_root: str,
+    pipeline: str,
+    subjects: list[str],
+    is_local: bool,
+    config: dict,
+) -> bool:
+    """Render the pre-flight checks UI.
+
+    Returns True if no critical checks have failed (safe to submit).
+    """
+    st.subheader("🔍 Pre-flight Checks")
+
+    cached: list[dict] | None = st.session_state.get(f"{STATE_PREFIX}preflight_results")
+    cached_pipeline = st.session_state.get(f"{STATE_PREFIX}preflight_pipeline")
+    cached_mode = st.session_state.get(f"{STATE_PREFIX}preflight_is_local")
+
+    if cached and (cached_pipeline != pipeline or cached_mode != is_local):
+        cached = None
+        st.session_state[f"{STATE_PREFIX}preflight_results"] = None
+        st.info("Settings changed — please re-run pre-flight checks.")
+
+    if st.button("Run pre-flight checks", key=f"{STATE_PREFIX}preflight_btn"):
+        with st.spinner("Running checks…"):
+            raw = _run_local_preflight(bids_root, pipeline, subjects)
+            if not is_local:
+                raw += _run_hpc_preflight(bids_root, pipeline, subjects, config)
+        cached = [{"name": r.name, "status": r.status, "detail": r.detail} for r in raw]
+        st.session_state[f"{STATE_PREFIX}preflight_results"] = cached
+        st.session_state[f"{STATE_PREFIX}preflight_pipeline"] = pipeline
+        st.session_state[f"{STATE_PREFIX}preflight_is_local"] = is_local
+
+    if cached is None:
+        st.caption("Click **Run pre-flight checks** to verify required files before submitting.")
+        return True  # Don't block submission before checks are run
+
+    n_fail = sum(1 for r in cached if r["status"] == "fail")
+    n_warn = sum(1 for r in cached if r["status"] == "warn")
+    n_pass = sum(1 for r in cached if r["status"] == "pass")
+
+    for r in cached:
+        icon = _PREFLIGHT_ICON.get(r["status"], "❓")
+        st.markdown(f"{icon} **{r['name']}** — {r['detail']}")
+
+    if n_fail == 0:
+        warn_note = f", {n_warn} warning(s)" if n_warn else ""
+        st.success(f"All critical checks passed ({n_pass} passed{warn_note}).")
+    else:
+        st.error(f"{n_fail} critical check(s) failed — resolve before submitting.")
+
+    return n_fail == 0
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -345,6 +570,19 @@ def render() -> None:
             "Consider HPC for large runs."
         )
 
+    st.markdown("---")
+
+    # --- File pre-flight checks ---
+    _preflight_ok = _render_preflight_section(
+        bids_root=str(bids_root),
+        pipeline=pipeline,
+        subjects=sel_subjects or all_subjects,
+        is_local=is_local,
+        config=config,
+    )
+
+    st.markdown("---")
+
     # --- Active local run status (if any) ---
     state_dir = (Path(bids_root) / ".neuconn") if bids_root else Path.home() / ".neuconn"
     runner = LocalConnectivityRunner(state_dir)
@@ -379,6 +617,19 @@ def render() -> None:
         if st.button(submit_label, key=f"{STATE_PREFIX}submit_btn", type="primary"):
             if not seeds:
                 st.error("Add at least one seed before submitting.")
+            elif not is_local and not _preflight_ok:
+                pf = st.session_state.get(f"{STATE_PREFIX}preflight_results")
+                if pf is None:
+                    st.error(
+                        "⚠️ Run **pre-flight checks** before submitting to HPC. "
+                        "This verifies the brain mask, scripts, and XCP-D data are "
+                        "present on the cluster."
+                    )
+                else:
+                    st.error(
+                        "❌ Pre-flight checks failed. Fix the issues shown above "
+                        "then re-run checks before submitting."
+                    )
             elif is_local:
                 # ---- LOCAL: serial subprocess loop --------------------- #
                 _subjects_sessions = {

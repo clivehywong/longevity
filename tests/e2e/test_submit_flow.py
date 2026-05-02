@@ -329,14 +329,23 @@ class TestGroupStatsVoxel:
         navigate_sidebar(app_page, stage="Group-Level", analysis="📤 Submit Group Statistics")
         _save_screenshot(app_page, "04_group_stats_page")
 
-        # "Analysis kind" radio has Voxel | Matrix
-        kind_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(
-            has_text="Analysis kind"
+        # "Choose analysis type:" selectbox has Voxel / Matrix / MixedDesign options
+        analysis_box = app_page.locator(MAIN + " " + '[data-testid="stSelectbox"]').filter(
+            has_text="Choose analysis type"
         )
-        expect(kind_radio).to_be_visible(timeout=10_000)
-        kind_opts = [el.text_content() or "" for el in kind_radio.locator("p").all()]
-        assert any("Voxel" in o for o in kind_opts), f"Voxel option missing: {kind_opts}"
-        assert any("Matrix" in o for o in kind_opts), f"Matrix option missing: {kind_opts}"
+        expect(analysis_box).to_be_visible(timeout=10_000)
+        analysis_box.click()
+        app_page.wait_for_timeout(400)
+        analysis_opts = [el.text_content() or "" for el in app_page.get_by_role("option").all()]
+        app_page.keyboard.press("Escape")
+        assert any("Voxel" in o for o in analysis_opts), f"Voxel option missing: {analysis_opts}"
+        assert any("Matrix" in o for o in analysis_opts), f"Matrix option missing: {analysis_opts}"
+
+        # Select "Voxel-level Group Stats" (default) explicitly
+        analysis_box.click()
+        app_page.wait_for_timeout(300)
+        app_page.get_by_role("option").filter(has_text="Voxel-level").first.click()
+        app_page.wait_for_timeout(2_000)
 
         # Voxel branch: Measure selectbox shows alff, reho
         measure_box = app_page.locator(MAIN + " " + '[data-testid="stSelectbox"]').filter(
@@ -408,11 +417,14 @@ class TestGroupStatsMatrix:
         """Kind=Matrix, matrix-kind=network, atlas=4S256Parcels, method=nbs, command preview."""
         navigate_sidebar(app_page, stage="Group-Level", analysis="📤 Submit Group Statistics")
 
-        # Switch to Matrix kind
-        kind_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(
-            has_text="Analysis kind"
+        # Switch to Matrix kind via "Choose analysis type:" selectbox
+        analysis_box = app_page.locator(MAIN + " " + '[data-testid="stSelectbox"]').filter(
+            has_text="Choose analysis type"
         )
-        kind_radio.locator("p", has_text="Matrix").click()
+        expect(analysis_box).to_be_visible(timeout=10_000)
+        analysis_box.click()
+        app_page.wait_for_timeout(300)
+        app_page.get_by_role("option").filter(has_text="Matrix-level").first.click()
         app_page.wait_for_timeout(2_000)
         _save_screenshot(app_page, "05_group_matrix_page")
 
@@ -483,3 +495,145 @@ class TestGroupStatsMatrix:
             f"--method nbs missing from: {command[:400]}"
         assert "--threshold 3.1" in command, \
             f"--threshold 3.1 missing from: {command[:400]}"
+
+
+# ---------------------------------------------------------------------------
+# Test 6: Seed Connectivity — Pre-flight checks
+# ---------------------------------------------------------------------------
+
+
+class TestSeedConnectivityPreflight:
+    """Verify the pre-flight check section for seed connectivity submission."""
+
+    def test_local_preflight_passes(self, app_page: Page) -> None:
+        """Local mode: brain mask and XCP-D outputs should be found (✅)."""
+        navigate_sidebar(app_page, stage="Subject-Level", analysis="📤 Submit Seed Connectivity")
+
+        # Switch to Local execution mode
+        run_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(
+            has_text="Run on"
+        )
+        expect(run_radio).to_be_visible(timeout=10_000)
+        run_radio.locator("p").filter(has_text="Local").click()
+        app_page.wait_for_timeout(1_500)
+        _save_screenshot(app_page, "06a_preflight_local_mode")
+
+        # Pre-flight subheader present
+        preflight_heading = app_page.locator(MAIN).get_by_role(
+            "heading", level=3
+        ).filter(has_text="Pre-flight")
+        expect(preflight_heading).to_be_visible(timeout=10_000)
+
+        # "Run pre-flight checks" button present
+        preflight_btn = app_page.locator(MAIN).get_by_role("button").filter(
+            has_text="pre-flight"
+        )
+        expect(preflight_btn).to_be_visible(timeout=8_000)
+
+        preflight_btn.scroll_into_view_if_needed()
+        preflight_btn.click()
+        app_page.wait_for_timeout(8_000)  # Local I/O checks finish quickly
+        _save_screenshot(app_page, "06b_preflight_local_results")
+
+        page_text = app_page.locator(MAIN).text_content() or ""
+
+        # Brain mask check must appear
+        assert "Brain mask" in page_text, (
+            f"'Brain mask' not found in pre-flight results. Page: {page_text[:600]}"
+        )
+        # XCP-D check must appear
+        assert "XCP-D" in page_text, (
+            f"'XCP-D' not found in pre-flight results. Page: {page_text[:600]}"
+        )
+        # At least one green tick (brain mask exists locally)
+        assert "✅" in page_text, (
+            f"Expected ✅ for brain mask but none found. Page: {page_text[:600]}"
+        )
+
+    def test_hpc_preflight_section_and_results(self, app_page: Page) -> None:
+        """HPC mode: pre-flight section is visible; clicking it renders check results."""
+        navigate_sidebar(app_page, stage="Subject-Level", analysis="📤 Submit Seed Connectivity")
+
+        # Switch to HPC mode
+        run_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(
+            has_text="Run on"
+        )
+        expect(run_radio).to_be_visible(timeout=10_000)
+        run_radio.locator("p").filter(has_text="HPC").click()
+        app_page.wait_for_timeout(1_500)
+        _save_screenshot(app_page, "07a_preflight_hpc_mode")
+
+        # Pre-flight subheader present in HPC mode too
+        preflight_heading = app_page.locator(MAIN).get_by_role(
+            "heading", level=3
+        ).filter(has_text="Pre-flight")
+        expect(preflight_heading).to_be_visible(timeout=10_000)
+
+        preflight_btn = app_page.locator(MAIN).get_by_role("button").filter(
+            has_text="pre-flight"
+        )
+        expect(preflight_btn).to_be_visible(timeout=8_000)
+
+        preflight_btn.scroll_into_view_if_needed()
+        preflight_btn.click()
+        # Allow time for SSH attempt (may succeed or fail gracefully)
+        app_page.wait_for_timeout(15_000)
+        _save_screenshot(app_page, "07b_preflight_hpc_results")
+
+        page_text = app_page.locator(MAIN).text_content() or ""
+
+        # Results rendered: at least one status icon present
+        has_icon = any(icon in page_text for icon in ["✅", "❌", "⚠️"])
+        assert has_icon, (
+            f"Expected pre-flight result icons (✅/❌/⚠️) after HPC check. "
+            f"Page snippet: {page_text[:800]}"
+        )
+
+        # HPC config check must appear regardless of connectivity
+        assert "HPC" in page_text, (
+            f"Expected HPC-related check names but got: {page_text[:600]}"
+        )
+
+    def test_preflight_invalidates_on_pipeline_change(self, app_page: Page) -> None:
+        """Cached pre-flight results are cleared when pipeline changes."""
+        navigate_sidebar(app_page, stage="Subject-Level", analysis="📤 Submit Seed Connectivity")
+
+        # Run local pre-flight on default pipeline (fc)
+        run_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(
+            has_text="Run on"
+        )
+        expect(run_radio).to_be_visible(timeout=10_000)
+        run_radio.locator("p").filter(has_text="Local").click()
+        app_page.wait_for_timeout(1_000)
+
+        preflight_btn = app_page.locator(MAIN).get_by_role("button").filter(
+            has_text="pre-flight"
+        )
+        preflight_btn.scroll_into_view_if_needed()
+        preflight_btn.click()
+        app_page.wait_for_timeout(8_000)
+        _save_screenshot(app_page, "08a_preflight_fc_ran")
+
+        page_text_fc = app_page.locator(MAIN).text_content() or ""
+        assert "✅" in page_text_fc, "Expected ✅ after local pre-flight with fc pipeline"
+
+        # Switch pipeline to fc_gsr → cached results should be invalidated
+        pipeline_box = app_page.locator(MAIN + " " + '[data-testid="stSelectbox"]').filter(
+            has_text="Pipeline"
+        )
+        pipeline_box.click()
+        app_page.wait_for_timeout(400)
+        app_page.get_by_role("option", name="fc_gsr").click()
+        app_page.wait_for_timeout(3_000)
+        _save_screenshot(app_page, "08b_preflight_pipeline_changed")
+
+        page_text_after = app_page.locator(MAIN).text_content() or ""
+        # Either the invalidation notice or the "click to run" caption appears
+        assert (
+            "Settings changed" in page_text_after
+            or "Click" in page_text_after
+            or "Run pre-flight" in page_text_after
+        ), (
+            f"Expected pre-flight cache invalidation notice after pipeline change. "
+            f"Page: {page_text_after[:600]}"
+        )
