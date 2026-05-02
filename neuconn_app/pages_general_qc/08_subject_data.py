@@ -180,7 +180,7 @@ def render() -> None:
             "Participant ID",
             help="BIDS participant identifier, e.g. sub-033",
         ),
-        "Age": st.column_config.TextColumn("Age"),
+        "Age": st.column_config.NumberColumn("Age", min_value=0, max_value=120, step=1),
         "Gender": st.column_config.TextColumn("Gender"),
         "group": st.column_config.SelectboxColumn(
             "Group",
