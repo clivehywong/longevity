@@ -72,10 +72,10 @@ def streamlit_test_server():
 
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args: dict) -> dict:
-    """Widen viewport so the Streamlit sidebar and main content are both visible."""
+    """Fixed 1920×1080 viewport for all E2E tests — no compromise."""
     return {
         **browser_context_args,
-        "viewport": {"width": 1400, "height": 900},
+        "viewport": {"width": 1920, "height": 1080},
     }
 
 

@@ -29,6 +29,31 @@ tmp/*.sh
 pipeline_*.log
 pipeline_*.pid
 
+# Test result files (ephemeral - documentation of test runs)
+docs/test-results/**/*.png
+docs/test-results/**/*.jpg
+docs/test-results/**/*E2E_TEST_*
+docs/test-results/**/*TFCE_*
+docs/test-results/**/*FINAL_*
+# But keep docs/test-results/README.md for conventions
+!docs/test-results/README.md
+
 # Loose session screenshots
 *.png
 *.jpg
+
+# Playwright (Node.js scaffolding — we use Python Playwright only)
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+playwright.config.ts
+package.json
+package-lock.json
+
+# Root directory protection — block stray files (see AGENTS.md §1)
+# Only whitelisted files belong at root: AGENTS.md, CLAUDE.md, QUICK_START.md,
+# group.csv, pytest.ini, .gitignore
+/nohup.out

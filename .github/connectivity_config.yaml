@@ -247,21 +247,28 @@ valid_combinations:
 # ============================================================================
 # PREPROCESSING: Standard parameters for connectivity analysis
 # ============================================================================
+# NOTE: When using XCP-D-denoised timeseries, confound regression is ALREADY
+# handled by XCP-D.  Do NOT re-regress motion/confound parameters in
+# subsequent seed-based or network connectivity analyses.  The parameters
+# below are retained for reference and for non-XCP-D legacy pipelines only.
 preprocessing:
   high_pass_hz: 0.01          # 0.01 Hz high-pass filter (100s cutoff)
   low_pass_hz: 0.1            # 0.1 Hz low-pass filter (10s cutoff)
   smoothing_fwhm_mm: 6.0      # 6mm FWHM Gaussian kernel
   tr_s: 0.8                   # Repetition time (from acquisition)
   volumes_expected: 480       # Expected timepoints per run (480 vol × 0.8s = 384s = 6.4 min)
+  xcpd_confounds_handled: true  # XCP-D already regresses confounds
+
+  # Brain mask for all voxelwise analyses (reduces computation)
+  brain_mask: "atlases/MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"
   
-  # Motion regression options
+  # Legacy confound regression (for non-XCP-D pipelines ONLY)
   motion_regression:
-    enabled: true
+    enabled: false             # Disabled: XCP-D handles this
     model: "24"               # 24-parameter Friston model (6 + derivatives + squares)
     
-  # Confound regression
   confound_regression:
-    enabled: true
+    enabled: false             # Disabled: XCP-D handles this
     models:
       - "trans_x"
       - "trans_y"
@@ -323,66 +330,72 @@ hpc:
 # ============================================================================
 # OUTPUT: Directory structure and naming conventions
 # ============================================================================
+# All outputs organized by: pipeline → atlas → seed (or network)
+# pipeline = XCP-D variant: fc, fc_gsr, ec
 output:
-  base: "results"
-  derivative_root: "derivatives/connectivity-difumo256"
+  # Root for all connectivity derivatives
+  derivative_root: "derivatives/connectivity"
   
   # Subject-level outputs
-  session_level:
+  subject_level:
     seed_based:
-      # Pattern: results/seed_based/difumo256/Motor_Cortex/sub-033_ses-01/
-      pattern: "{base}/seed_based/{atlas_name}/{seed_name}/sub-{subject_id}_ses-{session}/"
+      # Pattern: derivatives/connectivity/{pipeline}/{atlas}/{seed}/sub-{id}/ses-{ses}/
+      pattern: "{derivative_root}/{pipeline}/{atlas_name}/{seed_name}/sub-{subject_id}/ses-{session}/"
       files:
-        - "*_zmap.nii.gz"         # Z-scored connectivity map
-        - "*_zmap_fdr.nii.gz"     # FDR-corrected map (if applicable)
+        - "*_zmap.nii.gz"         # Fisher z-transformed correlation map
         - "*_mask.nii.gz"         # Seed mask used
-        - "individual_maps.csv"   # Metadata table for group analysis
+        - "metadata.json"         # Processing parameters
         
     local_measures:
-      pattern: "{base}/local_measures/sub-{subject_id}_ses-{session}/"
+      pattern: "{derivative_root}/{pipeline}/local_measures/sub-{subject_id}/ses-{session}/"
       files:
+        - "*_falff.nii.gz"
+        - "*_reho.nii.gz"
         - "*_degree.nii.gz"
         - "*_betweenness.nii.gz"
         - "*_eigenvector.nii.gz"
         
     network_connectivity:
-      pattern: "{base}/network_connectivity/sub-{subject_id}_ses-{session}/"
+      # Networks defined by atlas parcellations (not individual seeds)
+      pattern: "{derivative_root}/{pipeline}/{atlas_name}/network/sub-{subject_id}/ses-{session}/"
       files:
-        - "*_connectivity_matrix.csv"
-        - "*_correlation.nii.gz"
+        - "connectivity_matrix.h5"     # Full ROI×ROI matrix + timeseries
+        - "network_stats.csv"          # Network-level summary statistics
 
   # Group-level outputs
   group_level:
     seed_based:
-      pattern: "{base}/group_analysis/seed_based/{atlas_name}/{seed_name}/"
+      pattern: "{derivative_root}/{pipeline}/{atlas_name}/{seed_name}/group/"
       files:
-        - "cope1_mean.nii.gz"          # Mean connectivity map
-        - "cope1_zstat.nii.gz"         # Z-statistic map
-        - "cope1_tstat.nii.gz"         # T-statistic map
-        - "mask.nii.gz"                # Analysis mask
-        - "thresh_zstat1.nii.gz"       # Thresholded map
+        - "design.mat"                        # FSL design matrix
+        - "design.con"                        # Contrasts
+        - "design.grp"                        # Exchangeability blocks
+        - "mask.nii.gz"                       # Dilated MNI brain mask
+        - "cope1_tstat.nii.gz"                # T-statistic map
+        - "cope1_tfce_corrp_tstat.nii.gz"     # TFCE corrected p-values
         
     local_measures:
-      pattern: "{base}/group_analysis/local_measures/"
+      pattern: "{derivative_root}/{pipeline}/local_measures/group/"
       files:
-        - "*_degree_group.nii.gz"
-        - "*_degree_tstat.nii.gz"
+        - "*_group_tstat.nii.gz"
+        - "*_group_tfce_corrp.nii.gz"
         
     network_connectivity:
-      pattern: "{base}/group_analysis/network_connectivity/{atlas_name}/"
+      pattern: "{derivative_root}/{pipeline}/{atlas_name}/network/group/"
       files:
-        - "network_correlation_matrix.csv"
-        - "network_pvalues.csv"
+        - "group_matrix.h5"                   # Group connectivity matrices
+        - "group_stats.csv"                   # Statistical comparisons
 
   # Manifest and tracking
   manifest:
     filename: ".manifest.json"
-    location: "{base}/"
+    location: "{derivative_root}/{pipeline}/"
     track_fields:
       - subject_id
       - session
       - seed
       - atlas
+      - pipeline
       - processing_date
       - status
       - output_files
