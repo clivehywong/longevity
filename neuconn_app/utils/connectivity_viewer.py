@@ -279,10 +279,9 @@ def subject_session_pickers(
 
     Returns (subject, session) or (None, None) if no data is available.
     """
-    try:
-        from utils.xcpd_outputs import XcpdDiscovery
-    except Exception:
-        from neuconn_app.utils.xcpd_outputs import XcpdDiscovery
+    import importlib, sys
+    _mod = sys.modules.get("utils.xcpd_outputs") or importlib.import_module("utils.xcpd_outputs")
+    XcpdDiscovery = _mod.XcpdDiscovery
 
     discovery = XcpdDiscovery(bids_root, pipeline=pipeline)
     subjects = discovery.list_subjects(pipeline)
