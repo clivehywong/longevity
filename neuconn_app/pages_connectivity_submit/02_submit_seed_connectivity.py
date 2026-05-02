@@ -1,7 +1,16 @@
 """Submit seed-based connectivity analyses (XCP-D backend).
 
-Uses ConnectivityWorkflowManager.build_subject_level_command() with
---analysis seed, --pipeline, --measures, and repeatable --seed flags.
+Two run targets are supported:
+
+* **Local**  — serial subprocess execution (no parallelism), driven by
+  ``utils/local_connectivity_runner.LocalConnectivityRunner``.  Suitable for
+  testing the pipeline on the local workstation.
+* **HPC**    — submits a SLURM job via ``ConnectivityWorkflowManager`` (legacy
+  CLI path through ``hpc_submit_subject_level.py``).  Optionally re-uploads
+  cleaned XCP-D inputs first.
+
+Scripts are sourced from ``neuconn_app/scripts/connectivity/`` (symlinks to
+``script/``) so the app remains self-contained.
 """
 
 from __future__ import annotations
@@ -16,11 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils.config import load_config
 from utils.connectivity_workflow import ConnectivityWorkflowManager
+from utils.local_connectivity_runner import LocalConnectivityRunner
 from utils.seed_catalog import Seed, SeedCatalog
 from utils.xcpd_outputs import XcpdDiscovery, KNOWN_PIPELINES
 
-# Import MEASURES names from script directory
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "script"))
+# Import MEASURES names from the app-resident scripts directory
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "connectivity"))
 try:
     from connectivity_measures import MEASURES as _MEASURES_REGISTRY
     ALL_MEASURES = list(_MEASURES_REGISTRY.keys())
@@ -52,7 +62,7 @@ def _get_config() -> dict:
 def _seed_to_cli_token(seed: Seed) -> str:
     """Convert a Seed object to its CLI --seed argument value."""
     if seed.source == "xcpd_atlas_parcel":
-        return f"atlas-{seed.atlas}_parcel-{seed.parcel_label}"
+        return f"atlas-{seed.atlas}:{seed.parcel_label}"
     if seed.source == "custom_nifti_roi":
         return str(seed.nifti_path or seed.id)
     if seed.source == "sphere":
@@ -250,6 +260,37 @@ def render() -> None:
 
     st.markdown("---")
 
+    # --- Run target: Local vs HPC ---
+    st.subheader("⚙️ Execution target")
+    run_target = st.radio(
+        "Run on",
+        ["Local (serial, this workstation)", "HPC (SLURM batch)"],
+        horizontal=True,
+        key=f"{STATE_PREFIX}run_target_widget",
+        help=(
+            "Local runs the connectivity script serially as a subprocess on this "
+            "machine — no parallelism, suitable for testing or small jobs.  HPC "
+            "submits a SLURM array job via the configured cluster."
+        ),
+    )
+    is_local = run_target.startswith("Local")
+    st.session_state[f"{STATE_PREFIX}run_target"] = "local" if is_local else "hpc"
+
+    # HPC-only: re-upload cleaned XCP-D inputs
+    reupload_inputs = False
+    if not is_local:
+        reupload_inputs = st.checkbox(
+            "🔄 Re-upload cleaned XCP-D inputs to HPC before submitting",
+            value=False,
+            key=f"{STATE_PREFIX}reupload_widget",
+            help=(
+                "Sync local derivatives/preprocessing/xcpd/<pipeline>/<sub>/ for the "
+                "selected subjects to the HPC.  Use this if you have re-run XCP-D "
+                "locally and need the cluster to pick up the latest denoised BOLD "
+                "and atlas TSVs."
+            ),
+        )
+
     # --- Command preview ---
     seeds: list[dict] = st.session_state.get(f"{STATE_PREFIX}seeds", [])
     manager = ConnectivityWorkflowManager(config)
@@ -273,7 +314,12 @@ def render() -> None:
     if st.button("🔍 Build command preview", key=f"{STATE_PREFIX}preview_btn"):
         try:
             cmd = _build_cmd(dry_run=True)
-            st.session_state[f"{STATE_PREFIX}last_command"] = cmd
+            # Add note that this will be wrapped in sbatch on HPC
+            if not is_local:
+                display_cmd = f"# This command will be wrapped in sbatch on HPC:\n{cmd}"
+            else:
+                display_cmd = cmd
+            st.session_state[f"{STATE_PREFIX}last_command"] = display_cmd
         except Exception as exc:
             st.error(f"Command build failed: {exc}")
 
@@ -293,6 +339,25 @@ def render() -> None:
     )
     if total_jobs > 500:
         st.warning("⚠️ Large submission (>500 jobs). Consider narrowing scope.")
+    if is_local and total_jobs > 100:
+        st.warning(
+            "⚠️ Local serial execution will take a long time for this workload. "
+            "Consider HPC for large runs."
+        )
+
+    # --- Active local run status (if any) ---
+    state_dir = (Path(bids_root) / ".neuconn") if bids_root else Path.home() / ".neuconn"
+    runner = LocalConnectivityRunner(state_dir)
+    active_run_id = st.session_state.get(f"{STATE_PREFIX}local_run_id")
+    if active_run_id:
+        rs = runner.load_state(active_run_id)
+        if rs:
+            done = rs.get("completed", 0) + rs.get("failed", 0)
+            total = max(rs.get("total", 1), 1)
+            st.markdown(f"**Local run `{active_run_id}` — {rs['status']}**")
+            st.progress(done / total, text=f"{done}/{total} — current: {rs.get('current') or '—'}")
+            if rs["status"] in {"completed", "failed", "cancelled"}:
+                st.success(f"Run finished: completed={rs['completed']}, failed={rs['failed']}")
 
     # --- Dry-run / Submit ---
     col_dry, col_sub = st.columns(2)
@@ -310,11 +375,89 @@ def render() -> None:
                     st.error(f"Dry-run failed: {exc}")
 
     with col_sub:
-        if st.button("🚀 Submit", key=f"{STATE_PREFIX}submit_btn", type="primary"):
+        submit_label = "🖥️ Run locally (serial)" if is_local else "🚀 Submit to HPC"
+        if st.button(submit_label, key=f"{STATE_PREFIX}submit_btn", type="primary"):
             if not seeds:
                 st.error("Add at least one seed before submitting.")
+            elif is_local:
+                # ---- LOCAL: serial subprocess loop --------------------- #
+                _subjects_sessions = {
+                    s: [ss for ss in (sub_ses.get(s, []) or [])
+                        if not sel_sessions or ss in sel_sessions]
+                    for s in (sel_subjects or all_subjects)
+                }
+                _subjects_sessions = {k: v for k, v in _subjects_sessions.items() if v}
+                items = LocalConnectivityRunner.plan_seed(
+                    subjects_sessions=_subjects_sessions,
+                    seeds=[sd["token"] for sd in seeds],
+                    measures=sel_measures or ALL_MEASURES,
+                    bids_root=str(bids_root),
+                    out_root=out_root,
+                    pipeline=pipeline,
+                    bold_variant=bold_variant,
+                )
+                if not items:
+                    st.error("No subjects/sessions selected.")
+                else:
+                    run_id = runner.start_run("seed_connectivity", items)
+                    st.session_state[f"{STATE_PREFIX}local_run_id"] = run_id
+                    st.success(f"🟢 Local run started: `{run_id}` ({len(items)} subject-sessions)")
+                    st.info(
+                        "The UI will block while running.  Each subject-session "
+                        "takes ~30–60 s.  Progress is also persisted to "
+                        f"`{state_dir}/connectivity_local_runs/{run_id}.json`."
+                    )
+                    log_box = st.empty()
+                    progress_bar = st.progress(0.0, text="Starting…")
+                    log_lines: list[str] = []
+
+                    def _on_log(msg: str) -> None:
+                        log_lines.append(msg)
+                        log_box.code("\n".join(log_lines[-20:]))
+
+                    def _on_progress(done: int, total: int, label: str) -> None:
+                        progress_bar.progress(min(done / max(total, 1), 1.0),
+                                              text=f"{done}/{total} — {label}")
+
+                    final = runner.run_all(run_id, log_callback=_on_log, progress_callback=_on_progress)
+                    if final.get("status") == "completed":
+                        st.success(
+                            f"✅ Completed: {final['completed']}/{final['total']} "
+                            f"({final.get('failed', 0)} failed)"
+                        )
+                    else:
+                        st.error(
+                            f"⚠️ Run finished with errors: completed={final.get('completed')}, "
+                            f"failed={final.get('failed')}"
+                        )
             else:
+                # ---- HPC: optional re-upload then submit --------------- #
                 try:
+                    if reupload_inputs:
+                        with st.spinner("Re-uploading cleaned XCP-D inputs to HPC…"):
+                            from utils.hpc import HPCConfig, HPCConnection
+                            import subprocess as _sp
+                            hpc_cfg = HPCConfig.from_config(config)
+                            subjects_for_upload = sel_subjects or all_subjects
+                            ssh_opts = (
+                                f"ssh -p {hpc_cfg.port} -o StrictHostKeyChecking=no"
+                            )
+                            local_xcpd = (Path(bids_root) / "derivatives"
+                                          / "preprocessing" / "xcpd" / pipeline)
+                            remote_xcpd = (
+                                f"{hpc_cfg.user}@{hpc_cfg.host}:"
+                                f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline}/"
+                            )
+                            cmd = ["rsync", "-avz", "--info=progress2", "-e", ssh_opts]
+                            for sub in subjects_for_upload:
+                                cmd += [f"--include={sub}/", f"--include={sub}/**"]
+                            cmd += ["--exclude=*", f"{local_xcpd}/", remote_xcpd]
+                            res = _sp.run(cmd, capture_output=True, text=True, timeout=7200)
+                            if res.returncode != 0:
+                                st.error(f"Re-upload failed: {res.stderr[-500:]}")
+                                st.stop()
+                            st.success(f"Re-uploaded {len(subjects_for_upload)} subjects.")
+
                     subjects_for_submit = sel_subjects or all_subjects
                     opts = {
                         "pipeline": pipeline,
@@ -328,8 +471,9 @@ def render() -> None:
                         "seed_connectivity", opts, subjects_for_submit, dry_run=False
                     )
                     job_id = sub_obj.job_id if sub_obj else "unknown"
-                    st.success(f"✅ Submitted! Job ID: **{job_id}**")
-                    if st.button("📡 Track on HPC monitor", key=f"{STATE_PREFIX}track_btn"):
-                        st.session_state["hpc_monitor_job_id"] = job_id
+                    if sub_obj and sub_obj.status == "failed":
+                        st.error(f"❌ HPC submission failed: {sub_obj.notes or 'unknown error'}")
+                    else:
+                        st.success(f"✅ HPC job submitted! Job ID: **{job_id}**")
                 except Exception as exc:
-                    st.error(f"Submission failed: {exc}")
+                    st.error(f"HPC submission failed: {exc}")

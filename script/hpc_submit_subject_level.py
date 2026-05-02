@@ -667,7 +667,7 @@ print(' '.join(cfg['seeds'].keys()))
             if python3 script/seed_based_connectivity.py \\
                 --fmriprep "$FMRIPREP_ROOT" \\
                 --seeds script/motor_cerebellar_seeds.json \\
-                --metadata group.csv \\
+                --metadata bids/participants.tsv \\
                 --output "$SEED_OUTPUT" \\
                 --seed-names "$SEED" \\
                 --space MNI152NLin2009cAsym \\

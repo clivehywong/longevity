@@ -16,10 +16,10 @@ Only these files may exist at the repository root:
 | `AGENTS.md` | Agent/developer conventions (this file) |
 | `CLAUDE.md` | Thin pointer to AGENTS.md for Claude Code |
 | `QUICK_START.md` | User-facing navigation entry point |
-| `group.csv` | Study design metadata (subjects × groups) |
 | `pytest.ini` | Pytest configuration |
 | `.gitignore` | Git ignore rules |
-| `.coveragerc` / `.coverage` | Coverage config (if needed) |
+
+**Note**: Study metadata is in `bids/participants.tsv` (BIDS standard). Root files `.coverage` and `qc_status.json` are gitignored.
 
 ### Hard rules
 
@@ -343,7 +343,7 @@ Preserve this behavior — never flatten derived paths into hardcoded strings.
 | State | Location |
 |---|---|
 | User config | `~/neuconn_projects/<project>.yaml` |
-| QC status | `<bids_parent>/qc_status.json` |
+| QC status | `<bids_parent>/derivatives/qc/qc_status.json` (legacy fallback: `<bids_parent>/qc_status.json`) |
 | Exclusion files | sibling `bids_excluded/` |
 | HPC workflow state | `<bids_parent>/.neuconn/hpc_workflow_state.json` |
 | QC image cache | `<bids>/derivatives/qc_images/` |

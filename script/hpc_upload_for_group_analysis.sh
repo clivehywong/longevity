@@ -29,6 +29,7 @@ echo "Creating remote directories..."
 ssh ${HPC_USER}@${HPC_HOST} "mkdir -p ${HPC_PROJECT_DIR}/derivatives/connectivity-difumo256-hpc/group-level"
 ssh ${HPC_USER}@${HPC_HOST} "mkdir -p ${HPC_PROJECT_DIR}/script"
 ssh ${HPC_USER}@${HPC_HOST} "mkdir -p ${HPC_PROJECT_DIR}/logs"
+ssh ${HPC_USER}@${HPC_HOST} "mkdir -p ${HPC_PROJECT_DIR}/bids"
 
 # Upload metadata files
 echo ""
@@ -38,8 +39,8 @@ rsync -avz --progress \
     ${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/derivatives/connectivity-difumo256-hpc/
 
 rsync -avz --progress \
-    "${LOCAL_PROJECT_DIR}/group.csv" \
-    ${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/
+    "${LOCAL_PROJECT_DIR}/bids/participants.tsv" \
+    ${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/bids/
 
 # Upload subject-level z-maps (if not already on HPC)
 echo ""

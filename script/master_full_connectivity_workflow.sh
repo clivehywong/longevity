@@ -28,7 +28,7 @@ SCRIPT_DIR="$PROJECT_DIR/script"
 RESULTS_DIR="$PROJECT_DIR/results"
 
 # Input files
-GROUP_FILE="$PROJECT_DIR/group.csv"
+GROUP_FILE="$PROJECT_DIR/bids/participants.tsv"
 SEEDS_JSON="$ATLASES_DIR/motor_cerebellar_seeds.json"
 NETWORKS_JSON="$ATLASES_DIR/difumo256_network_definitions.json"
 

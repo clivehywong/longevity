@@ -20,7 +20,7 @@ bids/
 |---|---|---|
 | Validation/QC | `bids/` | console reports, `qa_images_full/` |
 | Preprocessing | `bids/` + HPC | `fmriprep/` |
-| Metadata | `fmriprep/`, `group.csv` | `results/metadata.csv` |
+| Metadata | `fmriprep/`, `bids/participants.tsv` | `results/metadata.csv` |
 | Local measures | `fmriprep/` | `results/local_measures/` |
 | Time series | `fmriprep/`, atlases | `results/timeseries_difumo256.h5` |
 | Seed/network analysis | `results/metadata.csv`, atlases | `results/seed_based/`, `results/network_connectivity/` |
@@ -32,7 +32,7 @@ bids/
 | Path | Role |
 |---|---|
 | `~/neuconn_projects/<project>.yaml` | user/project config overrides |
-| `<bids parent>/qc_status.json` | QC decisions |
+| `<bids parent>/derivatives/qc/qc_status.json` | QC decisions (legacy fallback: `<bids parent>/qc_status.json`) |
 | sibling `bids_excluded/` | excluded scans with preserved structure |
 | `<bids parent>/.neuconn/hpc_workflow_state.json` | HPC workflow state |
 | `<bids>/derivatives/qc_images/` | QC image cache and manifest |

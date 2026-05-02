@@ -307,7 +307,7 @@ class TestGroupVoxelCommand:
             measure="alff",
             contrast="ses-02_vs_ses-01",
             method="grf",
-            group_csv="group.csv",
+            group_csv="bids/participants.tsv",
             out="results/voxel",
         )
         assert "group_voxel_stats_xcpd.py" in cmd
@@ -321,7 +321,7 @@ class TestGroupVoxelCommand:
             measure="reho",
             contrast="ses-02_vs_ses-01",
             method="tfce",
-            group_csv="group.csv",
+            group_csv="bids/participants.tsv",
             out="results/voxel",
             n_permutations=5000,
         )
@@ -334,14 +334,14 @@ class TestGroupVoxelCommand:
         cmd_without = build_xcpd_group_command(
             kind="voxel", bids_root="/data", pipeline="fc",
             measure="alff", contrast="c", method="fdr",
-            group_csv="g.csv", out="out",
+            group_csv="bids/participants.tsv", out="out",
         )
         assert "--mask" not in cmd_without
 
         cmd_with = build_xcpd_group_command(
             kind="voxel", bids_root="/data", pipeline="fc",
             measure="alff", contrast="c", method="fdr",
-            group_csv="g.csv", out="out",
+            group_csv="bids/participants.tsv", out="out",
             mask="/data/mni_mask.nii.gz",
         )
         assert "--mask" in cmd_with
@@ -352,7 +352,7 @@ class TestGroupVoxelCommand:
             build_xcpd_group_command(
                 kind="unknown", bids_root="/data", pipeline="fc",
                 measure="alff", contrast="c", method="grf",
-                group_csv="g.csv", out="out",
+                group_csv="bids/participants.tsv", out="out",
             )
 
 
@@ -369,7 +369,7 @@ class TestGroupMatrixCommand:
             measure="pearson",
             contrast="ses-02_vs_ses-01",
             method="nbs",
-            group_csv="group.csv",
+            group_csv="bids/participants.tsv",
             out="results/matrix",
             matrix_kind="network",
             atlas="4S256Parcels",
@@ -385,7 +385,7 @@ class TestGroupMatrixCommand:
             measure="pearson",
             contrast="c",
             method="paired_t_fdr",
-            group_csv="group.csv",
+            group_csv="bids/participants.tsv",
             out="out",
             matrix_kind="seed",
             seed_id="PCC",
@@ -401,7 +401,7 @@ class TestGroupMatrixCommand:
             measure="pearson",
             contrast="c",
             method="nbs",
-            group_csv="group.csv",
+            group_csv="bids/participants.tsv",
             out="out",
             matrix_kind="network",
             atlas="Glasser",
@@ -429,7 +429,7 @@ class TestGroupSlurmScript:
             measure="alff",
             contrast="ses-02_vs_ses-01",
             method="grf",
-            group_csv="group.csv",
+            group_csv="bids/participants.tsv",
             out="results/voxel",
         )
         assert "group_voxel_stats_xcpd.py" in script
@@ -443,7 +443,7 @@ class TestGroupSlurmScript:
             measure="pearson",
             contrast="ses-02_vs_ses-01",
             method="nbs",
-            group_csv="group.csv",
+            group_csv="bids/participants.tsv",
             out="results/matrix",
             matrix_kind="network",
             atlas="4S256Parcels",
@@ -458,7 +458,7 @@ class TestGroupSlurmScript:
             measure="alff",
             contrast="c",
             method="grf",
-            group_csv="g.csv",
+            group_csv="bids/participants.tsv",
             out="out",
             subject_job_id="99999",
         )

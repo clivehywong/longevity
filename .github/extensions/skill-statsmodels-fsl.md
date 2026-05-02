@@ -262,14 +262,14 @@ print(df_long.shape)  # (n_scans × n_voxels, 7)
 ### Handling Missing Data and Exclusions
 
 **QC-based exclusions:**
-- Use `bids_excluded/` directory and `qc_status.json` to identify bad scans
+- Use `bids_excluded/` directory and `derivatives/qc/qc_status.json` to identify bad scans
 - Drop excluded rows from metadata before loading maps
 
 ```python
 import json
 
 # Load QC exclusions
-with open('bids/derivatives/qc_status.json', 'r') as f:
+with open('derivatives/qc/qc_status.json', 'r') as f:
     qc_status = json.load(f)
 
 excluded = [item for item, status in qc_status.items() if status == 'excluded']

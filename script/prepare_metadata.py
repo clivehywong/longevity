@@ -22,22 +22,64 @@ import pandas as pd
 warnings.filterwarnings('ignore')
 
 
+def load_participants_data(group_file=None):
+    """Load participants data from BIDS participants.tsv or legacy group.csv."""
+    candidates = []
+    if group_file:
+        candidates.append(Path(group_file))
+    else:
+        candidates.extend([Path("bids/participants.tsv"), Path("group.csv")])
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        if path.suffix == ".tsv":
+            df = pd.read_csv(path, sep='\t')
+        else:
+            df = pd.read_csv(path)
+        if 'subject_id' in df.columns and 'participant_id' not in df.columns:
+            df.rename(columns={'subject_id': 'participant_id'}, inplace=True)
+        return df
+
+    raise FileNotFoundError(
+        f"Could not find participants file. Checked: {', '.join(str(p) for p in candidates)}"
+    )
+
+
 def load_group_assignments(group_file):
-    """Load group assignments from CSV."""
-    df = pd.read_csv(group_file)
-    return dict(zip(df['subject_id'], df['group']))
+    """Load group assignments from participants.tsv or legacy group.csv."""
+    df = load_participants_data(group_file)
+    return dict(zip(df['participant_id'], df['group']))
 
 
 def load_demographics(demographics_file):
     """
-    Load demographics from CSV if available.
+    Load demographics from TSV/CSV if available.
 
-    Expected columns: subject_id, age, sex
+    Expected columns: participant_id/subject_id and Age/Gender or age/sex
     """
     if demographics_file and Path(demographics_file).exists():
-        df = pd.read_csv(demographics_file)
-        return df.set_index('subject_id')[['age', 'sex']].to_dict('index')
-    return {}
+        path = Path(demographics_file)
+        if path.suffix == '.tsv':
+            df = pd.read_csv(path, sep='\t')
+        else:
+            df = pd.read_csv(path)
+    else:
+        return {}
+
+    if 'subject_id' in df.columns and 'participant_id' not in df.columns:
+        df.rename(columns={'subject_id': 'participant_id'}, inplace=True)
+
+    age_col = 'Age' if 'Age' in df.columns else 'age'
+    sex_col = 'Gender' if 'Gender' in df.columns else 'sex'
+    if not {'participant_id', age_col, sex_col}.issubset(df.columns):
+        return {}
+
+    return (
+        df.set_index('participant_id')[[age_col, sex_col]]
+        .rename(columns={age_col: 'age', sex_col: 'sex'})
+        .to_dict('index')
+    )
 
 
 def extract_mean_fd(confounds_file):
@@ -64,7 +106,7 @@ def create_metadata(fmriprep_dir, group_file, demographics_file=None, output_fil
     fmriprep_dir : str
         Path to fMRIPrep derivatives directory
     group_file : str
-        Path to group.csv with subject_id,group columns
+        Path to bids/participants.tsv or legacy group.csv with participant_id/group columns
     demographics_file : str, optional
         Path to demographics.csv with subject_id,age,sex columns
     output_file : str, optional
@@ -83,7 +125,8 @@ def create_metadata(fmriprep_dir, group_file, demographics_file=None, output_fil
     print(f"Loaded group assignments for {len(groups)} subjects")
 
     # Load demographics if available
-    demographics = load_demographics(demographics_file)
+    demographics_source = demographics_file or group_file
+    demographics = load_demographics(demographics_source)
     if demographics:
         print(f"Loaded demographics for {len(demographics)} subjects")
     else:
@@ -106,7 +149,7 @@ def create_metadata(fmriprep_dir, group_file, demographics_file=None, output_fil
 
         # Skip if not in groups
         if subject not in groups:
-            print(f"  Warning: {subject} not in group.csv, skipping")
+            print(f"  Warning: {subject} not in participants.tsv/group.csv, skipping")
             continue
 
         # Get group
@@ -170,10 +213,10 @@ def main():
                         default='/home/clivewong/proj/longevity/fmriprep',
                         help='Path to fMRIPrep derivatives directory')
     parser.add_argument('--group', type=str,
-                        default='/home/clivewong/proj/longevity/group.csv',
-                        help='Path to group.csv with subject_id,group columns')
+                        default='/home/clivewong/proj/longevity/bids/participants.tsv',
+                        help='Path to bids/participants.tsv or legacy group.csv')
     parser.add_argument('--demographics', type=str,
-                        help='Path to demographics.csv with subject_id,age,sex columns (optional)')
+                        help='Path to demographics TSV/CSV with participant_id, age, sex columns (optional)')
     parser.add_argument('--output', type=str,
                         default='/home/clivewong/proj/longevity/results/metadata.csv',
                         help='Output path for metadata.csv')

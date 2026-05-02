@@ -50,7 +50,7 @@ GROUP_DIR="$DERIVATIVE_ROOT/group"
 REPORTS_DIR="$PROJECT_DIR/derivatives/reports"
 
 # Input files
-GROUP_FILE="$PROJECT_DIR/group.csv"
+GROUP_FILE="$PROJECT_DIR/bids/participants.tsv"
 
 # Atlas-specific files
 if [[ "$ATLAS" == "difumo256" ]]; then

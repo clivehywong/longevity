@@ -75,7 +75,7 @@ METADATA_FILE="$DERIVATIVE_ROOT/participants.tsv"
 
 python "$SCRIPT_DIR/prepare_metadata.py" \
     --fmriprep "$FMRIPREP_DIR" \
-    --group "$PROJECT_DIR/group.csv" \
+    --group "$PROJECT_DIR/bids/participants.tsv" \
     --output "$METADATA_FILE"
 
 echo ""

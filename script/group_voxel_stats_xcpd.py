@@ -32,7 +32,7 @@ Usage example
         --measure alff \\
         --contrast ses-02_minus_ses-01 \\
         --method tfce --n-permutations 5000 \\
-        --group-csv /home/clivewong/proj/longevity/group.csv \\
+        --group-csv /home/clivewong/proj/longevity/bids/participants.tsv \\
         --mask /home/clivewong/proj/longevity/atlases/MNI152NLin6Asym_res-2_brainmask.nii.gz \\
         --out derivatives/connectivity/group/voxel/fc/ses-02_minus_ses-01/alff/tfce/
 """
@@ -67,6 +67,20 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+
+def load_group_metadata(group_csv: Path) -> pd.DataFrame:
+    """Load CSV/TSV metadata and normalize participant_id to subject_id."""
+    group_df = pd.read_csv(group_csv, sep=None, engine="python")
+    if "participant_id" in group_df.columns and "subject_id" not in group_df.columns:
+        group_df = group_df.rename(columns={"participant_id": "subject_id"})
+
+    required_cols = {"subject_id", "group"}
+    if not required_cols.issubset(group_df.columns):
+        raise ValueError(
+            "Group metadata must contain subject_id/participant_id and group columns."
+        )
+    return group_df
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -128,6 +142,24 @@ def _get_seed_map(
     seed_id: str,
 ) -> Optional[Path]:
     """Return seed-to-voxel zmap for one (subject, session, seed_id), or None."""
+    # For generic "to-voxel" measure, look for generic seed-to-voxel zmap at parent level
+    if seed_id == "to-voxel":
+        seed_dir = (
+            bids_root
+            / "derivatives"
+            / "connectivity"
+            / pipeline
+            / subject
+            / session
+            / "seed"
+        )
+        if not seed_dir.exists():
+            return None
+        # Look for the generic seed-to-voxel file at parent seed/ level
+        matches = sorted(seed_dir.glob("*_seed-to-voxel_zmap.nii.gz"))
+        return matches[0] if matches else None
+    
+    # For specific seeds, look in subdirectories
     seed_dir = (
         bids_root
         / "derivatives"
@@ -913,10 +945,7 @@ def run_group_voxel_stats(
     out_dir = Path(out_dir)
     bids_root = Path(bids_root)
 
-    group_df = pd.read_csv(group_csv)
-    required_cols = {"subject_id", "group"}
-    if not required_cols.issubset(group_df.columns):
-        raise ValueError(f"group CSV must contain columns: {required_cols}")
+    group_df = load_group_metadata(group_csv)
 
     discovery = XcpdDiscovery(bids_root, pipeline=pipeline)
 
@@ -1026,7 +1055,7 @@ def _parse_args(argv=None) -> argparse.Namespace:
                         choices=["grf", "tfce", "fdr"],
                         help="Correction method.")
     parser.add_argument("--group-csv", required=True, type=Path,
-                        help="CSV with subject_id, group columns.")
+                        help="CSV/TSV with participant_id (or subject_id) and group columns.")
     parser.add_argument("--out", required=True, type=Path,
                         help="Output directory.")
     parser.add_argument("--mask", type=Path, default=None,

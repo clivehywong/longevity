@@ -394,15 +394,21 @@ def main():
         print("No clusters to plot. Exiting.")
         return 0
 
-    # Load metadata (auto-detect separator)
-    try:
-        metadata = pd.read_csv(args.metadata)
-    except Exception:
-        metadata = pd.read_csv(args.metadata, sep='\t')
+    # Load metadata
+    metadata_path = Path(args.metadata)
+    metadata = pd.read_csv(metadata_path, sep='\t' if metadata_path.suffix == '.tsv' else ',')
+
+    if 'participant_id' in metadata.columns and 'subject' not in metadata.columns:
+        metadata = metadata.rename(columns={'participant_id': 'subject'})
+    if 'subject_id' in metadata.columns and 'subject' not in metadata.columns:
+        metadata = metadata.rename(columns={'subject_id': 'subject'})
 
     # Supplement with group file if provided
     if args.group_file and Path(args.group_file).exists():
-        group_df = pd.read_csv(args.group_file)
+        group_path = Path(args.group_file)
+        group_df = pd.read_csv(group_path, sep='\t' if group_path.suffix == '.tsv' else ',')
+        if 'participant_id' in group_df.columns and 'subject_id' not in group_df.columns:
+            group_df = group_df.rename(columns={'participant_id': 'subject_id'})
         group_map = dict(zip(group_df['subject_id'], group_df['group']))
 
         # Add group to metadata if missing

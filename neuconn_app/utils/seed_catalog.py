@@ -68,7 +68,13 @@ def _infer_network(atlas: str, label: str) -> str | None:
     Glasser:      no network in label     →  None
     """
     if atlas.startswith("4S") and atlas.endswith("Parcels"):
-        m = re.match(r"^(?:LH|RH)_([A-Za-z]+[A-Za-z0-9]*)_\d+$", label)
+        # Schaefer cortical parcels can have either:
+        #   LH_<Network>_<index>            e.g. LH_Vis_3
+        #   LH_<Network>_<RegionTag>_<index> e.g. LH_Cont_Par_1, LH_Default_PFC_2
+        m = re.match(
+            r"^(?:LH|RH)_([A-Za-z]+[A-Za-z0-9]*?)(?:_[A-Za-z][A-Za-z0-9]*)*_\d+$",
+            label,
+        )
         if m:
             return m.group(1)
         m2 = re.match(r"^([A-Za-z]+)_Region\d+$", label)

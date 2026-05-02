@@ -45,7 +45,7 @@ Fisher-z transform is applied automatically to correlation-type measures before 
 
 - fMRIPrep outputs at `derivatives/func/preprocessing/fmriprep/`
 - XCP-D outputs at `derivatives/preprocessing/xcpd/{fc,fc_gsr,ec}/`
-- `group.csv` with subject group assignments
+- `bids/participants.tsv` with subject group assignments in tab-separated columns
 
 ### Step 1: Verify XCP-D coverage
 

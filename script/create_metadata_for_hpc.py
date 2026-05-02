@@ -4,9 +4,9 @@ Create Metadata File for Group-Level Analysis
 
 Generates participants_updated.tsv with:
 - Subject and session IDs from actual z-map files
-- Group assignments from group.csv
+- Group assignments from bids/participants.tsv (or legacy group.csv)
 - Mean FD from fMRIPrep confounds (if available)
-- Age and sex placeholders (to be filled manually)
+- Age and sex from participants.tsv when available
 
 Usage:
     python script/create_metadata_for_hpc.py
@@ -19,6 +19,25 @@ import pandas as pd
 from pathlib import Path
 import sys
 
+
+def load_participants_data(project_dir: Path) -> pd.DataFrame:
+    """Load BIDS participants.tsv with legacy group.csv fallback."""
+    participants_tsv = project_dir / 'bids' / 'participants.tsv'
+    legacy_group_csv = project_dir / 'group.csv'
+
+    if participants_tsv.exists():
+        df = pd.read_csv(participants_tsv, sep='\t')
+    elif legacy_group_csv.exists():
+        df = pd.read_csv(legacy_group_csv)
+        df.rename(columns={'subject_id': 'participant_id'}, inplace=True)
+    else:
+        raise FileNotFoundError(
+            f"Could not find {participants_tsv} or {legacy_group_csv}"
+        )
+
+    return df
+
+
 def main():
     print("=" * 60)
     print("CREATING METADATA FOR GROUP-LEVEL ANALYSIS")
@@ -27,19 +46,25 @@ def main():
 
     # Paths
     project_dir = Path('.')
-    group_file = project_dir / 'group.csv'
+    participants_file = project_dir / 'bids/participants.tsv'
     subject_level_dir = project_dir / 'derivatives/connectivity-difumo256-hpc/subject-level/seed_based/motor_cortex'
     fmriprep_dir = project_dir / 'fmriprep'
     output_file = project_dir / 'derivatives/connectivity-difumo256-hpc/participants_updated.tsv'
 
     # Load group assignments
-    if not group_file.exists():
-        print(f"ERROR: Group file not found: {group_file}")
+    try:
+        participants_df = load_participants_data(project_dir)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}")
         return 1
 
-    group_df = pd.read_csv(group_file)
-    group_map = dict(zip(group_df['subject_id'], group_df['group']))
-    print(f"Loaded group assignments for {len(group_map)} subjects")
+    participant_map = (
+        participants_df
+        .rename(columns={'Age': 'age', 'Gender': 'sex'})
+        .set_index('participant_id')
+        .to_dict('index')
+    )
+    print(f"Loaded participant data for {len(participant_map)} subjects from {participants_file}")
     print()
 
     # Find all subjects with z-maps
@@ -61,8 +86,9 @@ def main():
         subject = parts[0]
         session = parts[1]
 
-        # Get group
-        group = group_map.get(subject, 'Unknown')
+        # Get participant metadata
+        participant_info = participant_map.get(subject, {})
+        group = participant_info.get('group', 'Unknown')
         if group == 'Unknown':
             print(f"WARNING: No group assignment for {subject}")
 
@@ -82,8 +108,8 @@ def main():
             'subject': subject,
             'session': session,
             'group': group,
-            'age': '',
-            'sex': '',
+            'age': participant_info.get('age', ''),
+            'sex': participant_info.get('sex', ''),
             'mean_fd': mean_fd if mean_fd is not None else ''
         })
 
@@ -113,19 +139,18 @@ def main():
     print(f"  Missing FD: {len(metadata_df) - fd_available}/{len(metadata_df)}")
     print()
     print("Age/Sex status:")
-    print("  Age: Empty (fill manually if needed)")
-    print("  Sex: Empty (fill manually if needed)")
+    print(f"  Age present: {metadata_df['age'].replace('', pd.NA).notna().sum()}/{len(metadata_df)}")
+    print(f"  Sex present: {metadata_df['sex'].replace('', pd.NA).notna().sum()}/{len(metadata_df)}")
     print()
     print("First 5 rows:")
     print(metadata_df.head().to_string(index=False))
     print()
     print("=" * 60)
     print()
-    print("NOTE: Age and sex are left blank. The analysis will automatically")
-    print("      drop these covariates since >50% are missing.")
+    print("NOTE: Age and sex are populated from bids/participants.tsv when available.")
+    print("      Missing values can still be filled manually before running analysis.")
     print()
-    print("      If you want to include age/sex in the model, manually fill")
-    print(f"      them in {output_file} before running the analysis.")
+    print(f"      Review {output_file} before running the analysis.")
     print()
     print("=" * 60)
 

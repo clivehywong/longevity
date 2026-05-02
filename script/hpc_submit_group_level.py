@@ -901,7 +901,7 @@ def build_xcpd_group_command(
         - voxel: ``grf | tfce | fdr``
         - matrix: ``paired_t_fdr | nbs | tfnbs``
     group_csv:
-        Path to ``group.csv``.
+        Path to ``bids/participants.tsv`` or legacy ``group.csv``.
     out:
         Output directory/file path.
     mask:
@@ -1099,7 +1099,7 @@ def main():
     parser.add_argument("--contrast", default=None, help="Contrast label (e.g. ses-02_vs_ses-01).")
     parser.add_argument("--method", default=None,
                         help="Statistical method. Voxel: grf|tfce|fdr. Matrix: paired_t_fdr|nbs|tfnbs.")
-    parser.add_argument("--group-csv", default=None, help="Group definition CSV (required by XCP-D backends).")
+    parser.add_argument("--group-csv", default=None, help="Participants TSV / legacy group CSV (required by XCP-D backends).")
     parser.add_argument("--out", default=None, help="Output directory for XCP-D backend results.")
 
     # ---- Voxel-specific ----
@@ -1204,7 +1204,7 @@ def main():
                 measure=args.measure or "",
                 contrast=args.contrast or "",
                 method=args.method or ("grf" if args.kind == "voxel" else "paired_t_fdr"),
-                group_csv=args.group_csv or "group.csv",
+                group_csv=args.group_csv or "bids/participants.tsv",
                 out=args.out or f"results/group_{args.kind}",
                 log_dir=args.log_dir,
                 subject_job_id=args.subject_job_id,

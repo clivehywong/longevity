@@ -2,7 +2,10 @@
 .neuconn
 bids
 bids_excluded
-derivatives
+derivatives/*
+!derivatives/qc/
+derivatives/qc/*
+!derivatives/qc/qc_status.json
 fmriprep
 qa_images_full
 results
@@ -21,6 +24,7 @@ tmp
 xcpd_job_ids.txt
 
 # Session artifacts (ephemeral files, not tracked)
+.coverage
 *.log
 *.out
 *.pid
@@ -56,4 +60,6 @@ package-lock.json
 # Root directory protection — block stray files (see AGENTS.md §1)
 # Only whitelisted files belong at root: AGENTS.md, CLAUDE.md, QUICK_START.md,
 # group.csv, pytest.ini, .gitignore
+/qc_status.json
+/derivatives/qc/qc_status.json
 /nohup.out

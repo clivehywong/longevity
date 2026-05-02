@@ -199,7 +199,8 @@ class ConnectivityWorkflowManager:
         options = options or {}
         script_path = self._script_path("hpc_submit_subject_level.py", options)
         analysis_flag = _ANALYSIS_FLAG_MAP[analysis_type]
-        parts = ["python", shlex.quote(str(script_path)), "--analysis", shlex.quote(analysis_flag)]
+        # Use python3 explicitly (HPC environments may not have 'python' in PATH)
+        parts = ["python3", shlex.quote(str(script_path)), "--analysis", shlex.quote(analysis_flag)]
 
         # Core XCP-D flags
         scalar_options = [
@@ -260,7 +261,8 @@ class ConnectivityWorkflowManager:
         """
         options = options or {}
         script_path = self._script_path("hpc_submit_group_level.py", options)
-        parts = ["python", shlex.quote(str(script_path))]
+        # Use python3 explicitly (HPC environments may not have 'python' in PATH)
+        parts = ["python3", shlex.quote(str(script_path))]
 
         # New XCP-D routing flag
         if options.get("kind"):
@@ -444,10 +446,28 @@ class ConnectivityWorkflowManager:
                 connection.disconnect()
 
     def _script_path(self, script_name: str, options: Dict) -> Path:
+        """Resolve the script path for the submit command.
+
+        For HPC runs the path must be a remote path (resolved against
+        ``remote_project_dir`` or the configured ``remote_base``).  When the
+        caller has explicitly opted into running from the app-resident
+        ``neuconn_app/scripts/connectivity/`` directory (``options['use_app_scripts']``)
+        or no remote root is available, fall back to the local symlinked
+        directory inside the app — this keeps the app self-contained.
+        """
         project_root = options.get("remote_project_dir") or options.get("project_root")
-        if not project_root:
-            project_root = self.hpc_config.remote_base or str(self._project_root())
-        return Path(str(project_root)).expanduser() / "script" / script_name
+        if project_root:
+            return Path(str(project_root)).expanduser() / "script" / script_name
+        if options.get("use_app_scripts") or not self.hpc_config.remote_base:
+            app_scripts = (
+                Path(__file__).resolve().parent.parent
+                / "scripts" / "connectivity" / script_name
+            )
+            if app_scripts.exists():
+                return app_scripts
+        if self.hpc_config.remote_base:
+            return Path(self.hpc_config.remote_base).expanduser() / "script" / script_name
+        return self._project_root() / "script" / script_name
 
     def _project_root(self) -> Path:
         configured = self.config.get("paths", {}).get("project_root") or self.config.get("project_root")

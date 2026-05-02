@@ -16,7 +16,7 @@ from utils.roi_config import load_roi_config, seed_rois
 
 ARTIFACT_PATTERNS = {
     "timeseries": "**/*timeseries*.tsv",
-    "connectome": "**/*connectome*.tsv",
+    "connectome": "**/*pearsoncorrelation_relmat*.tsv",  # ✅ Fixed: XCP-D generates pearsoncorrelation_relmat files
     "alff": "**/*_alff.nii.gz",
     "falff": "**/*_falff.nii.gz",
     "reho": "**/*_reho.nii.gz",

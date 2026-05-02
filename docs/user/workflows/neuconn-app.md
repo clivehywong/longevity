@@ -52,11 +52,11 @@ The sidebar has two levels:
 
 ## Subject Data page
 
-**Data QC → 📋 Subject Data** shows and edits the project's `group.csv`.
+**Data QC → 📋 Subject Data** shows and edits the project's `bids/participants.tsv`.
 
 - The table is editable directly in the UI. Click **Save** to write changes back.
-- Use the file uploader to replace or merge a CSV from disk.
-- Subjects present in the BIDS folder but missing from `group.csv` are flagged as "unlabeled" — they are not auto-assigned a group.
+- Use the file uploader to replace or merge a tab-separated TSV from disk.
+- Subjects present in the BIDS folder but missing from `bids/participants.tsv` are flagged as "unlabeled" — they are not auto-assigned a group.
 
 ## fMRI Preprocessing Dashboard
 
@@ -258,7 +258,7 @@ After QC approval, open **fMRI Analysis → Subject Level**.
 | Path | Contents |
 |---|---|
 | `~/neuconn_projects/<project>.yaml` | User/project config and path overrides |
-| `<bids parent>/qc_status.json` | QC decisions (pass/fail per scan) |
+| `<bids parent>/derivatives/qc/qc_status.json` | QC decisions (pass/fail per scan; legacy fallback: `<bids parent>/qc_status.json`) |
 | `<bids parent>/.neuconn/xcpd_pipeline_state.json` | Pipeline step statuses, gate approvals, run metadata |
 | `sibling bids_excluded/` | Excluded scans (original structure preserved) |
 | `<bids>/derivatives/qc_images/` | QC image cache |

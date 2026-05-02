@@ -300,14 +300,14 @@ def test_null_tfnbs_no_edges(null_diffs):
 # ---------------------------------------------------------------------------
 
 def _write_synthetic_tsvs(tmp_path: Path) -> tuple[Path, Path, str]:
-    """Write synthetic paired TSVs and group.csv; return (bids_root, group_csv, atlas)."""
+    """Write synthetic paired TSVs and participants.tsv; return (bids_root, participants_tsv, atlas)."""
     rng = np.random.default_rng(7)
     pipeline = "fc"
     atlas = "TestAtlas"
     measure = "pearson"
     labels = [f"parcel-{k:02d}" for k in range(N_PARCELS)]
 
-    bids_root = tmp_path / "bids_root"
+    bids_root = tmp_path / "bids"
     subjects = [f"sub-{i:03d}" for i in range(N_SUB)]
 
     X1, X2 = _make_paired_data(injected_edges=INJECTED_EDGES, rng=rng)
@@ -330,16 +330,19 @@ def _write_synthetic_tsvs(tmp_path: Path) -> tuple[Path, Path, str]:
             df = pd.DataFrame(mat, index=labels, columns=labels)
             df.to_csv(conn_dir / fname, sep="\t")
 
-    group_csv = tmp_path / "group.csv"
-    pd.DataFrame({"subject_id": subjects, "group": ["A"] * N_SUB}).to_csv(
-        group_csv, index=False
-    )
-    return bids_root, group_csv, atlas
+    participants_tsv = bids_root / "participants.tsv"
+    pd.DataFrame({
+        "participant_id": subjects,
+        "Age": np.linspace(60, 68, N_SUB),
+        "Gender": ["F" if i % 2 == 0 else "M" for i in range(N_SUB)],
+        "group": ["A"] * N_SUB,
+    }).to_csv(participants_tsv, sep="\t", index=False)
+    return bids_root, participants_tsv, atlas
 
 
 def test_output_files_created(tmp_path):
     """All required output files are written by run_group_matrix_stats."""
-    bids_root, group_csv, atlas = _write_synthetic_tsvs(tmp_path)
+    bids_root, participants_tsv, atlas = _write_synthetic_tsvs(tmp_path)
     out_dir = tmp_path / "out_nbs"
 
     gms.run_group_matrix_stats(
@@ -354,7 +357,7 @@ def test_output_files_created(tmp_path):
         threshold=3.0,
         n_permutations=100,
         alpha=0.05,
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
         rng_seed=42,
     )
@@ -372,7 +375,7 @@ def test_output_files_created(tmp_path):
 
 def test_report_json_has_required_fields(tmp_path):
     """report.json must contain all required metadata keys."""
-    bids_root, group_csv, atlas = _write_synthetic_tsvs(tmp_path)
+    bids_root, participants_tsv, atlas = _write_synthetic_tsvs(tmp_path)
     out_dir = tmp_path / "out_json"
 
     gms.run_group_matrix_stats(
@@ -387,7 +390,7 @@ def test_report_json_has_required_fields(tmp_path):
         threshold=3.1,
         n_permutations=50,
         alpha=0.05,
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
         rng_seed=0,
     )
@@ -411,7 +414,7 @@ def test_report_json_has_required_fields(tmp_path):
 
 def test_tsv_shapes_match(tmp_path):
     """Output matrix TSVs must be square (N_parcels × N_parcels)."""
-    bids_root, group_csv, atlas = _write_synthetic_tsvs(tmp_path)
+    bids_root, participants_tsv, atlas = _write_synthetic_tsvs(tmp_path)
     out_dir = tmp_path / "out_shape"
 
     gms.run_group_matrix_stats(
@@ -426,7 +429,7 @@ def test_tsv_shapes_match(tmp_path):
         threshold=3.1,
         n_permutations=50,
         alpha=0.05,
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
     )
 
@@ -443,7 +446,7 @@ def test_tsv_shapes_match(tmp_path):
 
 def test_significant_edges_long_format(tmp_path):
     """significant_edges.tsv must have the expected column schema."""
-    bids_root, group_csv, atlas = _write_synthetic_tsvs(tmp_path)
+    bids_root, participants_tsv, atlas = _write_synthetic_tsvs(tmp_path)
     out_dir = tmp_path / "out_long"
 
     gms.run_group_matrix_stats(
@@ -458,7 +461,7 @@ def test_significant_edges_long_format(tmp_path):
         threshold=3.1,
         n_permutations=50,
         alpha=0.05,
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
     )
 
@@ -511,10 +514,13 @@ def test_seed_kind_non_square(tmp_path):
             df.index = ["seed"]
             df.to_csv(seed_dir / fname, sep="\t")
 
-    group_csv = tmp_path / "group_seed.csv"
-    pd.DataFrame({"subject_id": subjects, "group": ["A"] * 6}).to_csv(
-        group_csv, index=False
-    )
+    participants_tsv = bids_root / "participants.tsv"
+    pd.DataFrame({
+        "participant_id": subjects,
+        "Age": np.linspace(60, 65, len(subjects)),
+        "Gender": ["F" if i % 2 == 0 else "M" for i in range(len(subjects))],
+        "group": ["A"] * 6,
+    }).to_csv(participants_tsv, sep="\t", index=False)
 
     out_dir = tmp_path / "out_seed"
     gms.run_group_matrix_stats(
@@ -529,7 +535,7 @@ def test_seed_kind_non_square(tmp_path):
         threshold=2.5,
         n_permutations=50,
         alpha=0.05,
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
         seed_target_atlas=atlas,
     )

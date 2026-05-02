@@ -27,7 +27,7 @@ set -e
 PROJECT_DIR="${HOME}/proj/long"
 SUBJECT_LEVEL="${PROJECT_DIR}/derivatives/connectivity-difumo256/subject-level"
 METADATA="${PROJECT_DIR}/derivatives/connectivity-difumo256-hpc/participants_updated.tsv"
-GROUP_FILE="${PROJECT_DIR}/group.csv"
+GROUP_FILE="${PROJECT_DIR}/bids/participants.tsv"
 OUTPUT_DIR="${PROJECT_DIR}/derivatives/connectivity-difumo256-hpc/group-level"
 
 # Create logs directory

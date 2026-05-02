@@ -57,7 +57,7 @@ python script/group_matrix_stats.py \\
     --threshold 3.1 \\
     --n-permutations 5000 \\
     --alpha 0.05 \\
-    --group-csv /home/clivewong/proj/longevity/group.csv \\
+    --group-csv /home/clivewong/proj/longevity/bids/participants.tsv \\
     --out derivatives/connectivity/group/matrix/fc/ses-02_minus_ses-01/4S256Parcels/pearson/nbs/
 """
 
@@ -99,6 +99,17 @@ CONTRAST_PATTERNS: dict[str, tuple[str, str]] = {
 
 METHODS = {"paired_t_fdr", "nbs", "tfnbs"}
 
+
+def load_group_metadata(group_csv: Path) -> pd.DataFrame:
+    """Load CSV/TSV metadata and normalize participant_id to subject_id."""
+    group_df = pd.read_csv(group_csv, sep=None, engine="python")
+    if "participant_id" in group_df.columns and "subject_id" not in group_df.columns:
+        group_df = group_df.rename(columns={"participant_id": "subject_id"})
+    if "subject_id" not in group_df.columns:
+        raise ValueError(
+            "Group metadata must contain a 'participant_id' or 'subject_id' column"
+        )
+    return group_df
 
 # ---------------------------------------------------------------------------
 # File discovery
@@ -205,9 +216,7 @@ def load_paired_matrices(
         )
     ses_a, ses_b = CONTRAST_PATTERNS[contrast]
 
-    gdf = pd.read_csv(group_csv)
-    if "subject_id" not in gdf.columns:
-        raise ValueError("group.csv must contain a 'subject_id' column")
+    gdf = load_group_metadata(group_csv)
     all_subjects = sorted(gdf["subject_id"].tolist())
 
     effective_atlas = seed_target_atlas or atlas
@@ -900,7 +909,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of sign-flip permutations",
     )
     p.add_argument("--alpha", type=float, default=0.05, help="Significance level")
-    p.add_argument("--group-csv", required=True, type=Path, help="group.csv with subject_id column")
+    p.add_argument(
+        "--group-csv",
+        required=True,
+        type=Path,
+        help="CSV/TSV with participant_id (or subject_id) column",
+    )
     p.add_argument("--out", required=True, type=Path, help="Output directory")
     p.add_argument("--seed", type=int, default=42, help="RNG seed for permutations")
     return p

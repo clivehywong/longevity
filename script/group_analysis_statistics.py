@@ -88,6 +88,32 @@ def setup_logger(output_dir: Path) -> logging.Logger:
 # DATA AGGREGATION AND PREPARATION
 # ============================================================================
 
+def load_group_assignments(group_file: Optional[Path], results_dir: Path) -> pd.DataFrame:
+    """Load participants.tsv or legacy group.csv and normalize subject IDs."""
+    candidates = [Path(group_file)] if group_file is not None else [
+        Path('bids/participants.tsv'),
+        Path('group.csv'),
+        results_dir.parent / 'bids' / 'participants.tsv',
+        results_dir.parent / 'group.csv',
+    ]
+
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        groups = pd.read_csv(candidate, sep='\t' if candidate.suffix == '.tsv' else ',')
+        if 'participant_id' in groups.columns and 'subject_id' not in groups.columns:
+            groups = groups.rename(columns={'participant_id': 'subject_id'})
+        if 'subject_id' not in groups.columns:
+            raise ValueError(
+                f"Group metadata must contain a 'participant_id' or 'subject_id' column: {candidate}"
+            )
+        return groups
+
+    raise FileNotFoundError(
+        f"Group file not found. Checked: {', '.join(str(c) for c in candidates)}"
+    )
+
+
 def load_metadata_and_group(
     results_dir: Path,
     group_file: Optional[Path] = None
@@ -100,7 +126,7 @@ def load_metadata_and_group(
     results_dir : Path
         Path to results directory containing metadata.csv
     group_file : Path, optional
-        Path to group.csv file. If None, looks in results parent.
+        Path to bids/participants.tsv or legacy group.csv. If None, tries standard locations.
     
     Returns
     -------
@@ -118,16 +144,9 @@ def load_metadata_and_group(
     if 'subject' in metadata.columns and 'subject_id' not in metadata.columns:
         metadata = metadata.rename(columns={'subject': 'subject_id'})
     
-    # Load group assignments
-    if group_file is None:
-        group_file = results_dir.parent / 'group.csv'
+    groups = load_group_assignments(group_file, results_dir)
     
-    if not group_file.exists():
-        raise FileNotFoundError(f"Group file not found: {group_file}")
-    
-    groups = pd.read_csv(group_file)
-    
-    # Use group from group.csv if present in metadata, merge to get authoritative assignment
+    # Use group from participants.tsv/group.csv if present in metadata, merge to get authoritative assignment
     if 'group' in metadata.columns:
         metadata = metadata.drop(columns=['group'])
     
@@ -944,7 +963,7 @@ def run_group_analysis(
     n_permutations : int
         Number of permutations for TFCE
     group_file : Path, optional
-        Path to group.csv
+        Path to bids/participants.tsv or legacy group.csv
     mask_file : Path, optional
         Path to brain mask
     min_cluster_size : int
@@ -1170,7 +1189,7 @@ Examples:
     parser.add_argument('--n-permutations', type=int, default=1000,
                        help='Number of permutations for TFCE')
     parser.add_argument('--group-file', type=Path,
-                       help='Path to group.csv')
+                       help='Path to bids/participants.tsv or legacy group.csv')
     parser.add_argument('--mask-file', type=Path,
                        help='Path to brain mask')
     parser.add_argument('--alpha', type=float, default=0.05,

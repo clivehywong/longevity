@@ -96,7 +96,12 @@ def _synthetic_xcpd_tree(
             data = RNG.random(SMALL_SHAPE).astype(np.float32) + offset
             _make_nifti(data, func_dir / fname)
 
-    group_df = pd.DataFrame({"subject_id": subjects, "group": group_labels})
+    group_df = pd.DataFrame({
+        "participant_id": subjects,
+        "Age": np.linspace(60, 68, n_subjects),
+        "Gender": ["F" if i % 2 == 0 else "M" for i in range(n_subjects)],
+        "group": group_labels,
+    })
     return bids_root, group_df
 
 
@@ -106,8 +111,8 @@ def _synthetic_xcpd_tree(
 
 def test_fdr_paired(tmp_path):
     bids_root, group_df = _synthetic_xcpd_tree(tmp_path)
-    group_csv = tmp_path / "group.csv"
-    group_df.to_csv(group_csv, index=False)
+    participants_tsv = bids_root / "participants.tsv"
+    group_df.to_csv(participants_tsv, sep="\t", index=False)
     out_dir = tmp_path / "out_fdr_paired"
 
     gvs.run_group_voxel_stats(
@@ -116,7 +121,7 @@ def test_fdr_paired(tmp_path):
         measure="alff",
         contrast="ses-02_minus_ses-01",
         method="fdr",
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
         mask_path=None,
         n_permutations=0,
@@ -142,8 +147,8 @@ def test_fdr_two_sample(tmp_path):
     bids_root, group_df = _synthetic_xcpd_tree(
         tmp_path, n_subjects=n, group_labels=groups
     )
-    group_csv = tmp_path / "group.csv"
-    group_df.to_csv(group_csv, index=False)
+    participants_tsv = bids_root / "participants.tsv"
+    group_df.to_csv(participants_tsv, sep="\t", index=False)
     out_dir = tmp_path / "out_fdr_group"
 
     gvs.run_group_voxel_stats(
@@ -152,7 +157,7 @@ def test_fdr_two_sample(tmp_path):
         measure="alff",
         contrast="group-walking_minus_control",
         method="fdr",
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
     )
 
@@ -169,8 +174,8 @@ def test_fdr_correlation(tmp_path):
     n = 6
     bids_root, group_df = _synthetic_xcpd_tree(tmp_path, n_subjects=n)
     group_df["score"] = np.arange(n, dtype=float) * 10.0
-    group_csv = tmp_path / "group.csv"
-    group_df.to_csv(group_csv, index=False)
+    participants_tsv = bids_root / "participants.tsv"
+    group_df.to_csv(participants_tsv, sep="\t", index=False)
     out_dir = tmp_path / "out_fdr_corr"
 
     gvs.run_group_voxel_stats(
@@ -179,7 +184,7 @@ def test_fdr_correlation(tmp_path):
         measure="alff",
         contrast="correlation_score",
         method="fdr",
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
     )
 
@@ -194,8 +199,8 @@ def test_fdr_correlation(tmp_path):
 def test_grf_cli_args(tmp_path):
     """GRF method calls `cluster` with -t 3.1 -p 0.05 --mm."""
     bids_root, group_df = _synthetic_xcpd_tree(tmp_path)
-    group_csv = tmp_path / "group.csv"
-    group_df.to_csv(group_csv, index=False)
+    participants_tsv = bids_root / "participants.tsv"
+    group_df.to_csv(participants_tsv, sep="\t", index=False)
     out_dir = tmp_path / "out_grf"
 
     def fake_run(cmd, **kwargs):
@@ -216,7 +221,7 @@ def test_grf_cli_args(tmp_path):
             measure="alff",
             contrast="ses-02_minus_ses-01",
             method="grf",
-            group_csv=group_csv,
+            group_csv=participants_tsv,
             out_dir=out_dir,
             z_thresh=3.1,
             p_thresh=0.05,
@@ -250,8 +255,8 @@ def test_grf_cli_args(tmp_path):
 def test_tfce_paired_cli(tmp_path):
     """TFCE method calls `randomise -1 -T -n <n_perms>` for paired contrast."""
     bids_root, group_df = _synthetic_xcpd_tree(tmp_path)
-    group_csv = tmp_path / "group.csv"
-    group_df.to_csv(group_csv, index=False)
+    participants_tsv = bids_root / "participants.tsv"
+    group_df.to_csv(participants_tsv, sep="\t", index=False)
     out_dir = tmp_path / "out_tfce_paired"
 
     def fake_run(cmd, **kwargs):
@@ -268,7 +273,7 @@ def test_tfce_paired_cli(tmp_path):
             measure="alff",
             contrast="ses-02_minus_ses-01",
             method="tfce",
-            group_csv=group_csv,
+            group_csv=participants_tsv,
             out_dir=out_dir,
             n_permutations=500,
         )
@@ -299,8 +304,8 @@ def test_tfce_two_sample_cli(tmp_path):
     bids_root, group_df = _synthetic_xcpd_tree(
         tmp_path, n_subjects=n, group_labels=groups
     )
-    group_csv = tmp_path / "group.csv"
-    group_df.to_csv(group_csv, index=False)
+    participants_tsv = bids_root / "participants.tsv"
+    group_df.to_csv(participants_tsv, sep="\t", index=False)
     out_dir = tmp_path / "out_tfce_group"
 
     def fake_run(cmd, **kwargs):
@@ -317,7 +322,7 @@ def test_tfce_two_sample_cli(tmp_path):
             measure="alff",
             contrast="group-walking_minus_control",
             method="tfce",
-            group_csv=group_csv,
+            group_csv=participants_tsv,
             out_dir=out_dir,
             n_permutations=50,
         )
@@ -364,8 +369,8 @@ def test_mask_derivation(tmp_path):
 def test_output_files_fdr(tmp_path):
     """All required output files exist after a successful FDR run."""
     bids_root, group_df = _synthetic_xcpd_tree(tmp_path)
-    group_csv = tmp_path / "group.csv"
-    group_df.to_csv(group_csv, index=False)
+    participants_tsv = bids_root / "participants.tsv"
+    group_df.to_csv(participants_tsv, sep="\t", index=False)
     out_dir = tmp_path / "out_complete"
 
     gvs.run_group_voxel_stats(
@@ -374,7 +379,7 @@ def test_output_files_fdr(tmp_path):
         measure="alff",
         contrast="ses-02_minus_ses-01",
         method="fdr",
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
     )
 
@@ -397,8 +402,8 @@ def test_output_files_fdr(tmp_path):
 def test_report_json_fields(tmp_path):
     """report.json contains all provenance fields."""
     bids_root, group_df = _synthetic_xcpd_tree(tmp_path)
-    group_csv = tmp_path / "group.csv"
-    group_df.to_csv(group_csv, index=False)
+    participants_tsv = bids_root / "participants.tsv"
+    group_df.to_csv(participants_tsv, sep="\t", index=False)
     out_dir = tmp_path / "out_report"
 
     gvs.run_group_voxel_stats(
@@ -407,7 +412,7 @@ def test_report_json_fields(tmp_path):
         measure="alff",
         contrast="ses-02_minus_ses-01",
         method="fdr",
-        group_csv=group_csv,
+        group_csv=participants_tsv,
         out_dir=out_dir,
     )
 

@@ -30,7 +30,7 @@ The app uses a custom navigation model rather than relying on Streamlit's defaul
 
 | File | Purpose |
 |---|---|
-| `pages_general_qc/08_subject_data.py` | Subject Data — editable group.csv, BIDS conflict detection |
+| `pages_general_qc/08_subject_data.py` | Subject Data — editable `bids/participants.tsv`, BIDS conflict detection |
 | `pages_fmri/preprocessing/00_fmri_dashboard.py` | fMRI Dashboard — per-subject preprocessing status table |
 | `pages_fmri/preprocessing/06_xcpd_pipeline.py` | XCP-D Pipeline — FD gating, runs, QC, per-subject status |
 

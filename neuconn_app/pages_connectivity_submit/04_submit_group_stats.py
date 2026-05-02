@@ -1,18 +1,22 @@
 """Submit group-level statistics (XCP-D backend).
 
-Supports two top-level kinds:
+Supports three top-level kinds:
   Voxel  — alff / reho / seed-<id> maps via GRF / TFCE / FDR
   Matrix — network or seed correlation matrices via paired_t_fdr / nbs / tfnbs
+  Mixed-Design TFCE — Paired pre/post × 2-group mixed ANOVA (longitudinal intervention)
 
-Uses ConnectivityWorkflowManager.build_group_level_command().
+Uses ConnectivityWorkflowManager.build_group_level_command() for Voxel/Matrix.
+For Mixed-Design, uses MixedDesignBuilder + SubjectDataValidator + group_mixed_design_stats.py.
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,15 +24,52 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from utils.config import load_config
 from utils.connectivity_workflow import ConnectivityWorkflowManager
 from utils.xcpd_outputs import KNOWN_PIPELINES
+from utils.seed_catalog import SeedCatalog
+from utils.group_stats_design import MixedDesignBuilder
+from utils.group_stats_validation import SubjectDataValidator
 
 STATE_PREFIX = "submit_group_"
 
-_DEFAULT_GROUP_CSV = "/home/clivewong/proj/longevity/group.csv"
 _DEFAULT_OUT_ROOT = "derivatives/connectivity/group/"
 
 
 def _get_config() -> dict:
     return st.session_state.get("config") or load_config()
+
+
+def _default_participants_path(bids_root: str) -> str:
+    participants_tsv = Path(bids_root) / "bids" / "participants.tsv"
+    legacy_group_csv = Path(bids_root) / "group.csv"
+    return str(
+        participants_tsv if participants_tsv.exists() or not legacy_group_csv.exists()
+        else legacy_group_csv
+    )
+
+
+def _read_subject_table(csv_path: str) -> Any:
+    import pandas as pd
+
+    path = Path(csv_path)
+    sep = "\t" if path.suffix.lower() == ".tsv" else ","
+    df = pd.read_csv(path, sep=sep)
+
+    if "subject_id" in df.columns and "participant_id" not in df.columns:
+        df = df.rename(columns={"subject_id": "participant_id"})
+    if "subject" in df.columns and "participant_id" not in df.columns:
+        df = df.copy()
+        df["participant_id"] = df["subject"].apply(_format_participant_id)
+
+    return df
+
+
+def _format_participant_id(value: Any) -> str:
+    subject = str(value).strip()
+    if subject.startswith("sub-"):
+        return subject
+    digits = "".join(ch for ch in subject if ch.isdigit())
+    if digits:
+        return f"sub-{int(digits):03d}"
+    return subject
 
 
 def _scan_seed_ids(bids_root: str, pipeline: str) -> list[str]:
@@ -42,11 +83,9 @@ def _scan_seed_ids(bids_root: str, pipeline: str) -> list[str]:
 
 
 def _read_group_csv_columns(csv_path: str) -> list[str]:
-    """Return column names from group.csv for contrast builder."""
+    """Return metadata column names for the contrast builder."""
     try:
-        import pandas as pd
-        df = pd.read_csv(csv_path, nrows=0)
-        return list(df.columns)
+        return list(_read_subject_table(csv_path).columns)
     except Exception:
         return []
 
@@ -54,18 +93,389 @@ def _read_group_csv_columns(csv_path: str) -> list[str]:
 def _build_contrast_options(csv_path: str) -> list[str]:
     opts = ["ses-02_minus_ses-01", "group-walking_minus_control"]
     for col in _read_group_csv_columns(csv_path):
-        if col not in ("subject", "session", "group"):
+        if col not in ("subject", "subject_id", "participant_id", "session", "group"):
             opts.append(f"correlation_{col}")
     return opts
+
+
+def _load_seed_catalog(bids_root: str, pipeline: str) -> SeedCatalog | None:
+    """Load seed catalog from XCP-D outputs."""
+    try:
+        from utils.xcpd_outputs import XcpdDiscovery
+        disc = XcpdDiscovery(Path(bids_root), pipeline=pipeline)
+        return disc.get_seed_catalog()
+    except Exception as e:
+        st.warning(f"Could not load seed catalog: {e}")
+        return None
+
+
+def _seed_to_cli_format(seed_str: str) -> str:
+    """Convert seed UI string to CLI format."""
+    # If already in CLI format (atlas-... or nifti:...), return as-is
+    if ":" in seed_str or seed_str.startswith("nifti:"):
+        return seed_str
+    # Otherwise assume it's a seed name, convert to atlas format
+    return f"atlas-4S256Parcels:{seed_str}"
+
+
+def _render_mixed_design_section(config: dict, bids_root: str) -> None:
+    """Render mixed-design TFCE workflow section."""
+    
+    st.subheader("🧬 Mixed-Design TFCE Analysis")
+    
+    st.markdown("""
+    **Paired pre/post × 2-group mixed ANOVA** for longitudinal intervention studies.
+    
+    - **Input**: 72 zmaps (36 subjects × 2 sessions, ~20 control, ~16 walking)
+    - **Output**: FSL randomise results with TFCE/GRF/FDR correction
+    - **Design**: Time effect, group effect, subject intercepts
+    """)
+    
+    # ===== Section 1: Analysis Setup =====
+    st.markdown("#### 📋 Section 1: Analysis Setup")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        pipeline = st.selectbox(
+            "Pipeline",
+            KNOWN_PIPELINES,
+            index=KNOWN_PIPELINES.index(
+                st.session_state.get(f"{STATE_PREFIX}mixed_pipeline", "fc")
+            ),
+            key=f"{STATE_PREFIX}mixed_pipeline_widget",
+        )
+        st.session_state[f"{STATE_PREFIX}mixed_pipeline"] = pipeline
+    
+    with col2:
+        measure = st.selectbox(
+            "Measure",
+            [
+                "pearson", "spearman", "partial_correlation",
+                "plv", "wpli", "coherence",
+                "amplitude_envelope_correlation", "mutual_information"
+            ],
+            index=0 if not st.session_state.get(f"{STATE_PREFIX}mixed_measure") else 0,
+            key=f"{STATE_PREFIX}mixed_measure_widget",
+        )
+        st.session_state[f"{STATE_PREFIX}mixed_measure"] = measure
+    
+    with col3:
+        st.write("")  # Spacer
+    
+    # Seed selector (simplified for now)
+    seed_input = st.text_input(
+        "Seed (CLI format: atlas-4S256Parcels:LABEL or nifti:/path)",
+        value=st.session_state.get(f"{STATE_PREFIX}mixed_seed", ""),
+        key=f"{STATE_PREFIX}mixed_seed_widget",
+        help="Enter seed in CLI format, e.g., 'atlas-4S256Parcels:RH_Cont_Par_1'",
+    )
+    st.session_state[f"{STATE_PREFIX}mixed_seed"] = seed_input
+    
+    # ===== Section 2: FSL TFCE Parameters =====
+    st.markdown("#### ⚙️ Section 2: FSL TFCE Parameters")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        n_perm = st.slider(
+            "Number of permutations",
+            min_value=100,
+            max_value=10000,
+            value=st.session_state.get(f"{STATE_PREFIX}mixed_n_perm", 5000),
+            step=100,
+            key=f"{STATE_PREFIX}mixed_n_perm_widget",
+        )
+        st.session_state[f"{STATE_PREFIX}mixed_n_perm"] = n_perm
+    
+    with col2:
+        correction = st.radio(
+            "Correction method",
+            ["TFCE", "GRF", "FDR"],
+            index=["TFCE", "GRF", "FDR"].index(
+                st.session_state.get(f"{STATE_PREFIX}mixed_correction", "TFCE")
+            ),
+            horizontal=True,
+            key=f"{STATE_PREFIX}mixed_correction_widget",
+        )
+        st.session_state[f"{STATE_PREFIX}mixed_correction"] = correction
+    
+    mask_input = st.text_input(
+        "Custom brain mask (optional; auto-detected if blank)",
+        value=st.session_state.get(f"{STATE_PREFIX}mixed_mask", ""),
+        key=f"{STATE_PREFIX}mixed_mask_widget",
+        help="Leave blank to auto-derive mask from zmaps",
+    )
+    st.session_state[f"{STATE_PREFIX}mixed_mask"] = mask_input
+    
+    if n_perm < 1000:
+        st.warning("⚠️ <1000 permutations gives unreliable p-values")
+    
+    # ===== Section 3: Execution Options =====
+    st.markdown("#### 🚀 Section 3: Execution Options")
+    
+    execution = st.radio(
+        "Execution location",
+        ["Local", "HPC"],
+        index=["Local", "HPC"].index(
+            st.session_state.get(f"{STATE_PREFIX}mixed_execution", "Local")
+        ),
+        horizontal=True,
+        key=f"{STATE_PREFIX}mixed_execution_widget",
+    )
+    st.session_state[f"{STATE_PREFIX}mixed_execution"] = execution
+    
+    if execution == "Local":
+        use_test_perms = st.checkbox(
+            "Use reduced permutations for testing (100 instead of configured)",
+            value=st.session_state.get(f"{STATE_PREFIX}mixed_test_mode", False),
+            key=f"{STATE_PREFIX}mixed_test_mode_widget",
+        )
+        st.session_state[f"{STATE_PREFIX}mixed_test_mode"] = use_test_perms
+    else:
+        st.info("ℹ️ HPC: Will upload design files and submit SLURM job")
+    
+    # ===== Section 4: Preview & Validation =====
+    st.markdown("#### 👁️ Section 4: Preview & Validation")
+    
+    col_val, col_prev = st.columns([1, 1])
+    
+    with col_val:
+        if st.button("🔍 Validate Zmaps", key=f"{STATE_PREFIX}mixed_validate"):
+            with st.spinner("Validating zmaps..."):
+                try:
+                    canonical_csv = st.session_state.get(
+                        f"{STATE_PREFIX}mixed_canonical_csv",
+                        _default_participants_path(str(bids_root)),
+                    )
+                    
+                    validator = SubjectDataValidator(
+                        bids_root=str(bids_root),
+                        canonical_order_csv=canonical_csv,
+                        pipeline=pipeline,
+                        measure=measure,
+                    )
+                    
+                    validation_df = validator.validate_all_subjects()
+                    summary = validator.summarize_validation(validation_df)
+                    
+                    st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = summary
+                    st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = (
+                        summary.get("error_count", 0) == 0
+                    )
+                    
+                    if st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"]:
+                        st.success(f"✓ {summary['success_count']} zmaps valid")
+                    else:
+                        st.error(f"✗ {summary['error_count']} validation errors")
+                        if summary.get("error_details"):
+                            st.text(summary["error_details"])
+                    
+                except Exception as e:
+                    st.error(f"Validation failed: {e}")
+                    st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = False
+    
+    with col_prev:
+        if st.button("📊 Preview Design", key=f"{STATE_PREFIX}mixed_preview"):
+            with st.spinner("Building design preview..."):
+                try:
+                    canonical_csv = st.session_state.get(
+                        f"{STATE_PREFIX}mixed_canonical_csv",
+                        _default_participants_path(str(bids_root)),
+                    )
+
+                    df = _read_subject_table(canonical_csv)
+                    group_values = df["group"].astype(str).str.strip().str.lower()
+                    control = sorted(df.loc[group_values == "control", "participant_id"].dropna().unique())
+                    walking = sorted(df.loc[group_values == "walking", "participant_id"].dropna().unique())
+                    
+                    builder = MixedDesignBuilder.from_paired_two_group(control, walking)
+                    design_mat, _, _, _ = builder.build()
+                    
+                    st.info(f"""
+                    **Design Matrix:**
+                    - Shape: {design_mat.shape}
+                    - Rank: {int(np.linalg.matrix_rank(design_mat))}
+                    - Subjects: {len(control)} control, {len(walking)} walking
+                    - Sessions: 2 (pre/post)
+                    """)
+                    
+                    with st.expander("View sample rows"):
+                        st.dataframe(pd.DataFrame(design_mat[:5]))
+                    
+                except Exception as e:
+                    st.error(f"Preview failed: {e}")
+    
+    # Show validation result if available
+    if st.session_state.get(f"{STATE_PREFIX}mixed_validation_result"):
+        val_result = st.session_state[f"{STATE_PREFIX}mixed_validation_result"]
+        st.metric(
+            "Validation Status",
+            f"{val_result.get('success_count', 0)}/{val_result.get('total_count', 72)} zmaps",
+        )
+    
+    # ===== Section 5: Submit =====
+    st.markdown("#### 📤 Section 5: Submit Analysis")
+    
+    canonical_csv = st.session_state.get(
+        f"{STATE_PREFIX}mixed_canonical_csv",
+        _default_participants_path(str(bids_root)),
+    )
+    
+    output_dir = Path(bids_root) / "results" / "group_mixed_design" / f"seed_{pipeline}_{measure}"
+    
+    col_info, col_submit = st.columns([2, 1])
+    
+    with col_info:
+        st.info(f"""
+        **Execution Settings:**
+        - **Location**: {execution}
+        - **Output**: {output_dir}
+        - **N Permutations**: {100 if use_test_perms and execution == "Local" else n_perm}
+        - **Correction**: {correction}
+        """)
+    
+    is_valid = st.session_state.get(f"{STATE_PREFIX}mixed_zmaps_valid", False) and seed_input
+    
+    with col_submit:
+        if st.button(
+            "🚀 Submit",
+            key=f"{STATE_PREFIX}mixed_submit",
+            type="primary",
+            disabled=not is_valid,
+        ):
+            if not is_valid:
+                st.error("Please validate zmaps first and select a seed")
+            else:
+                with st.spinner("Submitting analysis..."):
+                    try:
+                        effective_n_perm = 100 if (use_test_perms and execution == "Local") else n_perm
+                        
+                        if execution == "Local":
+                            _submit_mixed_design_local(
+                                bids_root,
+                                seed_input,
+                                pipeline,
+                                measure,
+                                canonical_csv,
+                                str(output_dir),
+                                effective_n_perm,
+                                correction,
+                                mask_input or None,
+                            )
+                        else:
+                            _submit_mixed_design_hpc(
+                                config,
+                                bids_root,
+                                seed_input,
+                                pipeline,
+                                measure,
+                                canonical_csv,
+                                str(output_dir),
+                                n_perm,
+                                correction,
+                                mask_input or None,
+                            )
+                    except Exception as e:
+                        st.error(f"Submission failed: {e}")
+
+
+def _submit_mixed_design_local(
+    bids_root: str,
+    seed: str,
+    pipeline: str,
+    measure: str,
+    canonical_csv: str,
+    output_dir: str,
+    n_perm: int,
+    correction: str,
+    mask: str | None = None,
+) -> None:
+    """Submit mixed-design analysis locally."""
+    cmd = [
+        "python", "neuconn_app/scripts/group_mixed_design_stats.py",
+        "--bids-root", str(bids_root),
+        "--seed", seed,
+        "--pipeline", pipeline,
+        "--measure", measure,
+        "--n-perms", str(n_perm),
+        "--correction", correction,
+        "--canonical-csv", canonical_csv,
+        "--output-dir", output_dir,
+    ]
+    
+    if mask:
+        cmd.extend(["--mask", mask])
+    
+    st.code(" ".join(cmd), language="bash")
+    
+    with st.spinner("Running analysis... (this may take 10+ minutes)"):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            
+            if result.returncode == 0:
+                st.success("✅ Analysis completed!")
+                st.info(f"Results saved to: {output_dir}")
+                
+                if st.button("📂 Open results folder", key=f"{STATE_PREFIX}open_results"):
+                    st.text(f"Navigate to: {output_dir}")
+            else:
+                st.error(f"Analysis failed:\n{result.stderr}")
+        except subprocess.TimeoutExpired:
+            st.error("Analysis timed out (>1 hour)")
+        except Exception as e:
+            st.error(f"Execution error: {e}")
+
+
+def _submit_mixed_design_hpc(
+    config: dict,
+    bids_root: str,
+    seed: str,
+    pipeline: str,
+    measure: str,
+    canonical_csv: str,
+    output_dir: str,
+    n_perm: int,
+    correction: str,
+    mask: str | None = None,
+) -> None:
+    """Submit mixed-design analysis to HPC."""
+    cmd = [
+        "python", "neuconn_app/scripts/group_mixed_design_stats.py",
+        "--bids-root", str(bids_root),
+        "--seed", seed,
+        "--pipeline", pipeline,
+        "--measure", measure,
+        "--n-perms", str(n_perm),
+        "--correction", correction,
+        "--canonical-csv", canonical_csv,
+        "--output-dir", output_dir,
+    ]
+    
+    if mask:
+        cmd.extend(["--mask", mask])
+    
+    st.code(" ".join(cmd), language="bash")
+    st.info("HPC submission: Create SLURM job script and upload (future implementation)")
 
 
 def render() -> None:
     st.title("📤 Submit Group Statistics")
 
+    config = _get_config()
+    bids_root = (
+        config.get("paths", {}).get("project_root")
+        or config.get("project_root")
+        or config.get("paths", {}).get("bids_root")
+        or "."
+    )
+    default_participants_path = _default_participants_path(str(bids_root))
+
     # --- Session state defaults ---
+    st.session_state.setdefault(f"{STATE_PREFIX}template", "Voxel")
     st.session_state.setdefault(f"{STATE_PREFIX}kind", "Voxel")
     st.session_state.setdefault(f"{STATE_PREFIX}pipeline", "fc")
-    st.session_state.setdefault(f"{STATE_PREFIX}group_csv", _DEFAULT_GROUP_CSV)
+    st.session_state.setdefault(f"{STATE_PREFIX}group_csv", default_participants_path)
     st.session_state.setdefault(f"{STATE_PREFIX}out_root", _DEFAULT_OUT_ROOT)
     # Voxel defaults
     st.session_state.setdefault(f"{STATE_PREFIX}measure", "alff")
@@ -84,27 +494,55 @@ def render() -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}alpha", 0.05)
     st.session_state.setdefault(f"{STATE_PREFIX}mat_n_perms", 5000)
     st.session_state.setdefault(f"{STATE_PREFIX}last_command", "")
+    # Mixed-design defaults
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_pipeline", "fc")
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_measure", "pearson")
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_seed", "")
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_n_perm", 5000)
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_correction", "TFCE")
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_mask", "")
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_execution", "Local")
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_test_mode", False)
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_zmaps_valid", False)
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_validation_result", None)
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_canonical_csv", default_participants_path)
 
-    config = _get_config()
-    bids_root = (
-        config.get("paths", {}).get("project_root")
-        or config.get("project_root")
-        or config.get("paths", {}).get("bids_root")
-        or "."
+    # --- Template Selector ---
+    st.markdown("### 📋 Analysis Template")
+    template = st.selectbox(
+        "Choose analysis type:",
+        [
+            "Voxel-level Group Stats (existing)",
+            "Matrix-level Group Stats (existing)",
+            "Mixed-Design TFCE (pre/post × 2 groups)",
+        ],
+        index=0 if st.session_state.get(f"{STATE_PREFIX}template") == "Voxel" else (
+            1 if st.session_state.get(f"{STATE_PREFIX}template") == "Matrix" else 2
+        ),
+        key=f"{STATE_PREFIX}template_widget",
     )
-
-    # --- Kind ---
-    kind = st.radio(
-        "Analysis kind",
-        ["Voxel", "Matrix"],
-        index=0 if st.session_state.get(f"{STATE_PREFIX}kind", "Voxel") == "Voxel" else 1,
-        horizontal=True,
-        key=f"{STATE_PREFIX}kind_widget",
-    )
-    st.session_state[f"{STATE_PREFIX}kind"] = kind
-
+    
+    # Map template to kind
+    if "Voxel" in template:
+        st.session_state[f"{STATE_PREFIX}template"] = "Voxel"
+        kind = "Voxel"
+    elif "Matrix" in template:
+        st.session_state[f"{STATE_PREFIX}template"] = "Matrix"
+        kind = "Matrix"
+    else:
+        st.session_state[f"{STATE_PREFIX}template"] = "MixedDesign"
+        kind = "MixedDesign"
+    
     st.markdown("---")
 
+    # ===== Mixed-Design TFCE =====
+    if kind == "MixedDesign":
+        import numpy as np
+        _render_mixed_design_section(config, bids_root)
+        return
+
+    # ===== Original Voxel/Matrix workflows =====
+    
     # --- Common: pipeline + paths ---
     pipeline = st.selectbox(
         "Pipeline",
@@ -115,8 +553,8 @@ def render() -> None:
     st.session_state[f"{STATE_PREFIX}pipeline"] = pipeline
 
     group_csv = st.text_input(
-        "group.csv path",
-        value=st.session_state.get(f"{STATE_PREFIX}group_csv", _DEFAULT_GROUP_CSV),
+        "participants.tsv path",
+        value=st.session_state.get(f"{STATE_PREFIX}group_csv", default_participants_path),
         key=f"{STATE_PREFIX}csv_widget",
     )
     st.session_state[f"{STATE_PREFIX}group_csv"] = group_csv

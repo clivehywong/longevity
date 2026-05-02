@@ -188,7 +188,7 @@ def test_build_group_level_command_voxel_kind(tmp_path):
             "contrast": "ses-02_vs_ses-01",
             "method": "tfce",
             "n_permutations": 5000,
-            "group_csv": "group.csv",
+            "group_csv": "bids/participants.tsv",
             "out": "results/group_voxel",
             "mask": "/data/mask.nii.gz",
             "test_mode": True,
@@ -222,7 +222,7 @@ def test_build_group_level_command_matrix_kind(tmp_path):
             "threshold": 3.0,
             "n_permutations": 1000,
             "alpha": 0.05,
-            "group_csv": "group.csv",
+            "group_csv": "bids/participants.tsv",
             "out": "results/group_matrix",
         }
     )
