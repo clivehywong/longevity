@@ -331,8 +331,8 @@ def render_fmri_analysis():
             page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "01_local_measures.py"
             module_name = "fmri_subject_local_measures"
         elif analysis == "🎯 Seed Connectivity Viewer":
-            page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "02_seed_connectivity.py"
-            module_name = "fmri_subject_seed_connectivity"
+            page_path = Path(__file__).parent / "pages_connectivity" / "02_Seed_Connectivity.py"
+            module_name = "conn_seed_connectivity_viewer"
         elif analysis == "🕸️ Network Viewer":
             page_path = Path(__file__).parent / "pages_connectivity" / "network_connectivity.py"
             module_name = "network_connectivity"

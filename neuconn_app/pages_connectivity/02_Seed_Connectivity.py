@@ -8,10 +8,13 @@ Pipeline selector persists via ``viewer_pipeline_seed_conn`` session-state key.
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -61,76 +64,180 @@ def _load_s2p(
     )
 
 
+@st.cache_data(ttl=60)
+def _load_meta(meta_path_str: str, mtime: float) -> Optional[dict]:
+    """Load seed metadata JSON; keyed on path + mtime for freshness."""
+    try:
+        return json.loads(Path(meta_path_str).read_text())
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=60)
+def _compute_zmap_stats(
+    zmap_path_str: str, mtime: float
+) -> Optional[dict]:
+    """Load zmap NIfTI and compute in-brain z-score statistics."""
+    try:
+        import nibabel as nib
+        img = nib.load(zmap_path_str)
+        data = img.get_fdata(dtype=np.float32).ravel()
+        # Non-zero finite voxels approximate in-brain (background is exactly 0)
+        brain = data[np.isfinite(data) & (data != 0)]
+        if brain.size == 0:
+            return None
+        return {
+            "n_voxels": int(brain.size),
+            "mean": float(np.mean(brain)),
+            "std": float(np.std(brain)),
+            "pct_positive": float(100 * np.mean(brain > 0)),
+            "pct_strong_pos": float(100 * np.mean(brain > 0.5)),
+            "pct_strong_neg": float(100 * np.mean(brain < -0.5)),
+        }
+    except Exception:
+        return None
+
+
 # ============================================================================
 # Seed selector helpers
 # ============================================================================
 
 
-def _source_display(source: str) -> str:
-    return {
-        "xcpd_atlas_parcel": "Atlas parcel (XCP-D)",
-        "custom_nifti_roi": "Custom NIfTI ROI",
-        "sphere": "Sphere (coordinates)",
-    }.get(source, source)
+@st.cache_data(ttl=30)
+def _discover_computed_seeds(
+    bids_root_str: str, pipeline: str, subject: str, session: str
+) -> list[dict]:
+    """Return list of {id, display_name} for seeds with computed outputs."""
+    seed_ids = list_available_seeds(Path(bids_root_str), pipeline, subject, session)
+    results = []
+    for sid in seed_ids:
+        sdir = seed_dir(Path(bids_root_str), pipeline, subject, session, sid)
+        # Try meta.json for a friendly name
+        meta_files = sorted(sdir.glob("*_meta.json"))
+        display_name = sid  # fallback
+        if meta_files:
+            try:
+                meta = json.loads(meta_files[0].read_text())
+                spec = meta.get("seed_spec", {})
+                display_name = spec.get("name") or sid
+            except Exception:
+                pass
+        has_zmap = any(sdir.glob("*_seed-to-voxel_zmap.nii.gz"))
+        results.append({
+            "id": sid,
+            "display_name": display_name,
+            "has_zmap": has_zmap,
+        })
+    return results
 
 
-def _build_seed_selector(bids_root: Path, pipeline: str) -> Optional[str]:
-    """Cascading source → atlas → seed selector from SeedCatalog.
+def _build_seed_selector(
+    bids_root: Path, pipeline: str, subject: str, session: str
+) -> Optional[str]:
+    """Seed selector driven by file-system discovery of computed outputs.
 
     Returns the selected seed_id or None.
     """
-    try:
-        from neuconn_app.utils.seed_catalog import SeedCatalog
-    except ImportError:
-        st.warning("SeedCatalog not available.")
-        return None
+    computed = _discover_computed_seeds(str(bids_root), pipeline, subject, session)
 
-    catalog = SeedCatalog(bids_root, xcpd_pipeline=pipeline)
-    sources = catalog.list_sources()
-    if not sources:
-        st.warning("No seeds found in catalog.")
-        return None
-
-    col_src, col_atlas, col_seed = st.columns([1, 2, 3])
-
-    with col_src:
-        source = st.selectbox(
-            "Source",
-            options=sources,
-            format_func=_source_display,
-            key=f"seed_source_{PAGE_KEY}_{pipeline}",
+    if not computed:
+        st.info(
+            f"No computed seed outputs found for **{subject} / {session}** "
+            f"(pipeline: `{pipeline}`).  \n"
+            "Submit seeds from the **📤 Submit Seed Connectivity** section, "
+            "then return here to view results."
         )
-
-    atlas_for_source: Optional[str] = None
-    if source == "xcpd_atlas_parcel":
-        atlases = catalog.list_atlases()
-        with col_atlas:
-            atlas_for_source = st.selectbox(
-                "Atlas",
-                options=atlases,
-                key=f"seed_atlas_{PAGE_KEY}_{pipeline}",
-            )
-    else:
-        with col_atlas:
-            st.markdown("")  # placeholder
-
-    seeds = catalog.get_seeds(source=source, atlas=atlas_for_source)
-    if not seeds:
-        st.warning("No seeds for selected source/atlas.")
         return None
 
-    seed_ids = [s.id for s in seeds]
-    seed_names = {s.id: s.name for s in seeds}
+    options = [s["id"] for s in computed]
+    names = {s["id"]: s["display_name"] for s in computed}
+    zmap_flag = {s["id"]: s["has_zmap"] for s in computed}
 
-    with col_seed:
-        selected_id = st.selectbox(
-            "Seed",
-            options=seed_ids,
-            format_func=lambda x: seed_names.get(x, x),
-            key=f"seed_id_{PAGE_KEY}_{pipeline}",
-        )
+    def _fmt(sid: str) -> str:
+        icon = "🧠" if zmap_flag.get(sid) else "📊"
+        return f"{icon} {names.get(sid, sid)}"
 
+    selected_id = st.selectbox(
+        "Seed",
+        options=options,
+        format_func=_fmt,
+        key=f"seed_id_{PAGE_KEY}_{pipeline}_{subject}_{session}",
+        help="Shows seeds with computed outputs. 🧠 = has voxel z-map, 📊 = parcel only.",
+    )
     return selected_id
+
+
+# ============================================================================
+# Quality metrics panel
+# ============================================================================
+
+
+def _render_quality_metrics(sdir: Path, prefix: str) -> None:
+    """Render provenance + z-score quality metrics in an expander."""
+    meta_path = sdir / f"{prefix}_meta.json"
+    zmap_path = sdir / f"{prefix}_seed-to-voxel_zmap.nii.gz"
+
+    if not meta_path.exists() and not zmap_path.exists():
+        return
+
+    with st.expander("🔬 Quality metrics & provenance", expanded=False):
+        # ── Provenance from meta.json ─────────────────────────────────────
+        if meta_path.exists():
+            mtime = meta_path.stat().st_mtime
+            meta = _load_meta(str(meta_path), mtime)
+            if meta:
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Pipeline", meta.get("pipeline", "—"))
+                c2.metric("BOLD variant", meta.get("bold_variant", "—"))
+                c3.metric("TR (s)", meta.get("tr", "—"))
+                c4.metric("Timepoints", meta.get("n_timepoints") or "—")
+
+                mask_path = meta.get("brain_mask_path")
+                n_bvox = meta.get("n_brain_voxels")
+                if mask_path:
+                    mask_label = Path(mask_path).name
+                    st.success(
+                        f"✅ Brain mask applied: `{mask_label}` — "
+                        f"{n_bvox:,} voxels" if n_bvox else f"✅ Brain mask applied: `{mask_label}`"
+                    )
+                else:
+                    st.warning(
+                        "⚠️ Brain mask provenance not recorded — "
+                        "this output may have been generated without masking."
+                    )
+
+                zmap_shape = meta.get("zmap_shape")
+                expected = [91, 109, 91]
+                if zmap_shape and list(zmap_shape) != expected:
+                    st.warning(
+                        f"Unexpected zmap shape {zmap_shape} (expected {expected}). "
+                        "Check MNI space / resolution."
+                    )
+
+                rt = meta.get("runtime_seconds")
+                ts = meta.get("timestamp", "")
+                if rt or ts:
+                    st.caption(
+                        f"Computed in {rt:.1f}s" if rt else ""
+                        + (f"  ·  {ts}" if ts else "")
+                    )
+
+        # ── Z-score statistics from zmap ─────────────────────────────────
+        if zmap_path.exists():
+            mtime_z = zmap_path.stat().st_mtime
+            stats = _compute_zmap_stats(str(zmap_path), mtime_z)
+            if stats:
+                st.markdown("**Z-score distribution (in-brain voxels)**")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Mean z", f"{stats['mean']:.3f}")
+                c2.metric("Std z", f"{stats['std']:.3f}")
+                c3.metric("% z > 0", f"{stats['pct_positive']:.1f}%")
+                c4.metric("% |z| > 0.5", f"{stats['pct_strong_pos'] + stats['pct_strong_neg']:.1f}%")
+                if stats["pct_strong_neg"] > 0.5:
+                    st.caption(
+                        f"Strong positive (z>0.5): {stats['pct_strong_pos']:.1f}%  "
+                        f"· Strong negative (z<−0.5): {stats['pct_strong_neg']:.1f}%"
+                    )
 
 
 # ============================================================================
@@ -149,6 +256,7 @@ def _render_zmap(
         )
         return
 
+    prefix = f"{subject}_{session}_seed-{seed_id}"
     zmaps = sorted(sdir.glob("*_seed-to-voxel_zmap.nii.gz"))
     if not zmaps:
         st.info("Seed-to-voxel z-map not yet computed for this selection.")
@@ -167,6 +275,8 @@ def _render_zmap(
         )
     except Exception as exc:
         st.error(f"Viewer error: {exc}")
+
+    _render_quality_metrics(sdir, prefix)
 
 
 # ============================================================================
@@ -276,9 +386,16 @@ def render() -> None:
     st.header("🔗 Seed-Based Connectivity")
 
     config = st.session_state.get("config", {})
-    bids_root = Path(
-        config.get("paths", {}).get("bids_dir", "")
-        or Path(__file__).resolve().parents[3]
+    bids_root_value = (
+        config.get("project_root")
+        or config.get("paths", {}).get("project_root")
+        or config.get("paths", {}).get("bids_root")
+        or config.get("paths", {}).get("bids_dir")
+    )
+    bids_root = (
+        Path(bids_root_value).expanduser()
+        if bids_root_value and "${" not in str(bids_root_value)
+        else Path(__file__).resolve().parents[2]
     )
 
     # ── Top selector row ──────────────────────────────────────────────────
@@ -291,7 +408,7 @@ def render() -> None:
 
     # ── Seed selector ─────────────────────────────────────────────────────
     st.markdown("#### Seed selection")
-    seed_id = _build_seed_selector(bids_root, pipeline)
+    seed_id = _build_seed_selector(bids_root, pipeline, subject, session)
     if seed_id is None:
         return
 

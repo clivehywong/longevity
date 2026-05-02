@@ -59,6 +59,51 @@ def _open_pipeline_selectbox_options(page: Page, area: str = MAIN) -> list[str]:
     return opts
 
 
+def _set_selectbox_option(page: Page, label: str, option: str, area: str = MAIN) -> None:
+    """Set a Streamlit selectbox by visible label and option text."""
+    box = page.locator(area + " " + '[data-testid="stSelectbox"]').filter(has_text=label)
+    expect(box).to_be_visible(timeout=10_000)
+    box.click()
+    page.wait_for_timeout(400)
+    opt = page.get_by_role("option", name=option, exact=True)
+    expect(opt).to_be_visible(timeout=10_000)
+    opt.click()
+    page.wait_for_timeout(800)
+
+
+def _set_single_multiselect(page: Page, label: str, value: str, area: str = MAIN) -> None:
+    """Clear a Streamlit multiselect and choose a single value."""
+    box = page.locator(area + " " + '[data-testid="stMultiSelect"]').filter(has_text=label)
+    expect(box).to_be_visible(timeout=10_000)
+
+    clear_btn = box.get_by_role("button", name="Clear all")
+    if clear_btn.count():
+        clear_btn.click()
+        page.wait_for_timeout(500)
+
+    input_box = box.locator("input")
+    input_box.click()
+    input_box.fill(value)
+    page.wait_for_timeout(800)
+
+    option = page.get_by_role("option", name=value, exact=True)
+    expect(option).to_be_visible(timeout=10_000)
+    option.click()
+    page.wait_for_timeout(800)
+
+
+def _fill_number_input(page: Page, label: str, value: int | float) -> None:
+    """Fill a Streamlit number input by label text."""
+    widget = page.locator(MAIN + " " + '[data-testid="stNumberInput"]').filter(has_text=label)
+    expect(widget).to_be_visible(timeout=10_000)
+    input_box = widget.locator("input")
+    input_box.click()
+    input_box.press("Control+a")
+    input_box.fill(str(value))
+    input_box.press("Tab")
+    page.wait_for_timeout(300)
+
+
 # ---------------------------------------------------------------------------
 # Test 1: Local Measures Coverage Dashboard
 # ---------------------------------------------------------------------------
@@ -637,3 +682,164 @@ class TestSeedConnectivityPreflight:
             f"Expected pre-flight cache invalidation notice after pipeline change. "
             f"Page: {page_text_after[:600]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Full pipeline — local submit → viewer → quality metrics
+# ---------------------------------------------------------------------------
+
+TEST_SUBJECT = "sub-033"
+TEST_SESSION = "ses-01"
+TEST_SEED_NAME = "E2E_DLPFC"
+TEST_SEED_COORDS = (-46, 16, 32)
+TEST_SEED_RADIUS = 6
+TEST_SEED_ID = "sphere--46_16_32_r6"
+TEST_VIEWER_SUBJECT = TEST_SUBJECT.replace("sub-", "")
+TEST_VIEWER_SESSION = TEST_SESSION.replace("ses-", "")
+
+
+class TestSeedFullPipeline:
+    """Viewer smoke test plus full local submit → view pipeline test."""
+
+    def test_viewer_shows_existing_zmap(self, app_page: Page) -> None:
+        """Fast smoke test: existing sphere zmap is discoverable and viewable."""
+        navigate_sidebar(app_page, stage="Subject-Level", analysis="🎯 Seed Connectivity Viewer")
+        _save_screenshot(app_page, "09a_viewer_existing_open")
+
+        _set_selectbox_option(app_page, "Pipeline", "fc")
+        _set_selectbox_option(app_page, "Subject", TEST_VIEWER_SUBJECT)
+        _set_selectbox_option(app_page, "Session", TEST_VIEWER_SESSION)
+        app_page.wait_for_timeout(1_500)
+        _save_screenshot(app_page, "09b_viewer_existing_selected")
+
+        seed_selector = app_page.locator(MAIN + " " + '[data-testid="stSelectbox"]').filter(
+            has_text="Seed"
+        )
+        expect(seed_selector).to_be_visible(timeout=10_000)
+        seed_text = seed_selector.text_content() or ""
+        page_text = app_page.locator(MAIN).text_content() or ""
+        assert (
+            "DLPFC" in seed_text
+            or "sphere" in seed_text.lower()
+            or TEST_SEED_ID in page_text
+        ), f"Expected computed sphere seed in selector. Got: {seed_text}"
+
+        vox_tab = app_page.locator(MAIN).locator('[data-testid="stTab"]').filter(
+            has_text="Voxel z-map"
+        )
+        vox_tab.click()
+        app_page.wait_for_timeout(2_000)
+        _save_screenshot(app_page, "09c_viewer_existing_voxel")
+
+        papaya_frame = app_page.locator('[data-testid="stIFrame"]').first
+        expect(papaya_frame).to_be_visible(timeout=15_000)
+
+        qm_expander = app_page.locator(MAIN).locator('[data-testid="stExpander"]').filter(
+            has_text="Quality metrics"
+        )
+        expect(qm_expander).to_be_visible(timeout=8_000)
+        qm_expander.locator("summary").click()
+        expect(qm_expander.get_by_text("Brain mask applied", exact=False)).to_be_visible(timeout=5_000)
+        expect(qm_expander.get_by_text("Mean z", exact=False)).to_be_visible(timeout=5_000)
+        expect(qm_expander.get_by_text("Std z", exact=False)).to_be_visible(timeout=5_000)
+        _save_screenshot(app_page, "09d_viewer_existing_quality")
+
+    def test_submit_wait_and_view(self, app_page: Page) -> None:  # noqa: C901
+        """Full E2E: sphere seed, local submit sub-033/ses-01, view zmap + QA panel."""
+        navigate_sidebar(app_page, stage="Subject-Level", analysis="📤 Submit Seed Connectivity")
+        _save_screenshot(app_page, "09e_submit_page_open")
+
+        _set_single_multiselect(app_page, "Subjects (default: all)", TEST_SUBJECT)
+        _set_single_multiselect(app_page, "Sessions (default: all)", TEST_SESSION)
+
+        seed_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(
+            has_text="Seed source"
+        )
+        seed_radio.locator("p").filter(has_text="Sphere from coordinates").click()
+        app_page.wait_for_timeout(1_000)
+
+        sphere_name = app_page.locator(MAIN + " " + '[data-testid="stTextInput"]').filter(
+            has_text="Sphere name"
+        )
+        expect(sphere_name).to_be_visible(timeout=10_000)
+        sphere_name.locator("input").fill(TEST_SEED_NAME)
+        _fill_number_input(app_page, "x (mm)", TEST_SEED_COORDS[0])
+        _fill_number_input(app_page, "y (mm)", TEST_SEED_COORDS[1])
+        _fill_number_input(app_page, "z (mm)", TEST_SEED_COORDS[2])
+        _fill_number_input(app_page, "radius (mm)", TEST_SEED_RADIUS)
+
+        add_sphere_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Add sphere")
+        add_sphere_btn.scroll_into_view_if_needed()
+        add_sphere_btn.click()
+        app_page.wait_for_timeout(1_000)
+        _save_screenshot(app_page, "09f_seed_added")
+
+        seed_list_text = app_page.locator(MAIN).text_content() or ""
+        assert TEST_SEED_NAME in seed_list_text, (
+            f"Expected seed '{TEST_SEED_NAME}' in seed list. Page snippet: {seed_list_text[:600]}"
+        )
+
+        _set_single_multiselect(app_page, "Measures", "pearson")
+
+        run_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(
+            has_text="Run on"
+        )
+        run_radio.locator("p").filter(has_text="Local").click()
+        app_page.wait_for_timeout(1_000)
+
+        preflight_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="pre-flight")
+        preflight_btn.scroll_into_view_if_needed()
+        preflight_btn.click()
+        expect(app_page.locator(MAIN)).to_contain_text("All critical checks passed", timeout=20_000)
+        _save_screenshot(app_page, "09g_preflight_done")
+
+        submit_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Run locally")
+        submit_btn.scroll_into_view_if_needed()
+        _save_screenshot(app_page, "09h_before_submit")
+        submit_btn.click()
+        expect(app_page.locator(MAIN)).to_contain_text("Completed", timeout=180_000)
+        app_page.wait_for_timeout(2_000)
+        _save_screenshot(app_page, "09i_after_submit")
+
+        navigate_sidebar(app_page, stage="Subject-Level", analysis="🎯 Seed Connectivity Viewer")
+        app_page.wait_for_timeout(3_000)
+        _save_screenshot(app_page, "09j_viewer_page_open")
+
+        _set_selectbox_option(app_page, "Pipeline", "fc")
+        _set_selectbox_option(app_page, "Subject", TEST_VIEWER_SUBJECT)
+        _set_selectbox_option(app_page, "Session", TEST_VIEWER_SESSION)
+        app_page.wait_for_timeout(2_000)
+        _save_screenshot(app_page, "09k_viewer_subject_selected")
+
+        seed_selector = app_page.locator(MAIN + " " + '[data-testid="stSelectbox"]').filter(
+            has_text="Seed"
+        )
+        expect(seed_selector).to_be_visible(timeout=10_000)
+        seed_text = seed_selector.text_content() or ""
+        page_text = app_page.locator(MAIN).text_content() or ""
+        assert (
+            TEST_SEED_NAME in seed_text
+            or "DLPFC" in seed_text
+            or TEST_SEED_ID in page_text
+        ), f"Expected computed sphere seed in selector. Got: {seed_text}"
+        _save_screenshot(app_page, "09l_seed_selected")
+
+        vox_tab = app_page.locator(MAIN).locator('[data-testid="stTab"]').filter(
+            has_text="Voxel z-map"
+        )
+        vox_tab.click()
+        app_page.wait_for_timeout(4_000)
+        _save_screenshot(app_page, "09m_voxel_tab")
+
+        papaya_frame = app_page.locator('[data-testid="stIFrame"]').first
+        expect(papaya_frame).to_be_visible(timeout=15_000)
+
+        qm_expander = app_page.locator(MAIN).locator('[data-testid="stExpander"]').filter(
+            has_text="Quality metrics"
+        )
+        expect(qm_expander).to_be_visible(timeout=8_000)
+        qm_expander.locator("summary").click()
+        expect(qm_expander.get_by_text("Brain mask applied", exact=False)).to_be_visible(timeout=5_000)
+        expect(qm_expander.get_by_text("Mean z", exact=False)).to_be_visible(timeout=5_000)
+        expect(qm_expander.get_by_text("Std z", exact=False)).to_be_visible(timeout=5_000)
+        _save_screenshot(app_page, "09n_quality_metrics_open")

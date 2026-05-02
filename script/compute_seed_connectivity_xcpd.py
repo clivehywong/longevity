@@ -455,6 +455,12 @@ def _write_meta(
     measures: list[str],
     atlases: list[str],
     t0: float,
+    subject: Optional[str] = None,
+    session: Optional[str] = None,
+    brain_mask_path: Optional[str] = None,
+    n_brain_voxels: Optional[int] = None,
+    n_timepoints: Optional[int] = None,
+    zmap_shape: Optional[list] = None,
 ) -> None:
     """Write a JSON sidecar with provenance and run metadata."""
     import scipy
@@ -466,6 +472,8 @@ def _write_meta(
         nilearn_ver = "unavailable"
 
     meta: dict = {
+        "subject": subject,
+        "session": session,
         "seed_spec": {
             "id": seed.id,
             "name": seed.name,
@@ -479,8 +487,13 @@ def _write_meta(
         "pipeline": pipeline,
         "bold_variant": bold_variant,
         "tr": tr,
+        "n_timepoints": n_timepoints,
         "measures": measures,
         "atlas_list": atlases,
+        "brain_mask_path": brain_mask_path,
+        "n_brain_voxels": n_brain_voxels,
+        "zmap_shape": zmap_shape,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "software_versions": {
             "nibabel": nib.__version__,
             "nilearn": nilearn_ver,
@@ -563,6 +576,9 @@ def _process_seed(
         _compute_and_save_seed_to_parcel(seed_ts, atlas, measure, xcpd_out, out_tsv, tr)
 
     # Seed-to-voxel z-map (Pearson only)
+    active_mask_path: Optional[str] = None
+    n_brain_voxels: Optional[int] = None
+    zmap_shape: Optional[list] = None
     if zmap_needed:
         assert bold_data is not None and bold_img is not None
         _LOG.info("  Seed-to-voxel z-map")
@@ -594,7 +610,9 @@ def _process_seed(
                         mask_img_resampled = resample_to_img(mask_img, ref_img, interpolation='nearest')
                         brain_mask = mask_img_resampled.get_fdata() > 0.5
                     
-                    _LOG.info("    Brain mask loaded: %d voxels", brain_mask.sum())
+                    n_brain_voxels = int(brain_mask.sum())
+                    active_mask_path = str(mask_path)
+                    _LOG.info("    Brain mask loaded: %d voxels", n_brain_voxels)
                     break
             
             if brain_mask is None:
@@ -604,6 +622,7 @@ def _process_seed(
         
         zmap_img = _compute_seed_to_voxel_zmap(seed_ts, bold_data, bold_img, brain_mask)
         nib.save(zmap_img, str(zmap_path))
+        zmap_shape = list(zmap_img.shape)
 
     # Meta JSON
     if meta_needed:
@@ -616,6 +635,12 @@ def _process_seed(
             measures=measures,
             atlases=atlases,
             t0=t0,
+            subject=subject,
+            session=session,
+            brain_mask_path=active_mask_path,
+            n_brain_voxels=n_brain_voxels,
+            n_timepoints=int(seed_ts.shape[0]),
+            zmap_shape=zmap_shape,
         )
 
     _LOG.info("  Done: %s", seed_id)

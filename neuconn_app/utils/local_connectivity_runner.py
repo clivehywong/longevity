@@ -201,6 +201,8 @@ class LocalConnectivityRunner:
         if log_callback:
             log_callback(f"$ {' '.join(shlex.quote(c) for c in cmd)}")
 
+        workdir = Path(item["bids_root"]).expanduser()
+
         t0 = time.time()
         try:
             proc = subprocess.run(
@@ -208,6 +210,7 @@ class LocalConnectivityRunner:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                cwd=str(workdir),
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
             )
             dur = time.time() - t0

@@ -289,11 +289,11 @@ def _seed_to_cli_token(seed: Seed) -> str:
     if seed.source == "xcpd_atlas_parcel":
         return f"atlas-{seed.atlas}:{seed.parcel_label}"
     if seed.source == "custom_nifti_roi":
-        return str(seed.nifti_path or seed.id)
+        return f"nifti:{seed.nifti_path or seed.id},name={seed.name}"
     if seed.source == "sphere":
         x, y, z = seed.coords_mm or (0, 0, 0)
         r = seed.radius_mm or 6.0
-        return f"sphere:{seed.name}:{x},{y},{z}:{r}"
+        return f"sphere:{x},{y},{z},r={r},name={seed.name}"
     return seed.id
 
 
@@ -407,11 +407,16 @@ def render() -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}last_command", "")
 
     config = _get_config()
-    bids_root = (
-        config.get("paths", {}).get("project_root")
-        or config.get("project_root")
+    bids_root_value = (
+        config.get("project_root")
+        or config.get("paths", {}).get("project_root")
         or config.get("paths", {}).get("bids_root")
-        or "."
+        or config.get("paths", {}).get("bids_dir")
+    )
+    bids_root = (
+        Path(bids_root_value).expanduser()
+        if bids_root_value and "${" not in str(bids_root_value)
+        else Path(__file__).resolve().parents[2]
     )
 
     # --- Pipeline ---
