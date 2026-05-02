@@ -310,32 +310,91 @@ def _compute_seed_to_voxel_zmap(
     seed_ts: np.ndarray,
     bold_data: np.ndarray,
     bold_img: nib.Nifti1Image,
+    brain_mask: Optional[np.ndarray] = None,
 ) -> nib.Nifti1Image:
-    """Compute voxel-wise Pearson r with *seed_ts*, Fisher-z transform, return NIfTI."""
+    """Compute voxel-wise Pearson r with *seed_ts*, Fisher-z transform, return NIfTI.
+    
+    Parameters
+    ----------
+    seed_ts : np.ndarray
+        Seed timeseries (T,)
+    bold_data : np.ndarray
+        BOLD data (X, Y, Z, T)
+    bold_img : nib.Nifti1Image
+        BOLD image for affine
+    brain_mask : np.ndarray, optional
+        Brain mask (X, Y, Z) boolean array. If provided, only compute
+        correlations for voxels within mask (memory-efficient).
+        Non-brain voxels will be set to 0 in output.
+    
+    Returns
+    -------
+    nib.Nifti1Image
+        Fisher-z transformed connectivity map
+    """
     X, Y, Z, T = bold_data.shape
     n = X * Y * Z
 
-    voxels = bold_data.reshape(n, T).astype(np.float64)
+    bold_flat = bold_data.reshape(n, T).astype(np.float64)
 
     # Demean seed
     seed_dm = seed_ts - seed_ts.mean()
     seed_norm = np.linalg.norm(seed_dm)
 
-    # Demean voxels
-    vox_mean = voxels.mean(axis=1, keepdims=True)
-    voxels_dm = voxels - vox_mean
-    vox_norms = np.linalg.norm(voxels_dm, axis=1)  # (N,)
+    # Initialize output
+    r_values = np.zeros(n, dtype=np.float32)
 
-    # Pearson r: dot(x_dm, y_dm) / (||x_dm|| * ||y_dm||)
-    num = voxels_dm @ seed_dm  # (N,)
-    denom = vox_norms * seed_norm  # (N,)
+    # If mask provided, only process masked voxels (memory-efficient)
+    if brain_mask is not None:
+        mask_1d = brain_mask.ravel()
+        mask_indices = np.where(mask_1d)[0]
+        n_masked = len(mask_indices)
+        
+        _LOG.info("    Computing correlations for %d masked voxels (%.1f%% of volume)", 
+                  n_masked, 100 * n_masked / n)
+        
+        # Process in chunks to avoid memory issues
+        chunk_size = 50000
+        n_chunks = (n_masked + chunk_size - 1) // chunk_size
+        
+        for i in range(n_chunks):
+            start = i * chunk_size
+            end = min((i + 1) * chunk_size, n_masked)
+            chunk_indices = mask_indices[start:end]
+            
+            # Get chunk data
+            chunk_data = bold_flat[chunk_indices]
+            
+            # Demean
+            chunk_mean = chunk_data.mean(axis=1, keepdims=True)
+            chunk_dm = chunk_data - chunk_mean
+            chunk_norms = np.linalg.norm(chunk_dm, axis=1)
+            
+            # Pearson
+            num = chunk_dm @ seed_dm
+            denom = chunk_norms * seed_norm
+            
+            with np.errstate(invalid="ignore", divide="ignore"):
+                r_chunk = np.where(denom > 0, num / denom, 0.0)
+            
+            r_values[chunk_indices] = r_chunk
+    else:
+        # Process all voxels (original behavior, memory-intensive)
+        _LOG.info("    Computing correlations for all %d voxels (no mask)", n)
+        
+        vox_mean = bold_flat.mean(axis=1, keepdims=True)
+        voxels_dm = bold_flat - vox_mean
+        vox_norms = np.linalg.norm(voxels_dm, axis=1)
+        
+        num = voxels_dm @ seed_dm
+        denom = vox_norms * seed_norm
+        
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r_values = np.where(denom > 0, num / denom, 0.0)
 
-    with np.errstate(invalid="ignore", divide="ignore"):
-        r = np.where(denom > 0, num / denom, 0.0)
-
-    # Fisher-z
+    # Fisher-z transform
     clip_val = 1.0 - 1e-7
-    r_clipped = np.clip(r, -clip_val, clip_val)
+    r_clipped = np.clip(r_values, -clip_val, clip_val)
     z = np.arctanh(r_clipped).reshape(X, Y, Z).astype(np.float32)
 
     return nib.Nifti1Image(z, bold_img.affine)
@@ -507,7 +566,43 @@ def _process_seed(
     if zmap_needed:
         assert bold_data is not None and bold_img is not None
         _LOG.info("  Seed-to-voxel z-map")
-        zmap_img = _compute_seed_to_voxel_zmap(seed_ts, bold_data, bold_img)
+        
+        # Load brain mask (dilated MNI 2mm)
+        brain_mask = None
+        try:
+            from pathlib import Path as P
+            import os
+            
+            # Try local atlas directory first
+            bids_root_path = P(xcpd_out.bids_root) if hasattr(xcpd_out, 'bids_root') else P.cwd()
+            mask_candidates = [
+                bids_root_path / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz",
+                P(os.environ.get("FSLDIR", "/usr/share/fsl")) / "data" / "standard" / "MNI152_T1_2mm_brain_mask_dil.nii.gz",
+            ]
+            
+            for mask_path in mask_candidates:
+                if mask_path.exists():
+                    _LOG.info("    Loading brain mask: %s", mask_path.name)
+                    mask_img = nib.load(str(mask_path))
+                    brain_mask = mask_img.get_fdata() > 0.5
+                    
+                    # Resample to BOLD space if needed
+                    if brain_mask.shape != bold_data.shape[:3]:
+                        _LOG.info("    Resampling mask from %s to %s", brain_mask.shape, bold_data.shape[:3])
+                        from nilearn.image import resample_to_img
+                        ref_img = nib.Nifti1Image(bold_data[..., 0], bold_img.affine)
+                        mask_img_resampled = resample_to_img(mask_img, ref_img, interpolation='nearest')
+                        brain_mask = mask_img_resampled.get_fdata() > 0.5
+                    
+                    _LOG.info("    Brain mask loaded: %d voxels", brain_mask.sum())
+                    break
+            
+            if brain_mask is None:
+                _LOG.warning("    No brain mask found - processing all voxels (slower)")
+        except Exception as e:
+            _LOG.warning("    Could not load brain mask (%s) - processing all voxels", e)
+        
+        zmap_img = _compute_seed_to_voxel_zmap(seed_ts, bold_data, bold_img, brain_mask)
         nib.save(zmap_img, str(zmap_path))
 
     # Meta JSON
