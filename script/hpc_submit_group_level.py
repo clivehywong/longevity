@@ -99,7 +99,7 @@ CORRECTION_METHODS = ["grf", "tfce", "fdr"]
 MATRIX_CORRECTION_METHODS = ["paired_t_fdr", "nbs", "tfnbs"]
 
 # Kind choices for the new --kind selector
-KIND_CHOICES = ["voxel", "matrix"]
+KIND_CHOICES = ["voxel", "matrix", "mixed_design"]
 
 # Matrix sub-kind choices (--matrix-kind)
 MATRIX_KIND_CHOICES = ["network", "seed"]
@@ -1057,6 +1057,87 @@ fi
 # CLI ENTRY POINT
 # ============================================================================
 
+def generate_mixed_design_script(
+    bids_root: str,
+    seed: str,
+    pipeline: str,
+    measure: str,
+    n_perms: int,
+    correction: str,
+    canonical_csv: str,
+    log_dir: str = DEFAULT_LOGS_DIR,
+    time_limit: Optional[str] = None,
+    mem: Optional[str] = None,
+    cpus: Optional[int] = None,
+    partition: Optional[str] = None,
+    mask_path: Optional[str] = None,
+    conda_env: str = "",
+    subject_job_id: Optional[str] = None,
+) -> str:
+    """Generate a SLURM script for mixed-design TFCE group analysis.
+
+    Calls neuconn_app/scripts/group_mixed_design_stats.py directly.
+    """
+    cmd_parts = [
+        "python3",
+        f"{bids_root}/neuconn_app/scripts/group_mixed_design_stats.py",
+        "--bids-root", shlex.quote(bids_root),
+        "--seed", shlex.quote(seed),
+        "--pipeline", shlex.quote(pipeline),
+        "--measure", shlex.quote(measure),
+        "--n-perms", str(n_perms),
+        "--correction", shlex.quote(correction),
+        "--canonical-order-csv", shlex.quote(canonical_csv),
+    ]
+    if mask_path:
+        cmd_parts += ["--mask-path", shlex.quote(mask_path)]
+    backend_cmd = " ".join(cmd_parts)
+
+    dependency_line = f"#SBATCH --dependency=afterok:{subject_job_id}\n" if subject_job_id else ""
+    time_line = f"#SBATCH --time={time_limit}\n" if time_limit else ""
+    mem_line = f"#SBATCH --mem={mem}\n" if mem else ""
+    cpus_line = f"#SBATCH --cpus-per-task={cpus}\n" if cpus else ""
+    part_line = f"#SBATCH --partition={partition}\n" if partition else "#SBATCH --partition=shared_cpu\n"
+
+    if conda_env:
+        conda_block = f"""
+# Activate conda environment
+if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/anaconda3/etc/profile.d/conda.sh"
+fi
+conda activate {conda_env}
+"""
+    else:
+        conda_block = ""
+
+    return f"""#!/bin/bash
+# SLURM Mixed-Design TFCE Group Statistics Job
+# Generated: {datetime.now().isoformat()}
+# Seed: {seed}  Pipeline: {pipeline}  Measure: {measure}  Correction: {correction}
+
+#SBATCH --job-name=group_mixed_{pipeline}
+#SBATCH --chdir={bids_root}
+{dependency_line}{time_line}{mem_line}{cpus_line}{part_line}#SBATCH --output={log_dir}/group_mixed_%j.out
+#SBATCH --error={log_dir}/group_mixed_%j.err
+
+set -euo pipefail
+{conda_block}
+log_info() {{ echo "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $*"; }}
+log_error() {{ echo "[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $*"; }}
+
+log_info "Starting mixed-design TFCE group analysis (seed={seed}, pipeline={pipeline}, measure={measure}, correction={correction})"
+
+if {backend_cmd}; then
+    log_info "SUCCESS: mixed-design group analysis completed"
+else
+    log_error "FAILED: mixed-design group analysis"
+    exit 1
+fi
+"""
+
+
 def _csv_list(value: Optional[str]) -> Optional[List[str]]:
     """Parse comma-separated CLI values into a list."""
     if value is None:
@@ -1129,6 +1210,14 @@ def main():
     parser.add_argument("--partition", default=None, help="Requested SLURM partition.")
     parser.add_argument("--cpus", type=int, default=None, help="Requested CPUs per task.")
 
+    # ---- Mixed-design specific args ----
+    parser.add_argument("--seed", default=None, help="Seed CLI token (e.g., atlas-4S256Parcels:LH_Cont_PFCl_3).")
+    parser.add_argument("--n-perms", type=int, default=None, help="Number of permutations for mixed-design TFCE.")
+    parser.add_argument("--canonical-order-csv", default=None, help="Path to canonical subject order TSV/CSV.")
+    parser.add_argument("--correction", default=None, choices=["TFCE", "GRF", "FDR"], help="Correction method for mixed-design TFCE.")
+    parser.add_argument("--mask-path", default=None, help="Brain mask path for mixed-design TFCE.")
+    parser.add_argument("--conda-env", default="", help="Conda environment to activate on HPC.")
+
     # ---- Legacy / shared arguments ----
     parser.add_argument(
         "--subject-job-id",
@@ -1197,29 +1286,48 @@ def main():
     # ------------------------------------------------------------------ #
     if args.kind is not None:
         try:
-            script = generate_xcpd_group_script(
-                kind=args.kind,
-                bids_root=args.bids_root,
-                pipeline=args.pipeline,
-                measure=args.measure or "",
-                contrast=args.contrast or "",
-                method=args.method or ("grf" if args.kind == "voxel" else "paired_t_fdr"),
-                group_csv=args.group_csv or "bids/participants.tsv",
-                out=args.out or f"results/group_{args.kind}",
-                log_dir=args.log_dir,
-                subject_job_id=args.subject_job_id,
-                time_limit=args.time_limit,
-                mem=args.memory,
-                cpus=args.cpus,
-                partition=args.partition,
-                mask=args.mask,
-                n_permutations=args.n_permutations if args.n_permutations != 1000 else None,
-                matrix_kind=args.matrix_kind,
-                atlas=args.atlas,
-                seed_id=args.seed_id,
-                threshold=args.threshold,
-                alpha=args.alpha,
-            )
+            if args.kind == "mixed_design":
+                script = generate_mixed_design_script(
+                    bids_root=args.bids_root,
+                    seed=args.seed or "",
+                    pipeline=args.pipeline,
+                    measure=args.measure or "pearson",
+                    n_perms=args.n_perms or 5000,
+                    correction=args.correction or "TFCE",
+                    canonical_csv=args.canonical_order_csv or "bids/participants.tsv",
+                    log_dir=args.log_dir,
+                    time_limit=args.time_limit,
+                    mem=args.memory,
+                    cpus=args.cpus,
+                    partition=args.partition,
+                    mask_path=args.mask_path,
+                    conda_env=args.conda_env,
+                    subject_job_id=args.subject_job_id,
+                )
+            else:
+                script = generate_xcpd_group_script(
+                    kind=args.kind,
+                    bids_root=args.bids_root,
+                    pipeline=args.pipeline,
+                    measure=args.measure or "",
+                    contrast=args.contrast or "",
+                    method=args.method or ("grf" if args.kind == "voxel" else "paired_t_fdr"),
+                    group_csv=args.group_csv or "bids/participants.tsv",
+                    out=args.out or f"results/group_{args.kind}",
+                    log_dir=args.log_dir,
+                    subject_job_id=args.subject_job_id,
+                    time_limit=args.time_limit,
+                    mem=args.memory,
+                    cpus=args.cpus,
+                    partition=args.partition,
+                    mask=args.mask,
+                    n_permutations=args.n_permutations if args.n_permutations != 1000 else None,
+                    matrix_kind=args.matrix_kind,
+                    atlas=args.atlas,
+                    seed_id=args.seed_id,
+                    threshold=args.threshold,
+                    alpha=args.alpha,
+                )
 
             if args.dry_run:
                 print("\n" + "=" * 70)

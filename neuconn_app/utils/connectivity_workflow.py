@@ -218,6 +218,7 @@ class ConnectivityWorkflowManager:
             ("cpus", "--cpus"),
             ("log_dir", "--log-dir"),
             ("output_dir", "--output-dir"),
+            ("conda_env", "--conda-env"),
         ]
         for key, flag in scalar_options:
             self._append_option(parts, flag, options.get(key))
@@ -294,6 +295,13 @@ class ConnectivityWorkflowManager:
             ("partition", "--partition"),
             ("cpus", "--cpus"),
             ("log_dir", "--log-dir"),
+            # mixed_design-specific
+            ("seed", "--seed"),
+            ("n_perm", "--n-perms"),
+            ("correction", "--correction"),
+            ("canonical_order_csv", "--canonical-order-csv"),
+            ("mask_path", "--mask-path"),
+            ("conda_env", "--conda-env"),
         ]
         for key, flag in xcpd_option_map:
             self._append_option(parts, flag, options.get(key))

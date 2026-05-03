@@ -560,23 +560,57 @@ def _submit_mixed_design_hpc(
     correction: str,
     mask: str | None = None,
 ) -> None:
-    """Submit mixed-design analysis to HPC (output path resolved by backend)."""
-    cmd = [
-        "python", "neuconn_app/scripts/group_mixed_design_stats.py",
-        "--bids-root", str(bids_root),
-        "--seed", seed,
-        "--pipeline", pipeline,
-        "--measure", measure,
-        "--n-perms", str(n_perm),
-        "--correction", correction,
-        "--canonical-csv", canonical_csv,
-    ]
+    """Submit mixed-design analysis to HPC via ConnectivityWorkflowManager."""
+    from utils.hpc import HPCConfig as _HPCCfg
+    hpc_cfg = _HPCCfg.from_config(config)
+    remote_bids_root = hpc_cfg.remote_base or str(bids_root)
 
-    if mask:
-        cmd.extend(["--mask", mask])
+    # Remap local paths to remote equivalents
+    def _remap_path(local_path: str | None) -> str | None:
+        if not local_path:
+            return None
+        lp = str(local_path)
+        if lp.startswith(str(bids_root)):
+            return lp.replace(str(bids_root), remote_bids_root, 1)
+        return lp
 
-    st.code(" ".join(cmd), language="bash")
-    st.info("ℹ️ HPC submission: Create a SLURM job script and upload to HPC. (Full HPC integration coming soon.)")
+    remote_mask = _remap_path(mask)
+    remote_canonical_csv = _remap_path(canonical_csv)
+    remote_log_dir = f"{remote_bids_root}/logs"
+
+    manager = ConnectivityWorkflowManager(config)
+    opts: dict = {
+        "bids_root": remote_bids_root,
+        "seed": seed,
+        "pipeline": pipeline,
+        "measure": measure,
+        "n_perm": str(n_perm),
+        "correction": correction,
+        "canonical_order_csv": remote_canonical_csv or f"{remote_bids_root}/bids/participants.tsv",
+        "kind": "mixed_design",
+        "log_dir": remote_log_dir,
+        "partition": hpc_cfg.partition or "shared_cpu",
+        "conda_env": hpc_cfg.conda_env,
+    }
+    if remote_mask:
+        opts["mask_path"] = remote_mask
+
+    with st.spinner("Submitting group analysis to HPC…"):
+        try:
+            sub_obj = manager.submit(
+                "group_stats", opts, [], dry_run=False, execution_mode="hpc"
+            )
+            job_id = sub_obj.job_id if sub_obj else "unknown"
+            if sub_obj and sub_obj.status == "failed":
+                st.error(f"❌ HPC submission failed: {sub_obj.notes or 'unknown error'}")
+            else:
+                st.success(f"✅ Group analysis submitted to HPC! Job ID: **{job_id}**")
+                st.info(
+                    f"Monitor progress in the 📡 Monitor tab. "
+                    f"Download results when the job completes."
+                )
+        except Exception as exc:
+            st.error(f"HPC submission failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
