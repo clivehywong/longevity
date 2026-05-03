@@ -150,10 +150,11 @@ class ConnectivityWorkflowManager:
 
     @property
     def state_file(self) -> Path:
-        bids_dir = self._expand_path(
-            self.config.get("paths", {}).get("bids_dir")
-            or str(self._project_root() / "bids")
-        )
+        bids_raw = self.config.get("paths", {}).get("bids_dir") or ""
+        if bids_raw and "${" not in str(bids_raw):
+            bids_dir = self._expand_path(bids_raw)
+        else:
+            bids_dir = self._project_root() / "bids"
         state_dir = bids_dir.parent / ".neuconn"
         state_dir.mkdir(parents=True, exist_ok=True)
         return state_dir / "connectivity_workflow_state.json"
@@ -483,7 +484,7 @@ class ConnectivityWorkflowManager:
 
     def _project_root(self) -> Path:
         configured = self.config.get("paths", {}).get("project_root") or self.config.get("project_root")
-        if configured:
+        if configured and "${" not in str(configured):
             return self._expand_path(configured)
         return Path(__file__).resolve().parents[2]
 
