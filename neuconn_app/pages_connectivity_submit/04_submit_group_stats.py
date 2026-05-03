@@ -24,7 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from utils.config import load_config
 from utils.connectivity_workflow import ConnectivityWorkflowManager
 from utils.xcpd_outputs import KNOWN_PIPELINES
-from utils.seed_catalog import SeedCatalog
+from utils.seed_catalog import SeedCatalog, Seed
+from utils.seed_viz import make_seed_preview_png, cli_token_to_seed_dir_name
 from utils.group_stats_design import MixedDesignBuilder
 from utils.group_stats_validation import SubjectDataValidator
 
@@ -109,12 +110,59 @@ def _load_seed_catalog(bids_root: str, pipeline: str) -> SeedCatalog | None:
         return None
 
 
+def _list_computed_seeds(bids_root: str, pipeline: str) -> list[str]:
+    """List seeds with subject-level outputs as CLI tokens.
+
+    Scans derivatives/connectivity/{pipeline}/sub-*/ses-*/seed/ and converts
+    dir names back to CLI tokens using the canonical mapping.
+    """
+    base = Path(bids_root) / "derivatives" / "connectivity" / pipeline
+    seed_dirs: set[str] = set()
+    for p in base.glob("sub-*/ses-*/seed/*/"):
+        if p.is_dir():
+            seed_dirs.add(p.name)
+    return sorted(_dir_name_to_cli_token(d) for d in seed_dirs)
+
+
+def _dir_name_to_cli_token(dir_name: str) -> str:
+    """Convert on-disk seed dir name back to CLI token format."""
+    import re  # noqa: PLC0415
+    # sphere-{x}_{y}_{z}_r{r}  →  sphere:{x},{y},{z},r={r}
+    m = re.match(r"sphere-([-\d]+)_([-\d]+)_([-\d]+)_r([\d]+)$", dir_name)
+    if m:
+        return f"sphere:{m.group(1)},{m.group(2)},{m.group(3)},r={m.group(4)}"
+    # atlas-{atlas}_parcel-{label}  →  atlas-{atlas}:{label}
+    m = re.match(r"(atlas-[^_]+)_parcel-(.+)$", dir_name)
+    if m:
+        return f"{m.group(1)}:{m.group(2)}"
+    # custom-{name}  →  keep as-is
+    return dir_name
+
+
+def _seed_token_display(token: str) -> str:
+    """Human-readable label for a CLI seed token."""
+    import re  # noqa: PLC0415
+    if token.startswith("sphere:"):
+        m = re.match(r"sphere:([-\d.]+),([-\d.]+),([-\d.]+),r=([\d.]+)(?:,name=(.+))?", token)
+        if m:
+            name = m.group(5) or f"({m.group(1)}, {m.group(2)}, {m.group(3)})"
+            return f"🔵 {name}  r={m.group(4)} mm"
+    if token.startswith("atlas-"):
+        m = re.match(r"atlas-([^:]+):(.+)$", token)
+        if m:
+            return f"🟠 {m.group(2)}  [{m.group(1)}]"
+    return token
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _cached_seed_preview(token: str, bids_root_str: str) -> bytes | None:
+    return make_seed_preview_png(token, bids_root_str)
+
+
 def _seed_to_cli_format(seed_str: str) -> str:
     """Convert seed UI string to CLI format."""
-    # If already in CLI format (atlas-... or nifti:...), return as-is
     if ":" in seed_str or seed_str.startswith("nifti:"):
         return seed_str
-    # Otherwise assume it's a seed name, convert to atlas format
     return f"atlas-4S256Parcels:{seed_str}"
 
 
@@ -162,15 +210,74 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     
     with col3:
         st.write("")  # Spacer
-    
-    # Seed selector (simplified for now)
-    seed_input = st.text_input(
-        "Seed (CLI format: atlas-4S256Parcels:LABEL or nifti:/path)",
-        value=st.session_state.get(f"{STATE_PREFIX}mixed_seed", ""),
-        key=f"{STATE_PREFIX}mixed_seed_widget",
-        help="Enter seed in CLI format, e.g., 'atlas-4S256Parcels:RH_Cont_Par_1'",
+
+    # ── Seed selection from catalog ────────────────────────────────────────
+    st.markdown("**Seed selection**")
+    catalog = _load_seed_catalog(str(bids_root), pipeline)
+
+    seed_input = ""
+    seed_source = st.radio(
+        "Seed source",
+        ["Catalog (from computed subject-level outputs)", "Manual entry"],
+        horizontal=True,
+        key=f"{STATE_PREFIX}mixed_seed_source",
     )
+
+    if seed_source == "Catalog (from computed subject-level outputs)":
+        if catalog is None or not catalog.get_seeds():
+            st.warning("⚠️ No seeds in catalog — run subject-level seed connectivity first, or use Manual entry.")
+        else:
+            computed_seeds = _list_computed_seeds(str(bids_root), pipeline)
+            if computed_seeds:
+                computed_tokens = {s: cli_token_to_seed_dir_name(s) for s in computed_seeds}
+                # Prefer seeds that have been computed for subjects
+                catalog_tokens = {
+                    f"atlas-{s.atlas}:{s.parcel_label}" if s.source == "xcpd_atlas_parcel"
+                    else f"sphere:{','.join(str(int(v) if v == int(v) else v) for v in s.coords_mm or (0,0,0))},r={int(s.radius_mm or 6)},name={s.name}"
+                    if s.source == "sphere"
+                    else s.id
+                    : s
+                    for s in catalog.get_seeds()
+                }
+                # Filter to seeds that have subject-level outputs
+                available = [t for t in computed_seeds if t in catalog_tokens or True]
+                sel = st.selectbox(
+                    "Select seed",
+                    computed_seeds,
+                    key=f"{STATE_PREFIX}mixed_seed_catalog_sel",
+                    format_func=lambda t: _seed_token_display(t),
+                )
+                seed_input = sel
+            else:
+                st.info("No subject-level seed outputs found. Showing full catalog.")
+                all_seeds = catalog.get_seeds(source="xcpd_atlas_parcel")[:100]
+                if all_seeds:
+                    opts = {f"atlas-{s.atlas}:{s.parcel_label}": s for s in all_seeds}
+                    sel_label = st.selectbox(
+                        "Select seed", list(opts.keys()),
+                        key=f"{STATE_PREFIX}mixed_seed_catalog_full",
+                        format_func=_seed_token_display,
+                    )
+                    seed_input = sel_label
+    else:
+        seed_input = st.text_input(
+            "Seed token (CLI format: atlas-4S256Parcels:LABEL or sphere:x,y,z,r=6,name=...)",
+            value=st.session_state.get(f"{STATE_PREFIX}mixed_seed", ""),
+            key=f"{STATE_PREFIX}mixed_seed_manual",
+            help="E.g., 'atlas-4S256Parcels:RH_Cont_Par_1' or 'sphere:-46,16,32,r=6,name=dlpfc_l'",
+        )
+
     st.session_state[f"{STATE_PREFIX}mixed_seed"] = seed_input
+
+    # Seed visualizer preview
+    if seed_input:
+        with st.expander("🔍 Preview seed on MNI template", expanded=False):
+            with st.spinner("Rendering seed preview..."):
+                png = _cached_seed_preview(seed_input, str(bids_root))
+            if png:
+                st.image(png, use_container_width=True)
+            else:
+                st.warning(f"Could not render preview for: `{seed_input}`")
     
     # ===== Section 2: FSL TFCE Parameters =====
     st.markdown("#### ⚙️ Section 2: FSL TFCE Parameters")
@@ -242,38 +349,41 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     
     with col_val:
         if st.button("🔍 Validate Zmaps", key=f"{STATE_PREFIX}mixed_validate"):
-            with st.spinner("Validating zmaps..."):
-                try:
-                    canonical_csv = st.session_state.get(
-                        f"{STATE_PREFIX}mixed_canonical_csv",
-                        _default_participants_path(str(bids_root)),
-                    )
-                    
-                    validator = SubjectDataValidator(
-                        bids_root=str(bids_root),
-                        canonical_order_csv=canonical_csv,
-                        pipeline=pipeline,
-                        measure=measure,
-                    )
-                    
-                    validation_df = validator.validate_all_subjects()
-                    summary = validator.summarize_validation(validation_df)
-                    
-                    st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = summary
-                    st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = (
-                        summary.get("error_count", 0) == 0
-                    )
-                    
-                    if st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"]:
-                        st.success(f"✓ {summary['success_count']} zmaps valid")
-                    else:
-                        st.error(f"✗ {summary['error_count']} validation errors")
-                        if summary.get("error_details"):
-                            st.text(summary["error_details"])
-                    
-                except Exception as e:
-                    st.error(f"Validation failed: {e}")
-                    st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = False
+            if not seed_input:
+                st.warning("Select a seed first before validating zmaps.")
+            else:
+                with st.spinner("Validating zmaps..."):
+                    try:
+                        canonical_csv = st.session_state.get(
+                            f"{STATE_PREFIX}mixed_canonical_csv",
+                            _default_participants_path(str(bids_root)),
+                        )
+                        seed_dir_name = cli_token_to_seed_dir_name(seed_input)
+
+                        validator = SubjectDataValidator(
+                            bids_root=str(bids_root),
+                            canonical_order_csv=canonical_csv,
+                            pipeline=pipeline,
+                            measure=measure,
+                        )
+
+                        validation_df = validator.validate_all_subjects(seed=seed_dir_name)
+                        summary = validator.summarize_validation(validation_df)
+
+                        st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = summary
+                        st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = (
+                            summary.get("error_count", 0) == 0
+                        )
+
+                        if st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"]:
+                            st.success(f"✓ {summary['success_count']} zmaps valid for seed: `{seed_dir_name}`")
+                        else:
+                            st.error(f"✗ {summary['error_count']} validation errors")
+                            if summary.get("error_details"):
+                                st.text(summary["error_details"])
+                    except Exception as e:
+                        st.error(f"Validation failed: {e}")
+                        st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = False
     
     with col_prev:
         if st.button("📊 Preview Design", key=f"{STATE_PREFIX}mixed_preview"):
@@ -321,22 +431,29 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         f"{STATE_PREFIX}mixed_canonical_csv",
         _default_participants_path(str(bids_root)),
     )
-    
-    output_dir = Path(bids_root) / "results" / "group_mixed_design" / f"seed_{pipeline}_{measure}"
-    
+
+    # Let the backend resolve the canonical output path (derivatives/connectivity/...)
+    seed_dir_name = cli_token_to_seed_dir_name(seed_input) if seed_input else ""
+    expected_output = (
+        Path(bids_root) / "derivatives" / "connectivity"
+        / pipeline / "group" / "seed" / seed_dir_name / f"measure-{measure}"
+        if seed_dir_name else None
+    )
+
     col_info, col_submit = st.columns([2, 1])
-    
+
     with col_info:
         st.info(f"""
         **Execution Settings:**
         - **Location**: {execution}
-        - **Output**: {output_dir}
+        - **Seed dir**: `{seed_dir_name or '(none selected)'}`
+        - **Output**: `{expected_output or '(select a seed)'}`
         - **N Permutations**: {100 if use_test_perms and execution == "Local" else n_perm}
         - **Correction**: {correction}
         """)
-    
+
     is_valid = st.session_state.get(f"{STATE_PREFIX}mixed_zmaps_valid", False) and seed_input
-    
+
     with col_submit:
         if st.button(
             "🚀 Submit",
@@ -350,7 +467,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                 with st.spinner("Submitting analysis..."):
                     try:
                         effective_n_perm = 100 if (use_test_perms and execution == "Local") else n_perm
-                        
+
                         if execution == "Local":
                             _submit_mixed_design_local(
                                 bids_root,
@@ -358,7 +475,6 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                                 pipeline,
                                 measure,
                                 canonical_csv,
-                                str(output_dir),
                                 effective_n_perm,
                                 correction,
                                 mask_input or None,
@@ -371,7 +487,6 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                                 pipeline,
                                 measure,
                                 canonical_csv,
-                                str(output_dir),
                                 n_perm,
                                 correction,
                                 mask_input or None,
@@ -386,12 +501,11 @@ def _submit_mixed_design_local(
     pipeline: str,
     measure: str,
     canonical_csv: str,
-    output_dir: str,
     n_perm: int,
     correction: str,
     mask: str | None = None,
 ) -> None:
-    """Submit mixed-design analysis locally."""
+    """Submit mixed-design analysis locally (output path resolved by backend)."""
     cmd = [
         "python", "neuconn_app/scripts/group_mixed_design_stats.py",
         "--bids-root", str(bids_root),
@@ -401,26 +515,27 @@ def _submit_mixed_design_local(
         "--n-perms", str(n_perm),
         "--correction", correction,
         "--canonical-csv", canonical_csv,
-        "--output-dir", output_dir,
     ]
-    
+
     if mask:
         cmd.extend(["--mask", mask])
-    
+
     st.code(" ".join(cmd), language="bash")
-    
-    with st.spinner("Running analysis... (this may take 10+ minutes)"):
+
+    with st.spinner("Running analysis... (this may take 10+ minutes for full permutations)"):
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-            
+
             if result.returncode == 0:
                 st.success("✅ Analysis completed!")
-                st.info(f"Results saved to: {output_dir}")
-                
-                if st.button("📂 Open results folder", key=f"{STATE_PREFIX}open_results"):
-                    st.text(f"Navigate to: {output_dir}")
+                seed_dir = cli_token_to_seed_dir_name(seed)
+                out = (
+                    Path(bids_root) / "derivatives" / "connectivity"
+                    / pipeline / "group" / "seed" / seed_dir / f"measure-{measure}"
+                )
+                st.info(f"Results saved to: `{out}`")
             else:
-                st.error(f"Analysis failed:\n{result.stderr}")
+                st.error(f"Analysis failed (exit {result.returncode}):\n```\n{result.stderr[-2000:]}\n```")
         except subprocess.TimeoutExpired:
             st.error("Analysis timed out (>1 hour)")
         except Exception as e:
@@ -434,12 +549,11 @@ def _submit_mixed_design_hpc(
     pipeline: str,
     measure: str,
     canonical_csv: str,
-    output_dir: str,
     n_perm: int,
     correction: str,
     mask: str | None = None,
 ) -> None:
-    """Submit mixed-design analysis to HPC."""
+    """Submit mixed-design analysis to HPC (output path resolved by backend)."""
     cmd = [
         "python", "neuconn_app/scripts/group_mixed_design_stats.py",
         "--bids-root", str(bids_root),
@@ -449,14 +563,13 @@ def _submit_mixed_design_hpc(
         "--n-perms", str(n_perm),
         "--correction", correction,
         "--canonical-csv", canonical_csv,
-        "--output-dir", output_dir,
     ]
-    
+
     if mask:
         cmd.extend(["--mask", mask])
-    
+
     st.code(" ".join(cmd), language="bash")
-    st.info("HPC submission: Create SLURM job script and upload (future implementation)")
+    st.info("ℹ️ HPC submission: Create a SLURM job script and upload to HPC. (Full HPC integration coming soon.)")
 
 
 def render() -> None:

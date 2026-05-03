@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.group_stats_design import MixedDesignBuilder
 from utils.group_stats_validation import SubjectDataValidator
+from utils.seed_viz import cli_token_to_seed_dir_name
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ class GroupStatsRunner:
         n_perm: int = 5000,
         mask_path: Optional[str] = None,
         canonical_order_csv: Optional[str] = None,
+        correction: str = "TFCE",
     ):
         self.bids_root = Path(bids_root)
         self.seed = seed
@@ -128,7 +130,8 @@ class GroupStatsRunner:
         self.measure = measure
         self.n_perm = n_perm
         self.mask_path = Path(mask_path) if mask_path else None
-        
+        self.correction = correction.upper()
+
         # Set canonical order / participant metadata file
         if canonical_order_csv:
             self.canonical_order_csv = Path(canonical_order_csv)
@@ -139,14 +142,19 @@ class GroupStatsRunner:
                 participants_tsv if participants_tsv.exists() or not legacy_group_csv.exists()
                 else legacy_group_csv
             )
-        
-        # Set output directory
+
+        # Set output directory — use canonical derivatives structure
         if output_dir:
             self.output_dir = Path(output_dir)
         else:
-            seed_name = self.seed.replace(":", "_").replace("/", "_")
-            self.output_dir = self.bids_root / "results" / "group_stats" / f"{seed_name}_{pipeline}_{measure}"
-        
+            seed_dir_name = cli_token_to_seed_dir_name(seed)
+            self.output_dir = (
+                self.bids_root
+                / "derivatives" / "connectivity"
+                / pipeline / "group" / "seed"
+                / seed_dir_name / f"measure-{measure}"
+            )
+
         # State
         self.canonical_order: Optional[pd.DataFrame] = None
         self.validation_df: Optional[pd.DataFrame] = None
@@ -424,11 +432,18 @@ class GroupStatsRunner:
                 "-d", str(self.design_files["design.mat"]),
                 "-t", str(self.design_files["design.con"]),
                 "-f", str(self.design_files["design.fts"]),
+                "-e", str(self.design_files["design.grp"]),
                 "-m", mask,
                 "-n", str(self.n_perm),
-                "-T",
                 "-D",
             ]
+
+            # Add correction method flag
+            if self.correction == "TFCE":
+                cmd.append("-T")
+            elif self.correction == "GRF":
+                cmd.extend(["--vxl", "-c", "3.1"])  # cluster-based GRF
+            # FDR: no extra flag — randomise applies FDR correction by default
             
             logger.debug(f"Command: {' '.join(cmd)}")
             
@@ -691,21 +706,25 @@ def main():
     parser = argparse.ArgumentParser(
         description="Mixed-design group-level statistics pipeline"
     )
-    
+
     parser.add_argument("--bids-root", required=True, help="Project root directory")
-    parser.add_argument("--seed", required=True, help="Seed ID (e.g., atlas-4S256Parcels:RH_Cont_Par_1)")
+    parser.add_argument("--seed", required=True, help="Seed CLI token (e.g., atlas-4S256Parcels:RH_Cont_Par_1 or sphere:x,y,z,r=6)")
     parser.add_argument("--pipeline", default="fc", choices=["fc", "fc_gsr", "ec"], help="Pipeline (default: fc)")
     parser.add_argument("--measure", default="pearson", help="Connectivity measure (default: pearson)")
-    parser.add_argument("--output-dir", help="Output directory (default: results/group_stats/...)")
-    parser.add_argument("--n-perm", type=int, default=5000, help="Number of permutations (default: 5000)")
-    parser.add_argument("--mask-path", help="FSL mask file path (auto-detect if not provided)")
-    parser.add_argument("--canonical-order-csv", help="Path to canonical subject order CSV")
+    parser.add_argument("--output-dir", help="Output directory (default: derivatives/connectivity/<pipeline>/group/seed/.../)")
+    # Accept both --n-perm and --n-perms for compatibility
+    parser.add_argument("--n-perms", "--n-perm", dest="n_perm", type=int, default=5000, help="Number of permutations (default: 5000)")
+    # Accept both --mask-path and --mask for compatibility
+    parser.add_argument("--mask-path", "--mask", dest="mask_path", help="FSL mask file path (auto-detect if not provided)")
+    # Accept both --canonical-order-csv and --canonical-csv for compatibility
+    parser.add_argument("--canonical-order-csv", "--canonical-csv", dest="canonical_order_csv", help="Path to canonical subject order CSV/TSV")
+    parser.add_argument("--correction", default="TFCE", choices=["TFCE", "GRF", "FDR"], help="Multiple comparison correction (default: TFCE)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    
+
     args = parser.parse_args()
     setup_logging(debug=args.debug)
     logger.debug(f"Arguments: {args}")
-    
+
     runner = GroupStatsRunner(
         bids_root=args.bids_root,
         seed=args.seed,
@@ -715,8 +734,9 @@ def main():
         n_perm=args.n_perm,
         mask_path=args.mask_path,
         canonical_order_csv=args.canonical_order_csv,
+        correction=args.correction,
     )
-    
+
     success = runner.run()
     sys.exit(0 if success else 1)
 
