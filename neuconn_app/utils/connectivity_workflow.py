@@ -51,6 +51,7 @@ class ConnectivitySubmission:
     status: str
     output_dir: Optional[str]
     notes: Optional[str] = None
+    execution_mode: str = "hpc"  # "hpc" or "local"
 
 
 @dataclass
@@ -106,6 +107,7 @@ class ConnectivityWorkflowState:
                     status=status,
                     output_dir=raw.get("output_dir"),
                     notes=raw.get("notes"),
+                    execution_mode=raw.get("execution_mode", "hpc"),
                 )
             except Exception:
                 continue
@@ -333,6 +335,7 @@ class ConnectivityWorkflowManager:
         options: Dict,
         subjects: List[str],
         dry_run: bool = False,
+        execution_mode: str = "hpc",
     ) -> ConnectivitySubmission:
         """Submit, or dry-run, a connectivity analysis and persist its record."""
         if analysis_type not in VALID_ANALYSIS_TYPES:
@@ -369,6 +372,7 @@ class ConnectivityWorkflowManager:
             status=status,
             output_dir=self._output_dir(analysis_type, options_copy),
             notes=notes,
+            execution_mode=execution_mode,
         )
         state = self.load_state()
         state.add(submission)

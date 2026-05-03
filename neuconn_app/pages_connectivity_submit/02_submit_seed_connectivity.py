@@ -551,9 +551,179 @@ def _render_seed_builder(catalog: SeedCatalog | None, bids_root: Path) -> None:
 
 
 
-def render() -> None:
-    st.title("📤 Submit Seed Connectivity")
+# ---------------------------------------------------------------------------
+# Status badge mapping (shared across tabs)
+# ---------------------------------------------------------------------------
 
+_STATUS_BADGE: dict[str, str] = {
+    "submitted": "⏳ Pending",
+    "running": "🔄 Running",
+    "completed": "✅ Completed",
+    "failed": "❌ Failed",
+    "cancelled": "🚫 Cancelled",
+}
+
+
+def _make_progress_callback(progress_bar, status_text):
+    def callback(label: str, msg: str, frac: float) -> None:
+        progress_bar.progress(min(frac, 1.0), text=f"{label}: {msg}")
+        status_text.text(msg)
+    return callback
+
+
+def _render_monitor_tab(config: dict, bids_root: Any) -> None:
+    """Monitor seed connectivity HPC submissions."""
+    manager = ConnectivityWorkflowManager(config)
+    all_subs = [s for s in manager.list_submissions() if s.analysis_type == "seed_connectivity"]
+
+    col_refresh, col_filter = st.columns([1, 3])
+    with col_refresh:
+        if st.button("🔄 Refresh All", key="monitor_seed_refresh_all"):
+            for sub in all_subs:
+                if sub.status not in {"completed", "failed", "cancelled"}:
+                    try:
+                        manager.refresh_status(sub.submission_id)
+                    except Exception:
+                        pass
+            st.rerun()
+    with col_filter:
+        filter_val = st.selectbox(
+            "Filter by status",
+            ["All", "Pending", "Running", "Completed", "Failed"],
+            key="monitor_seed_filter",
+        )
+
+    if not all_subs:
+        st.info("No seed connectivity submissions yet. Submit a job in the ⚙️ Submit tab.")
+        return
+
+    filter_map = {
+        "Pending": "submitted",
+        "Running": "running",
+        "Completed": "completed",
+        "Failed": "failed",
+    }
+    filtered = all_subs if filter_val == "All" else [
+        s for s in all_subs if s.status == filter_map.get(filter_val, "")
+    ]
+
+    if not filtered:
+        st.info(f"No submissions with status: {filter_val}")
+        return
+
+    for sub in sorted(filtered, key=lambda s: s.submitted_at, reverse=True):
+        with st.container(border=True):
+            badge = _STATUS_BADGE.get(sub.status, sub.status)
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**Job ID:** `{sub.job_id or '—'}` &nbsp; {badge}")
+                st.caption(f"Submitted: {sub.submitted_at} | ID: `{sub.submission_id}`")
+                pipeline_opt = sub.options.get("pipeline", "—")
+                seeds_opt = sub.options.get("seeds", [])
+                seeds_str = ", ".join(str(s) for s in seeds_opt[:3])
+                if len(seeds_opt) > 3:
+                    seeds_str += f" (+{len(seeds_opt) - 3} more)"
+                st.caption(
+                    f"Pipeline: `{pipeline_opt}` | Seeds: {seeds_str or '—'} "
+                    f"| Subjects: {len(sub.subjects)}"
+                )
+            with col2:
+                if st.button("🔁 Refresh", key=f"refresh_{sub.submission_id}"):
+                    try:
+                        manager.refresh_status(sub.submission_id)
+                    except Exception as exc:
+                        st.error(f"Refresh failed: {exc}")
+                    st.rerun()
+                if sub.status in {"submitted", "running"}:
+                    if st.button("🚫 Cancel", key=f"cancel_{sub.submission_id}"):
+                        try:
+                            manager.cancel(sub.submission_id)
+                        except Exception as exc:
+                            st.error(f"Cancel failed: {exc}")
+                        st.rerun()
+
+
+def _render_download_tab(config: dict, bids_root: Any) -> None:
+    """Download completed HPC seed connectivity results."""
+    from utils.connectivity_download import (  # noqa: PLC0415
+        download_seed_results as _dl_seed,
+        build_seed_download_command as _build_seed_dl_cmd,
+    )
+    from utils.hpc import HPCConfig as _HPCConfig  # noqa: PLC0415
+
+    manager = ConnectivityWorkflowManager(config)
+    completed = [
+        s for s in manager.list_submissions()
+        if s.analysis_type == "seed_connectivity"
+        and s.execution_mode == "hpc"
+        and s.status == "completed"
+    ]
+
+    if not completed:
+        st.info("No completed HPC seed jobs to download.")
+        return
+
+    for sub in sorted(completed, key=lambda s: s.submitted_at, reverse=True):
+        with st.container(border=True):
+            pipeline = sub.options.get("pipeline", "fc")
+            seeds = sub.options.get("seeds", [])
+            seeds_str = ", ".join(str(s) for s in seeds[:3])
+            if len(seeds) > 3:
+                seeds_str += f" (+{len(seeds) - 3} more)"
+
+            st.markdown(f"**Job ID:** `{sub.job_id or '—'}` ✅ Completed")
+            st.caption(
+                f"Submitted: {sub.submitted_at} | Pipeline: `{pipeline}` "
+                f"| Seeds: {seeds_str or '—'} | Subjects: {len(sub.subjects)}"
+            )
+
+            hpc_cfg = None
+            try:
+                hpc_cfg = _HPCConfig.from_config(config)
+                cmd_preview = _build_seed_dl_cmd(
+                    pipeline=pipeline,
+                    seeds=seeds,
+                    subjects=sub.subjects[:5],
+                    hpc_config=hpc_cfg,
+                    local_bids_root=Path(bids_root),
+                )
+                with st.expander("📋 Rsync command preview"):
+                    st.code(cmd_preview, language="bash")
+            except Exception as exc:
+                st.warning(f"Could not build command preview: {exc}")
+
+            if st.button("⬇️ Download Results", key=f"download_{sub.submission_id}"):
+                if hpc_cfg is None:
+                    try:
+                        hpc_cfg = _HPCConfig.from_config(config)
+                    except Exception as exc:
+                        st.error(f"HPC config error: {exc}")
+                        return
+                st_progress = st.progress(0.0, text="Starting download…")
+                st_status = st.empty()
+                try:
+                    results = _dl_seed(
+                        submission_id=sub.submission_id,
+                        pipeline=pipeline,
+                        seeds=seeds,
+                        subjects=sub.subjects,
+                        hpc_config=hpc_cfg,
+                        local_bids_root=Path(bids_root),
+                        progress_callback=_make_progress_callback(st_progress, st_status),
+                    )
+                    ok = sum(1 for v in results.values() if v)
+                    fail = len(results) - ok
+                    for sub_id, success in results.items():
+                        st.markdown(f"{'✅' if success else '❌'} `{sub_id}`")
+                    if fail == 0:
+                        st.success(f"✅ Downloaded {ok}/{len(results)} subjects successfully.")
+                    else:
+                        st.error(f"⚠️ {fail} subject(s) failed. {ok} succeeded.")
+                except Exception as exc:
+                    st.error(f"Download failed: {exc}")
+
+
+def _render_submit_tab(config: dict, bids_root: Any) -> None:
     # --- Session state defaults ---
     st.session_state.setdefault(f"{STATE_PREFIX}pipeline", "fc")
     st.session_state.setdefault(f"{STATE_PREFIX}subjects", [])
@@ -563,19 +733,6 @@ def render() -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}bold_variant", "denoisedSmoothed")
     st.session_state.setdefault(f"{STATE_PREFIX}out_root", "derivatives/connectivity")
     st.session_state.setdefault(f"{STATE_PREFIX}last_command", "")
-
-    config = _get_config()
-    bids_root_value = (
-        config.get("project_root")
-        or config.get("paths", {}).get("project_root")
-        or config.get("paths", {}).get("bids_root")
-        or config.get("paths", {}).get("bids_dir")
-    )
-    bids_root = (
-        Path(bids_root_value).expanduser()
-        if bids_root_value and "${" not in str(bids_root_value)
-        else Path(__file__).resolve().parents[2]
-    )
 
     # --- Pipeline ---
     pipeline = st.selectbox(
@@ -882,7 +1039,8 @@ def render() -> None:
                         "bold_variant": bold_variant,
                     }
                     sub_obj = manager.submit(
-                        "seed_connectivity", opts, subjects_for_submit, dry_run=False
+                        "seed_connectivity", opts, subjects_for_submit, dry_run=False,
+                        execution_mode="hpc",
                     )
                     job_id = sub_obj.job_id if sub_obj else "unknown"
                     if sub_obj and sub_obj.status == "failed":
@@ -891,3 +1049,35 @@ def render() -> None:
                         st.success(f"✅ HPC job submitted! Job ID: **{job_id}**")
                 except Exception as exc:
                     st.error(f"HPC submission failed: {exc}")
+
+
+def render() -> None:
+    st.title("📤 Submit Seed Connectivity")
+
+    config = _get_config()
+    bids_root_value = (
+        config.get("project_root")
+        or config.get("paths", {}).get("project_root")
+        or config.get("paths", {}).get("bids_root")
+        or config.get("paths", {}).get("bids_dir")
+    )
+    bids_root = (
+        Path(bids_root_value).expanduser()
+        if bids_root_value and "${" not in str(bids_root_value)
+        else Path(__file__).resolve().parents[2]
+    )
+
+    tabs = st.tabs(["⚙️ Submit", "📡 Monitor", "⬇️ Download"])
+
+    with tabs[0]:
+        _render_submit_tab(config, bids_root)
+
+    with tabs[1]:
+        _render_monitor_tab(config, bids_root)
+
+    with tabs[2]:
+        _render_download_tab(config, bids_root)
+
+
+if __name__ == "__main__":
+    render()

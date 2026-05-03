@@ -304,13 +304,24 @@ def load_or_derive_mask(
 ) -> Tuple[np.ndarray, nib.Nifti1Image]:
     """Return (boolean mask array, mask NIfTI).
 
-    If *mask_arg* exists on disk, load it. Otherwise derive from map_paths and
-    cache it under GROUP_MASK_PATH relative to bids_root.
+    Priority order (AGENTS.md §6: all voxelwise analyses must use dilated mask):
+      1. Explicit --mask argument (if provided and exists)
+      2. Project-local dilated MNI mask (atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz)
+      3. Previously cached derived mask (GROUP_MASK_PATH)
+      4. Derive fresh from map_paths and cache it
     """
     if mask_arg is not None and Path(mask_arg).exists():
         img = nib.load(str(mask_arg))
         mask_data = np.asarray(img.get_fdata(), dtype=bool)
         logger.info("Loaded mask from %s  (%d voxels)", mask_arg, mask_data.sum())
+        return mask_data, img
+
+    # Prefer project dilated mask before data-derived fallback
+    dilated = bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
+    if dilated.exists():
+        img = nib.load(str(dilated))
+        mask_data = np.asarray(img.get_fdata(), dtype=bool)
+        logger.info("Using project dilated MNI mask  (%d voxels)", mask_data.sum())
         return mask_data, img
 
     cached_path = bids_root / GROUP_MASK_PATH

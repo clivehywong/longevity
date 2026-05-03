@@ -308,12 +308,19 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         st.session_state[f"{STATE_PREFIX}mixed_correction"] = correction
     
     mask_input = st.text_input(
-        "Custom brain mask (optional; auto-detected if blank)",
-        value=st.session_state.get(f"{STATE_PREFIX}mixed_mask", ""),
+        "Brain mask",
+        value=st.session_state.get(
+            f"{STATE_PREFIX}mixed_mask",
+            str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"),
+        ),
         key=f"{STATE_PREFIX}mixed_mask_widget",
-        help="Leave blank to auto-derive mask from zmaps",
+        help="Dilated MNI brain mask (AGENTS.md §6). Defaults to project atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz",
     )
     st.session_state[f"{STATE_PREFIX}mixed_mask"] = mask_input
+    if not mask_input:
+        st.warning("⚠️ No mask provided — scripts will auto-detect, but dilated mask is required.")
+    elif not Path(mask_input).exists():
+        st.warning(f"⚠️ Mask file not found on this machine: `{mask_input}`")
     
     if n_perm < 1000:
         st.warning("⚠️ <1000 permutations gives unreliable p-values")
@@ -572,16 +579,175 @@ def _submit_mixed_design_hpc(
     st.info("ℹ️ HPC submission: Create a SLURM job script and upload to HPC. (Full HPC integration coming soon.)")
 
 
-def render() -> None:
-    st.title("📤 Submit Group Statistics")
+# ---------------------------------------------------------------------------
+# Status badge mapping (shared across tabs)
+# ---------------------------------------------------------------------------
 
-    config = _get_config()
-    bids_root = (
-        config.get("paths", {}).get("project_root")
-        or config.get("project_root")
-        or config.get("paths", {}).get("bids_root")
-        or "."
+_STATUS_BADGE: dict[str, str] = {
+    "submitted": "⏳ Pending",
+    "running": "🔄 Running",
+    "completed": "✅ Completed",
+    "failed": "❌ Failed",
+    "cancelled": "🚫 Cancelled",
+}
+
+
+def _make_progress_callback(progress_bar, status_text):
+    def callback(label: str, msg: str, frac: float) -> None:
+        progress_bar.progress(min(frac, 1.0), text=f"{label}: {msg}")
+        status_text.text(msg)
+    return callback
+
+
+def _render_monitor_tab(config: dict, bids_root: Any) -> None:
+    """Monitor group stats HPC submissions."""
+    manager = ConnectivityWorkflowManager(config)
+    all_subs = [s for s in manager.list_submissions() if s.analysis_type == "group_stats"]
+
+    col_refresh, col_filter = st.columns([1, 3])
+    with col_refresh:
+        if st.button("🔄 Refresh All", key="monitor_group_refresh_all"):
+            for sub in all_subs:
+                if sub.status not in {"completed", "failed", "cancelled"}:
+                    try:
+                        manager.refresh_status(sub.submission_id)
+                    except Exception:
+                        pass
+            st.rerun()
+    with col_filter:
+        filter_val = st.selectbox(
+            "Filter by status",
+            ["All", "Pending", "Running", "Completed", "Failed"],
+            key="monitor_group_filter",
+        )
+
+    if not all_subs:
+        st.info("No group stats submissions yet. Submit a job in the ⚙️ Submit tab.")
+        return
+
+    filter_map = {
+        "Pending": "submitted",
+        "Running": "running",
+        "Completed": "completed",
+        "Failed": "failed",
+    }
+    filtered = all_subs if filter_val == "All" else [
+        s for s in all_subs if s.status == filter_map.get(filter_val, "")
+    ]
+
+    if not filtered:
+        st.info(f"No submissions with status: {filter_val}")
+        return
+
+    for sub in sorted(filtered, key=lambda s: s.submitted_at, reverse=True):
+        with st.container(border=True):
+            badge = _STATUS_BADGE.get(sub.status, sub.status)
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**Job ID:** `{sub.job_id or '—'}` &nbsp; {badge}")
+                st.caption(f"Submitted: {sub.submitted_at} | ID: `{sub.submission_id}`")
+                pipeline_opt = sub.options.get("pipeline", "—")
+                kind_opt = sub.options.get("kind", "—")
+                seeds_opt = sub.options.get("seeds", [])
+                seed_id_opt = sub.options.get("seed_id", "")
+                seeds_str = ", ".join(str(s) for s in seeds_opt[:3]) if seeds_opt else seed_id_opt
+                if len(seeds_opt) > 3:
+                    seeds_str += f" (+{len(seeds_opt) - 3} more)"
+                st.caption(
+                    f"Pipeline: `{pipeline_opt}` | Kind: `{kind_opt}` "
+                    f"| Seeds: {seeds_str or '—'}"
+                )
+            with col2:
+                if st.button("🔁 Refresh", key=f"refresh_{sub.submission_id}"):
+                    try:
+                        manager.refresh_status(sub.submission_id)
+                    except Exception as exc:
+                        st.error(f"Refresh failed: {exc}")
+                    st.rerun()
+                if sub.status in {"submitted", "running"}:
+                    if st.button("🚫 Cancel", key=f"cancel_{sub.submission_id}"):
+                        try:
+                            manager.cancel(sub.submission_id)
+                        except Exception as exc:
+                            st.error(f"Cancel failed: {exc}")
+                        st.rerun()
+
+
+def _render_download_tab(config: dict, bids_root: Any) -> None:
+    """Download completed HPC group stats results."""
+    from utils.connectivity_download import (  # noqa: PLC0415
+        download_group_results as _dl_group,
+        build_group_download_command as _build_group_dl_cmd,
     )
+    from utils.hpc import HPCConfig as _HPCConfig  # noqa: PLC0415
+
+    manager = ConnectivityWorkflowManager(config)
+    completed = [
+        s for s in manager.list_submissions()
+        if s.analysis_type == "group_stats"
+        and s.execution_mode == "hpc"
+        and s.status == "completed"
+    ]
+
+    if not completed:
+        st.info("No completed HPC group stats jobs to download.")
+        return
+
+    for sub in sorted(completed, key=lambda s: s.submitted_at, reverse=True):
+        with st.container(border=True):
+            pipeline = sub.options.get("pipeline", "fc")
+            seeds = sub.options.get("seeds", []) or [sub.options.get("seed_id", "")]
+            seeds = [s for s in seeds if s]
+            seeds_str = ", ".join(str(s) for s in seeds[:3])
+            if len(seeds) > 3:
+                seeds_str += f" (+{len(seeds) - 3} more)"
+
+            st.markdown(f"**Job ID:** `{sub.job_id or '—'}` ✅ Completed")
+            st.caption(
+                f"Submitted: {sub.submitted_at} | Pipeline: `{pipeline}` "
+                f"| Kind: `{sub.options.get('kind', '—')}` | Seeds: {seeds_str or '—'}"
+            )
+
+            hpc_cfg = None
+            try:
+                hpc_cfg = _HPCConfig.from_config(config)
+                cmd_preview = _build_group_dl_cmd(
+                    pipeline=pipeline,
+                    seeds=seeds,
+                    hpc_config=hpc_cfg,
+                    local_bids_root=Path(bids_root),
+                )
+                with st.expander("📋 Rsync command preview"):
+                    st.code(cmd_preview, language="bash")
+            except Exception as exc:
+                st.warning(f"Could not build command preview: {exc}")
+
+            if st.button("⬇️ Download Results", key=f"download_{sub.submission_id}"):
+                if hpc_cfg is None:
+                    try:
+                        hpc_cfg = _HPCConfig.from_config(config)
+                    except Exception as exc:
+                        st.error(f"HPC config error: {exc}")
+                        return
+                st_progress = st.progress(0.0, text="Starting download…")
+                st_status = st.empty()
+                try:
+                    success = _dl_group(
+                        pipeline=pipeline,
+                        seeds=seeds,
+                        hpc_config=hpc_cfg,
+                        local_bids_root=Path(bids_root),
+                        progress_callback=_make_progress_callback(st_progress, st_status),
+                    )
+                    if success:
+                        st.success("✅ Group results downloaded successfully.")
+                    else:
+                        st.error("⚠️ Some seeds failed to download. Check progress above.")
+                except Exception as exc:
+                    st.error(f"Download failed: {exc}")
+
+
+def _render_submit_tab(config: dict, bids_root: Any) -> None:
     default_participants_path = _default_participants_path(str(bids_root))
 
     # --- Session state defaults ---
@@ -590,12 +756,13 @@ def render() -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}pipeline", "fc")
     st.session_state.setdefault(f"{STATE_PREFIX}group_csv", default_participants_path)
     st.session_state.setdefault(f"{STATE_PREFIX}out_root", _DEFAULT_OUT_ROOT)
-    # Voxel defaults
+    # Voxel defaults — pre-fill dilated mask (AGENTS.md §6)
+    _dilated_mask_path = str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz")
     st.session_state.setdefault(f"{STATE_PREFIX}measure", "alff")
     st.session_state.setdefault(f"{STATE_PREFIX}contrast", "ses-02_minus_ses-01")
     st.session_state.setdefault(f"{STATE_PREFIX}method", "GRF")
     st.session_state.setdefault(f"{STATE_PREFIX}n_perms", 5000)
-    st.session_state.setdefault(f"{STATE_PREFIX}mask", "")
+    st.session_state.setdefault(f"{STATE_PREFIX}mask", _dilated_mask_path)
     # Matrix defaults
     st.session_state.setdefault(f"{STATE_PREFIX}matrix_kind", "network")
     st.session_state.setdefault(f"{STATE_PREFIX}atlas", "")
@@ -613,7 +780,10 @@ def render() -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_seed", "")
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_n_perm", 5000)
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_correction", "TFCE")
-    st.session_state.setdefault(f"{STATE_PREFIX}mixed_mask", "")
+    st.session_state.setdefault(
+        f"{STATE_PREFIX}mixed_mask",
+        str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"),
+    )
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_execution", "Local")
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_test_mode", False)
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_zmaps_valid", False)
@@ -740,13 +910,16 @@ def render() -> None:
             n_perms = None
 
         mask = st.text_input(
-            "Brain mask path (leave blank for auto-derived)",
-            value=st.session_state.get(f"{STATE_PREFIX}mask", ""),
+            "Brain mask path",
+            value=st.session_state.get(f"{STATE_PREFIX}mask", _dilated_mask_path),
             key=f"{STATE_PREFIX}mask_widget",
+            help="Dilated MNI brain mask (required per AGENTS.md §6). Defaults to project atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz",
         )
         st.session_state[f"{STATE_PREFIX}mask"] = mask
         if not mask:
-            st.info("ℹ️ No mask provided — will auto-derive from data (may warn).")
+            st.warning("⚠️ No mask provided — scripts will auto-detect, but dilated mask is strongly recommended.")
+        elif not Path(mask).exists():
+            st.warning(f"⚠️ Mask file not found on this machine: `{mask}`")
 
         group_opts: dict[str, Any] = {
             "kind": "voxel",
@@ -948,3 +1121,30 @@ def render() -> None:
                     st.session_state["hpc_monitor_job_id"] = job_id
             except Exception as exc:
                 st.error(f"Submission failed: {exc}")
+
+
+def render() -> None:
+    st.title("📤 Submit Group Statistics")
+
+    config = _get_config()
+    bids_root = (
+        config.get("paths", {}).get("project_root")
+        or config.get("project_root")
+        or config.get("paths", {}).get("bids_root")
+        or "."
+    )
+
+    tabs = st.tabs(["⚙️ Submit", "📡 Monitor", "⬇️ Download"])
+
+    with tabs[0]:
+        _render_submit_tab(config, bids_root)
+
+    with tabs[1]:
+        _render_monitor_tab(config, bids_root)
+
+    with tabs[2]:
+        _render_download_tab(config, bids_root)
+
+
+if __name__ == "__main__":
+    render()

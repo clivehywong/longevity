@@ -628,7 +628,19 @@ class GroupStatsRunner:
         logger.debug(f"HTML report saved: {html_path}")
     
     def _get_standard_mask(self) -> Optional[str]:
-        """Get standard space mask path or create one from merged NIfTI."""
+        """Get standard space mask path or create one from merged NIfTI.
+
+        Priority order (AGENTS.md §6: all voxelwise analyses must use dilated mask):
+          1. Project-local dilated MNI mask (atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz)
+          2. FSL standard brain mask (non-dilated, fallback)
+          3. Auto-derived mask from merged data (last resort)
+        """
+        # 1. Project-local dilated mask (preferred per AGENTS.md)
+        dilated = self.bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
+        if dilated.exists():
+            logger.info(f"Using project dilated MNI mask: {dilated}")
+            return str(dilated)
+
         candidates = [
             "${FSLDIR}/data/standard/MNI152_T1_2mm_brain_mask.nii.gz",
             "/usr/share/fsl/5.0/data/standard/MNI152_T1_2mm_brain_mask.nii.gz",
