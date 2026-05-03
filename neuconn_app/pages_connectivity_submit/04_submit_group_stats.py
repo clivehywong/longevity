@@ -593,6 +593,7 @@ def _submit_mixed_design_hpc(
     opts: dict = {
         "bids_root": remote_bids_root,
         "seed": seed,
+        "seeds": [seed],  # list form for download compatibility
         "pipeline": pipeline,
         "measure": measure,
         "n_perm": str(n_perm),
@@ -741,7 +742,7 @@ def _render_download_tab(config: dict, bids_root: Any) -> None:
     for sub in sorted(completed, key=lambda s: s.submitted_at, reverse=True):
         with st.container(border=True):
             pipeline = sub.options.get("pipeline", "fc")
-            seeds = sub.options.get("seeds", []) or [sub.options.get("seed_id", "")]
+            seeds = sub.options.get("seeds", []) or [sub.options.get("seed", "")] or [sub.options.get("seed_id", "")]
             seeds = [s for s in seeds if s]
             seeds_str = ", ".join(str(s) for s in seeds[:3])
             if len(seeds) > 3:
@@ -1172,12 +1173,17 @@ def render() -> None:
     st.title("📤 Submit Group Statistics")
 
     config = _get_config()
-    bids_root = (
+    _raw_root = (
         config.get("paths", {}).get("project_root")
         or config.get("project_root")
         or config.get("paths", {}).get("bids_root")
         or "."
     )
+    # Fall back to repo root when config contains an unexpanded template variable
+    if "${" in str(_raw_root):
+        bids_root = str(Path(__file__).resolve().parents[2])
+    else:
+        bids_root = _raw_root
 
     tabs = st.tabs(["⚙️ Submit", "📡 Monitor", "⬇️ Download"])
 

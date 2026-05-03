@@ -495,7 +495,7 @@ class GroupStatsRunner:
             if self.correction == "TFCE":
                 cmd.append("-T")
             elif self.correction == "GRF":
-                cmd.extend(["--vxl", "-c", "3.1"])  # cluster-based GRF
+                cmd.extend(["-c", "2.3"])  # cluster-based thresholding (z=2.3)
             # FDR: no extra flag — randomise applies FDR correction by default
             
             logger.debug(f"Command: {' '.join(cmd)}")
@@ -506,15 +506,15 @@ class GroupStatsRunner:
             stdout_log = logs_dir / "randomise_stdout.log"
             stderr_log = logs_dir / "randomise_stderr.log"
             
-            with open(stdout_log, "w") as stdout_f, open(stderr_log, "w") as stderr_f:
-                result = subprocess.run(cmd, stdout=stdout_f, stderr=stderr_f, timeout=3600)
+            with open(stdout_log, "w") as stdout_f, open(stderr_f_path := stderr_log, "w") as stderr_f:
+                result = subprocess.run(cmd, stdout=stdout_f, stderr=stderr_f)
             
             if result.returncode != 0:
                 logger.error(f"randomise failed with return code {result.returncode}")
                 try:
-                    with open(stderr_log, "r") as f:
+                    with open(stderr_f_path, "r") as f:
                         logger.error(f"stderr: {f.read()[:500]}")
-                except:
+                except Exception:
                     pass
                 return False
             
@@ -522,9 +522,8 @@ class GroupStatsRunner:
             logger.info(f"✓ randomise completed ({self.n_perm} permutations)")
             return True
         
-        except subprocess.TimeoutExpired:
-            logger.error("randomise timed out (>3600s)")
-            return False
+        except Exception as e:
+            logger.error(f"Failed to run randomise: {e}")
         except Exception as e:
             logger.error(f"Failed to run randomise: {e}")
             return False

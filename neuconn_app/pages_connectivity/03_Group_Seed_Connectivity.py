@@ -66,7 +66,11 @@ def _scan_group_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.Dat
             measure = measure_dir.name.removeprefix("measure-")
             rand_dir = measure_dir / "randomise_outputs"
             tstats = sorted(rand_dir.glob("randomise_tstat*.nii.gz")) if rand_dir.exists() else []
-            tfce = sorted(rand_dir.glob("randomise_tfce_corrp_tstat*.nii.gz")) if rand_dir.exists() else []
+            # Accept TFCE or GRF (clustere) corrected p-value maps
+            tfce = (
+                sorted(rand_dir.glob("randomise_tfce_corrp_tstat*.nii.gz"))
+                + sorted(rand_dir.glob("randomise_clustere_corrp_tstat*.nii.gz"))
+            ) if rand_dir.exists() else []
             summary = measure_dir / "stats_summary.json"
             rows.append({
                 "seed_dir": seed_dir.name,
@@ -243,6 +247,10 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
     )
     tstat_path = rand_dir / f"randomise_tstat{contrast_idx}.nii.gz"
     tfce_path = rand_dir / f"randomise_tfce_corrp_tstat{contrast_idx}.nii.gz"
+    grf_path = rand_dir / f"randomise_clustere_corrp_tstat{contrast_idx}.nii.gz"
+    # Use GRF cluster-corrected map when TFCE is not available
+    corrp_path = tfce_path if tfce_path.exists() else (grf_path if grf_path.exists() else None)
+    corrp_label = "TFCE" if tfce_path.exists() else "GRF cluster"
 
     if not tstat_path.exists():
         st.error(f"T-stat file not found: `{tstat_path}`")
@@ -274,20 +282,20 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
     else:
         st.warning("Could not render t-stat map.")
 
-    # ── TFCE map ──────────────────────────────────────────────────────────
-    if tfce_path.exists():
-        st.markdown("**📊 TFCE corrected p-values** (p < 0.05 threshold → 1 − p > 0.95)")
-        tfce_mtime = tfce_path.stat().st_mtime
+    # ── Corrected p-value map (TFCE or GRF) ─────────────────────────────────
+    if corrp_path:
+        st.markdown(f"**📊 {corrp_label} corrected p-values** (p < 0.05 threshold → 1 − p > 0.95)")
+        corrp_mtime = corrp_path.stat().st_mtime
         png_tfce = _render_stat_map_png(
-            str(tfce_path), tfce_mtime, threshold=0.95, vmax=1.0,
-            cmap="autumn", title=f"TFCE corrp  [{seed_dir}  ·  {measure}]",
+            str(corrp_path), corrp_mtime, threshold=0.95, vmax=1.0,
+            cmap="autumn", title=f"{corrp_label} corrp  [{seed_dir}  ·  {measure}]",
         )
         if png_tfce:
             st.image(png_tfce, use_container_width=True)
         else:
-            st.warning("Could not render TFCE map.")
+            st.warning(f"Could not render {corrp_label} map.")
     else:
-        st.info("TFCE corrected p-value map not found (analysis may still be running).")
+        st.info("Corrected p-value map not found (analysis may still be running).")
 
     # ── Metadata ──────────────────────────────────────────────────────────
     summary_path = rand_dir.parent / "stats_summary.json"
