@@ -1,15 +1,16 @@
 """
 Seed-Based Connectivity Viewer — driven by XCP-D outputs.
 
-Cascading seed selector: source → atlas → seed.
-Shows seed-to-voxel z-map in Papaya and seed-to-parcel bar chart.
+Two top-level tabs:
+  📋 Dashboard  — completion matrix across all subjects / sessions / seeds
+  🔍 Viewer     — per-subject z-map (nilearn) + parcel bar chart + QA panel
+
 Pipeline selector persists via ``viewer_pipeline_seed_conn`` session-state key.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -20,9 +21,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.papaya_wrapper import render_papaya_viewer_streamlit
 from utils.connectivity_viewer import (
-    KNOWN_MEASURES,
     pipeline_picker,
     subject_session_pickers,
     list_available_seeds,
@@ -241,8 +240,130 @@ def _render_quality_metrics(sdir: Path, prefix: str) -> None:
 
 
 # ============================================================================
-# Voxel z-map viewer
+# Dashboard
 # ============================================================================
+
+_STATUS_ICON = {
+    "both": "✅",
+    "zmap_only": "🧠",
+    "parcel_only": "📊",
+    "none": "⚪",
+}
+
+
+@st.cache_data(ttl=60)
+def _build_dashboard_df(bids_root_str: str, pipeline: str, _scan_ver: int) -> pd.DataFrame:
+    """Scan filesystem for seed outputs; return tidy DataFrame."""
+    conn_root = Path(bids_root_str) / "derivatives" / "connectivity" / pipeline
+    rows: list[dict] = []
+    if not conn_root.exists():
+        return pd.DataFrame()
+    for sub_dir in sorted(conn_root.glob("sub-*")):
+        for ses_dir in sorted(sub_dir.glob("ses-*")):
+            seed_base = ses_dir / "seed"
+            if not seed_base.exists():
+                continue
+            for sd in sorted(seed_base.iterdir()):
+                if not sd.is_dir():
+                    continue
+                has_zmap = any(sd.glob("*_seed-to-voxel_zmap.nii.gz"))
+                has_parcel = any(sd.glob("*_seed-to-parcel.tsv"))
+                if has_zmap and has_parcel:
+                    status = "both"
+                elif has_zmap:
+                    status = "zmap_only"
+                elif has_parcel:
+                    status = "parcel_only"
+                else:
+                    status = "none"
+                # friendly seed name from meta.json
+                meta_files = sorted(sd.glob("*_meta.json"))
+                seed_label = sd.name
+                if meta_files:
+                    try:
+                        meta = json.loads(meta_files[0].read_text())
+                        seed_label = meta.get("seed_spec", {}).get("name") or sd.name
+                    except Exception:
+                        pass
+                rows.append(
+                    {
+                        "subject": sub_dir.name,
+                        "session": ses_dir.name,
+                        "seed_id": sd.name,
+                        "seed_label": seed_label,
+                        "status": status,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def _render_dashboard(bids_root: Path, pipeline: str) -> None:
+    """Completion matrix: (subject, session) × seed."""
+    scan_ver = st.session_state.get(f"dash_scan_ver_{PAGE_KEY}", 0)
+
+    col_title, col_btn = st.columns([6, 1])
+    with col_title:
+        st.markdown(f"**Pipeline: `{pipeline}`** — subjects × seeds completion")
+    with col_btn:
+        if st.button("🔄 Rescan", key=f"dash_rescan_{PAGE_KEY}"):
+            st.session_state[f"dash_scan_ver_{PAGE_KEY}"] = scan_ver + 1
+            scan_ver += 1
+            st.cache_data.clear()
+
+    df = _build_dashboard_df(str(bids_root), pipeline, scan_ver)
+
+    if df.empty:
+        st.info(
+            f"No seed outputs found for pipeline **{pipeline}**.  \n"
+            "Run submissions from **📤 Submit Seed Connectivity** first."
+        )
+        return
+
+    # ── Summary counts ────────────────────────────────────────────────────
+    total = len(df)
+    n_done = (df["status"] == "both").sum()
+    n_zmap = (df["status"].isin(["both", "zmap_only"])).sum()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total computed", total)
+    c2.metric("✅ Z-map + parcel", int(n_done))
+    c3.metric("🧠 Has z-map", int(n_zmap))
+    c4.metric("Unique subjects", df["subject"].nunique())
+
+    # ── Pivot table ───────────────────────────────────────────────────────
+    pivot = df.pivot_table(
+        index=["subject", "session"],
+        columns="seed_label",
+        values="status",
+        aggfunc="first",
+    ).fillna("none")
+    pivot = pivot.map(lambda x: _STATUS_ICON.get(x, "⚪"))
+
+    # Append a "Total ✅" column
+    pivot.insert(0, "✅ done", (df.groupby(["subject", "session"])
+                                .apply(lambda g: (g["status"] == "both").sum())
+                                .reindex(pivot.index, fill_value=0)))
+
+    st.dataframe(pivot, use_container_width=True)
+    st.caption("✅ z-map + parcel  🧠 z-map only  📊 parcel only  ⚪ none")
+
+
+@st.cache_data(ttl=300)
+def _render_nilearn_html(zmap_path_str: str, mtime: float, threshold: float, vmax: float) -> str:
+    """Generate nilearn interactive HTML for a z-map (cached by path+mtime+params)."""
+    from nilearn import plotting
+    import nibabel as nib
+
+    img = nib.load(zmap_path_str)
+    view = plotting.view_img(
+        img,
+        threshold=threshold,
+        cmap="hot",
+        vmax=vmax,
+        symmetric_cmap=True,
+        title="",
+        colorbar=True,
+    )
+    return view._repr_html_()
 
 
 def _render_zmap(
@@ -263,16 +384,32 @@ def _render_zmap(
         return
 
     zmap_path = zmaps[0]
-    try:
-        render_papaya_viewer_streamlit(
-            brain_map_path=str(zmap_path),
-            title="",
-            colormap="Hot",
-            height=500,
-            key=f"papaya_zmap_{pipeline}_{subject}_{session}_{seed_id[:20]}",
-            enable_export=True,
-            show_info=True,
+
+    # ── Controls ─────────────────────────────────────────────────────────
+    stats = _compute_zmap_stats(str(zmap_path), zmap_path.stat().st_mtime)
+    col_thr, col_vmax = st.columns(2)
+    auto_vmax = round(max(
+        (stats["mean"] + 3 * stats["std"]) if stats else 2.0, 0.5
+    ), 2)
+    with col_thr:
+        threshold = st.slider(
+            "Z threshold (display min)",
+            min_value=0.0, max_value=2.0, value=0.2, step=0.05,
+            key=f"nilearn_thr_{pipeline}_{subject}_{session}_{seed_id[:20]}",
         )
+    with col_vmax:
+        vmax = st.slider(
+            "Vmax (display max)",
+            min_value=0.5, max_value=5.0, value=float(auto_vmax), step=0.1,
+            key=f"nilearn_vmax_{pipeline}_{subject}_{session}_{seed_id[:20]}",
+        )
+
+    # ── nilearn interactive viewer ────────────────────────────────────────
+    try:
+        html = _render_nilearn_html(
+            str(zmap_path), zmap_path.stat().st_mtime, threshold, vmax
+        )
+        st.components.v1.html(html, height=520, scrolling=False)
     except Exception as exc:
         st.error(f"Viewer error: {exc}")
 
@@ -398,33 +535,40 @@ def render() -> None:
         else Path(__file__).resolve().parents[2]
     )
 
-    # ── Top selector row ──────────────────────────────────────────────────
+    # ── Pipeline picker (shared across both tabs) ─────────────────────────
     pipeline = pipeline_picker(PAGE_KEY)
-    subject, session = subject_session_pickers(bids_root, pipeline, PAGE_KEY)
-    if subject is None or session is None:
-        return
 
-    st.divider()
+    # ── Top-level tabs ────────────────────────────────────────────────────
+    tab_dash, tab_viewer = st.tabs(["📋 Dashboard", "🔍 Viewer"])
 
-    # ── Seed selector ─────────────────────────────────────────────────────
-    st.markdown("#### Seed selection")
-    seed_id = _build_seed_selector(bids_root, pipeline, subject, session)
-    if seed_id is None:
-        return
+    # ── Dashboard tab ─────────────────────────────────────────────────────
+    with tab_dash:
+        _render_dashboard(bids_root, pipeline)
 
-    st.caption(
-        f"Pipeline: **{pipeline}** | {subject} / {session} | Seed: `{seed_id}`"
-    )
-    st.divider()
+    # ── Viewer tab ────────────────────────────────────────────────────────
+    with tab_viewer:
+        subject, session = subject_session_pickers(bids_root, pipeline, PAGE_KEY)
+        if subject is None or session is None:
+            return
 
-    # ── Tabs ──────────────────────────────────────────────────────────────
-    tab_vox, tab_parcel = st.tabs(["🧠 Voxel z-map", "📊 Seed-to-parcel"])
+        # Seed selector
+        st.markdown("#### Seed selection")
+        seed_id = _build_seed_selector(bids_root, pipeline, subject, session)
+        if seed_id is None:
+            return
 
-    with tab_vox:
-        _render_zmap(bids_root, pipeline, subject, session, seed_id)
+        st.caption(
+            f"Pipeline: **{pipeline}** | {subject} / {session} | Seed: `{seed_id}`"
+        )
 
-    with tab_parcel:
-        _render_seed_to_parcel(bids_root, pipeline, subject, session, seed_id)
+        # Inner tabs: z-map vs parcel
+        tab_vox, tab_parcel = st.tabs(["🧠 Voxel z-map", "📊 Seed-to-parcel"])
+
+        with tab_vox:
+            _render_zmap(bids_root, pipeline, subject, session, seed_id)
+
+        with tab_parcel:
+            _render_seed_to_parcel(bids_root, pipeline, subject, session, seed_id)
 
 
 # ============================================================================

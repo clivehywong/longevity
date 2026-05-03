@@ -699,7 +699,35 @@ TEST_VIEWER_SESSION = TEST_SESSION.replace("ses-", "")
 
 
 class TestSeedFullPipeline:
-    """Viewer smoke test plus full local submit → view pipeline test."""
+    """Dashboard smoke test + viewer smoke test + full local submit → view pipeline."""
+
+    def test_dashboard_shows_completion(self, app_page: Page) -> None:
+        """Dashboard tab shows completion matrix with sub-033 entry."""
+        navigate_sidebar(app_page, stage="Subject-Level", analysis="🎯 Seed Connectivity Viewer")
+        _save_screenshot(app_page, "09a_dashboard_open")
+
+        _set_selectbox_option(app_page, "Pipeline", "fc")
+        app_page.wait_for_timeout(2_000)
+
+        # Dashboard tab is the first (default) tab
+        dash_tab = app_page.locator(MAIN).locator('[data-testid="stTab"]').filter(
+            has_text="Dashboard"
+        )
+        expect(dash_tab).to_be_visible(timeout=10_000)
+        dash_tab.click()
+        app_page.wait_for_timeout(2_000)
+        _save_screenshot(app_page, "09b_dashboard_active")
+
+        # Should show the completion table with sub-033
+        page_text = app_page.locator(MAIN).text_content() or ""
+        assert "sub-033" in page_text or "Total computed" in page_text, (
+            f"Expected sub-033 or summary metrics in dashboard. Snippet: {page_text[:600]}"
+        )
+        # Legend caption
+        assert "z-map" in page_text or "parcel" in page_text, (
+            f"Expected legend in dashboard. Snippet: {page_text[:400]}"
+        )
+        _save_screenshot(app_page, "09c_dashboard_with_data")
 
     def test_viewer_shows_existing_zmap(self, app_page: Page) -> None:
         """Fast smoke test: existing sphere zmap is discoverable and viewable."""
@@ -707,6 +735,14 @@ class TestSeedFullPipeline:
         _save_screenshot(app_page, "09a_viewer_existing_open")
 
         _set_selectbox_option(app_page, "Pipeline", "fc")
+
+        # New layout: click "🔍 Viewer" top-level tab first
+        viewer_tab = app_page.locator(MAIN).locator('[data-testid="stTab"]').filter(
+            has_text="Viewer"
+        )
+        viewer_tab.click()
+        app_page.wait_for_timeout(1_000)
+
         _set_selectbox_option(app_page, "Subject", TEST_VIEWER_SUBJECT)
         _set_selectbox_option(app_page, "Session", TEST_VIEWER_SESSION)
         app_page.wait_for_timeout(1_500)
@@ -724,15 +760,17 @@ class TestSeedFullPipeline:
             or TEST_SEED_ID in page_text
         ), f"Expected computed sphere seed in selector. Got: {seed_text}"
 
+        # Click inner "🧠 Voxel z-map" tab
         vox_tab = app_page.locator(MAIN).locator('[data-testid="stTab"]').filter(
             has_text="Voxel z-map"
         )
         vox_tab.click()
-        app_page.wait_for_timeout(2_000)
+        app_page.wait_for_timeout(3_000)
         _save_screenshot(app_page, "09c_viewer_existing_voxel")
 
-        papaya_frame = app_page.locator('[data-testid="stIFrame"]').first
-        expect(papaya_frame).to_be_visible(timeout=15_000)
+        # nilearn renders via st.components.v1.html → stIFrame
+        nilearn_frame = app_page.locator('[data-testid="stIFrame"]').first
+        expect(nilearn_frame).to_be_visible(timeout=15_000)
 
         qm_expander = app_page.locator(MAIN).locator('[data-testid="stExpander"]').filter(
             has_text="Quality metrics"
@@ -806,6 +844,14 @@ class TestSeedFullPipeline:
         _save_screenshot(app_page, "09j_viewer_page_open")
 
         _set_selectbox_option(app_page, "Pipeline", "fc")
+
+        # Click "🔍 Viewer" top-level tab
+        viewer_tab = app_page.locator(MAIN).locator('[data-testid="stTab"]').filter(
+            has_text="Viewer"
+        )
+        viewer_tab.click()
+        app_page.wait_for_timeout(1_000)
+
         _set_selectbox_option(app_page, "Subject", TEST_VIEWER_SUBJECT)
         _set_selectbox_option(app_page, "Session", TEST_VIEWER_SESSION)
         app_page.wait_for_timeout(2_000)
@@ -831,8 +877,9 @@ class TestSeedFullPipeline:
         app_page.wait_for_timeout(4_000)
         _save_screenshot(app_page, "09m_voxel_tab")
 
-        papaya_frame = app_page.locator('[data-testid="stIFrame"]').first
-        expect(papaya_frame).to_be_visible(timeout=15_000)
+        # nilearn renders via st.components.v1.html → stIFrame
+        nilearn_frame = app_page.locator('[data-testid="stIFrame"]').first
+        expect(nilearn_frame).to_be_visible(timeout=15_000)
 
         qm_expander = app_page.locator(MAIN).locator('[data-testid="stExpander"]').filter(
             has_text="Quality metrics"
