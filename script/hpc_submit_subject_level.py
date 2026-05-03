@@ -114,6 +114,7 @@ def generate_xcpd_subject_script(
     tr: float = 0.8,
     force: bool = False,
     test_mode: bool = False,
+    conda_env: str = "",
 ) -> str:
     """Generate a SLURM array bash script for XCP-D-driven subject-level analysis.
 
@@ -197,6 +198,16 @@ def generate_xcpd_subject_script(
             f"    --tr {tr}{force_flag}"
         )
 
+    conda_block = ""
+    if conda_env:
+        conda_block = f"""
+# ---------- conda environment ----------
+for _conda_init in "$HOME/miniconda3/etc/profile.d/conda.sh" "$HOME/anaconda3/etc/profile.d/conda.sh"; do
+    [ -f "$_conda_init" ] && source "$_conda_init" && break
+done
+conda activate {conda_env}
+"""
+
     script = f"""#!/bin/bash
 # SLURM XCP-D Subject-Level {analysis.capitalize()} Connectivity Array
 # Generated: {datetime.now().isoformat()}
@@ -208,11 +219,12 @@ def generate_xcpd_subject_script(
 #SBATCH --mem={mem}
 #SBATCH --cpus-per-task={cpus}
 #SBATCH --partition={partition}
+#SBATCH --chdir={bids_root}
 #SBATCH --output={log_dir}/{analysis}_%A_%a.out
 #SBATCH --error={log_dir}/{analysis}_%A_%a.err
 
 set -euo pipefail
-
+{conda_block}
 # ---------- subject/session lookup (1-based SLURM index) ----------
 SUBJECTS_ARRAY=({subjects_arr})
 SESSIONS_ARRAY=({sessions_arr})
@@ -1015,6 +1027,7 @@ def main():
     parser.add_argument("--memory", default="16G", help="SLURM memory per task.")
     parser.add_argument("--cpus", type=int, default=4, help="CPUs per task.")
     parser.add_argument("--partition", default="cpu-long", help="SLURM partition.")
+    parser.add_argument("--conda-env", default="", help="Conda environment to activate in SLURM jobs.")
 
     # ---- Legacy / shared arguments ----
     parser.add_argument(
@@ -1104,6 +1117,7 @@ def main():
                 tr=args.tr,
                 force=args.force,
                 test_mode=args.test_mode,
+                conda_env=args.conda_env,
             )
 
             if args.dry_run:

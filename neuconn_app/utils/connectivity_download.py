@@ -30,16 +30,24 @@ def _ssh_opts(cfg: HPCConfig) -> List[str]:
 
 
 def _seed_dir_name(seed_token: str) -> str:
-    """Convert a CLI seed token to the directory name used on disk.
+    """Convert a seed token to the directory name used on disk.
 
-    Examples:
+    Handles both the UI colon format and the CLI dash format:
+      "atlas-4S256Parcels:LH_Cont_PFCl_3"  →  "atlas-4S256Parcels_parcel-LH_Cont_PFCl_3"
       "atlas-4S256Parcels-LH_Cont_PFCl_3"  →  "atlas-4S256Parcels_parcel-LH_Cont_PFCl_3"
       "sphere-0_0_0_r6"                     →  "sphere-0_0_0_r6"
     """
     if seed_token.startswith("atlas-"):
-        parts = seed_token.split("-", 2)          # ["atlas", "<atlas>", "<parcel>"]
-        if len(parts) == 3:
-            return f"atlas-{parts[1]}_parcel-{parts[2]}"
+        if ":" in seed_token:
+            # UI format: "atlas-<AtlasName>:<ParcelName>"
+            atlas_part, parcel = seed_token.split(":", 1)
+            atlas_name = atlas_part[len("atlas-"):]
+            return f"atlas-{atlas_name}_parcel-{parcel}"
+        else:
+            # CLI dash format: "atlas-<AtlasName>-<ParcelName>"
+            parts = seed_token.split("-", 2)  # ["atlas", "<atlas>", "<parcel>"]
+            if len(parts) == 3:
+                return f"atlas-{parts[1]}_parcel-{parts[2]}"
     return seed_token
 
 

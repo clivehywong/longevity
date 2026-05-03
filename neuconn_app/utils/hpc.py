@@ -87,6 +87,7 @@ class HPCConfig:
     xcpd_cpus: int = 0
     xcpd_memory: str = ""
     xcpd_time_limit: str = ""
+    conda_env: str = ""
 
     @classmethod
     def from_config(cls, config: Dict) -> 'HPCConfig':
@@ -137,6 +138,7 @@ class HPCConfig:
             xcpd_cpus=slurm.get('xcpd_cpus', 0),
             xcpd_memory=slurm.get('xcpd_memory', ''),
             xcpd_time_limit=slurm.get('xcpd_time', ''),
+            conda_env=slurm.get('conda_env', ''),
         )
 
 

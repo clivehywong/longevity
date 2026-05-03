@@ -554,10 +554,14 @@ class MixedDesignBuilder:
 
     def _write_exchangeability_blocks(self, path: Path) -> None:
         """
-        Write exchangeability blocks to FSL format (ASCII).
+        Write exchangeability blocks to FSL VEST format.
 
-        FSL design.grp format (one block label per row):
+        FSL design.grp format (VEST header + one block label per row):
         ```
+        /NumWaves 1
+        /NumPoints N
+
+        /Matrix
         1
         1
         2
@@ -572,7 +576,14 @@ class MixedDesignBuilder:
         path : Path
             Output file path for design.grp
         """
-        np.savetxt(path, self.exchangeability_blocks, fmt='%d')
+        blocks = self.exchangeability_blocks
+        n_points = len(blocks)
+        with open(path, 'w') as f:
+            f.write(f"/NumWaves\t1\n")
+            f.write(f"/NumPoints\t{n_points}\n")
+            f.write("\n/Matrix\n")
+            for val in blocks:
+                f.write(f"{int(val)}\n")
 
     def get_canonical_subject_order(self) -> pd.DataFrame:
         """

@@ -100,13 +100,14 @@ def _build_contrast_options(csv_path: str) -> list[str]:
 
 
 def _load_seed_catalog(bids_root: str, pipeline: str) -> SeedCatalog | None:
-    """Load seed catalog from XCP-D outputs."""
+    """Load seed catalog from XCP-D outputs. Returns None if unavailable."""
     try:
         from utils.xcpd_outputs import XcpdDiscovery
         disc = XcpdDiscovery(Path(bids_root), pipeline=pipeline)
+        if not hasattr(disc, "get_seed_catalog"):
+            return None
         return disc.get_seed_catalog()
-    except Exception as e:
-        st.warning(f"Could not load seed catalog: {e}")
+    except Exception:
         return None
 
 
@@ -339,6 +340,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     )
     st.session_state[f"{STATE_PREFIX}mixed_execution"] = execution
     
+    use_test_perms = False
     if execution == "Local":
         use_test_perms = st.checkbox(
             "Use reduced permutations for testing (100 instead of configured)",
@@ -378,16 +380,25 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                         summary = validator.summarize_validation(validation_df)
 
                         st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = summary
+                        valid_count = summary.get("valid_count", 0)
+                        total_count = summary.get("total_count", 0)
+                        error_count = summary.get("error_count", 0)
+                        # For HPC: allow partial zmaps (script uses whatever exists remotely)
+                        # For local: require all zmaps present
+                        hpc_mode = execution == "HPC"
                         st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = (
-                            summary.get("error_count", 0) == 0
+                            valid_count > 0 if hpc_mode else error_count == 0
                         )
 
-                        if st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"]:
-                            st.success(f"✓ {summary['success_count']} zmaps valid for seed: `{seed_dir_name}`")
+                        if valid_count > 0:
+                            msg = f"✓ {valid_count}/{total_count} zmaps valid for seed: `{seed_dir_name}`"
+                            if hpc_mode and error_count > 0:
+                                msg += f" ({error_count} missing locally — HPC uses remote files)"
+                                st.warning(msg)
+                            else:
+                                st.success(msg)
                         else:
-                            st.error(f"✗ {summary['error_count']} validation errors")
-                            if summary.get("error_details"):
-                                st.text(summary["error_details"])
+                            st.error(f"✗ No valid zmaps found ({error_count} errors). Run subject-level analysis first.")
                     except Exception as e:
                         st.error(f"Validation failed: {e}")
                         st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = False
@@ -428,7 +439,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         val_result = st.session_state[f"{STATE_PREFIX}mixed_validation_result"]
         st.metric(
             "Validation Status",
-            f"{val_result.get('success_count', 0)}/{val_result.get('total_count', 72)} zmaps",
+            f"{val_result.get('valid_count', 0)}/{val_result.get('total_count', 0)} zmaps",
         )
     
     # ===== Section 5: Submit =====

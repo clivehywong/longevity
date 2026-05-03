@@ -766,7 +766,9 @@ class TestSeedFullPipeline:
             "DLPFC" in seed_text
             or "sphere" in seed_text.lower()
             or TEST_SEED_ID in page_text
-        ), f"Expected computed sphere seed in selector. Got: {seed_text}"
+            or "4S256Parcels" in seed_text
+            or "LH_Cont_PFCl_3" in seed_text
+        ), f"Expected computed seed in selector. Got: {seed_text}"
 
         # Click inner "🧠 Voxel z-map" tab
         vox_tab = app_page.locator(MAIN).locator('[data-testid="stTab"]').filter(
@@ -875,7 +877,9 @@ class TestSeedFullPipeline:
             TEST_SEED_NAME in seed_text
             or "DLPFC" in seed_text
             or TEST_SEED_ID in page_text
-        ), f"Expected computed sphere seed in selector. Got: {seed_text}"
+            or "4S256Parcels" in seed_text
+            or "LH_Cont_PFCl_3" in seed_text
+        ), f"Expected computed seed in selector. Got: {seed_text}"
         _save_screenshot(app_page, "09l_seed_selected")
 
         vox_tab = app_page.locator(MAIN).locator('[data-testid="stTab"]').filter(

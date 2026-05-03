@@ -1124,6 +1124,15 @@ conda activate {conda_env}
 
 set -euo pipefail
 {conda_block}
+# Set up FSL (required for fslmerge / randomise)
+if [ -d "$HOME/fsl" ] && [ -z "${{FSLDIR:-}}" ]; then
+    export FSLDIR="$HOME/fsl"
+fi
+if [ -n "${{FSLDIR:-}}" ]; then
+    source "$FSLDIR/etc/fslconf/fsl.sh" 2>/dev/null || true
+    export PATH="$FSLDIR/bin:$PATH"
+fi
+
 log_info() {{ echo "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $*"; }}
 log_error() {{ echo "[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $*"; }}
 

@@ -243,10 +243,8 @@ class SubjectDataValidator:
                 f"Has: {list(df.columns)}"
             )
 
-        if len(df) != 72:
-            logger.warning(
-                f"Expected 72 rows in canonical order, got {len(df)}"
-            )
+        if len(df) == 0:
+            raise ValueError("Canonical order CSV has no rows")
 
         logger.info(
             f"Loaded canonical order: {len(df)} subjects/sessions, "

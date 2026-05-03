@@ -244,9 +244,11 @@ class GroupStatsRunner:
         try:
             self.canonical_order = _to_canonical_order(_read_subject_table(self.canonical_order_csv))
 
-            if len(self.canonical_order) != 72:
-                logger.error(f"Expected 72 rows, got {len(self.canonical_order)}")
+            if len(self.canonical_order) == 0:
+                logger.error("Canonical order is empty — no subjects found")
                 return False
+            n_subjects = len(self.canonical_order["subject"].unique())
+            logger.debug(f"Canonical order: {len(self.canonical_order)} rows, {n_subjects} subjects")
 
             required_cols = ["row_index", "subject", "session", "group"]
             if not all(col in self.canonical_order.columns for col in required_cols):
@@ -267,8 +269,8 @@ class GroupStatsRunner:
             return False
     
     def _step_validate_zmaps(self) -> bool:
-        """Step 3: Validate all 72 zmaps."""
-        logger.info("\n[Step 3] Validating 72 zmaps...")
+        """Step 3: Validate zmaps and filter to available subjects."""
+        logger.info("\n[Step 3] Validating zmaps...")
         
         try:
             validator = SubjectDataValidator(
@@ -282,30 +284,80 @@ class GroupStatsRunner:
             self.validation_df = validator.validate_all_subjects(seed=seed_filter)
             
             error_count = self.validation_df["error"].notna().sum()
-            valid_count = self.validation_df["exists"].sum()
+            valid_count = int(self.validation_df["exists"].sum())
+            total_count = len(self.validation_df)
             
-            logger.debug(f"Validation results: {valid_count} valid, {error_count} errors")
+            logger.debug(f"Validation results: {valid_count}/{total_count} valid, {error_count} errors")
+            
+            if valid_count == 0:
+                logger.error("No valid zmaps found — run subject-level analysis first")
+                return False
             
             if error_count > 0:
-                logger.error(f"Zmap validation failed: {error_count} errors")
-                for idx, row in self.validation_df[self.validation_df["error"].notna()].iterrows():
-                    logger.error(f"  {row['subject']} {row['session']}: {row['error']}")
+                logger.warning(
+                    f"{error_count}/{total_count} subjects missing zmaps; "
+                    f"proceeding with {valid_count} available subjects"
+                )
+                # Filter canonical order to only subjects with valid zmaps
+                valid_mask = (
+                    self.validation_df["exists"] & self.validation_df["error"].isna()
+                )
+                valid_rows = self.validation_df[valid_mask][["subject", "session"]]
+                self.canonical_order = self.canonical_order.merge(
+                    valid_rows, on=["subject", "session"], how="inner"
+                ).reset_index(drop=True)
+                # Update row_index after filtering
+                self.canonical_order["row_index"] = range(len(self.canonical_order))
+                logger.info(
+                    f"Filtered canonical order to {len(self.canonical_order)} rows "
+                    f"({len(self.canonical_order['subject'].unique())} subjects)"
+                )
+            
+            # Check minimum subjects per group
+            for grp in ("control", "walking"):
+                grp_count = (self.canonical_order["group"] == grp).sum()
+                if grp_count < 2:
+                    logger.error(
+                        f"Need at least 2 {grp} sessions (got {grp_count}); "
+                        "run more subject-level analyses"
+                    )
+                    return False
+            
+            # Must have paired data (each subject must have both sessions)
+            subject_session_counts = self.canonical_order.groupby("subject")["session"].count()
+            unpaired = subject_session_counts[subject_session_counts != 2]
+            if len(unpaired) > 0:
+                logger.warning(
+                    f"{len(unpaired)} subjects have incomplete sessions "
+                    f"(expected ses-01+ses-02): {list(unpaired.index)}; dropping them"
+                )
+                complete = subject_session_counts[subject_session_counts == 2].index
+                self.canonical_order = self.canonical_order[
+                    self.canonical_order["subject"].isin(complete)
+                ].reset_index(drop=True)
+                self.canonical_order["row_index"] = range(len(self.canonical_order))
+            
+            # Build zmaps list directly from filtered canonical_order (avoids validator's
+            # unfiltered iteration in get_canonical_zmaps_list)
+            self.zmaps_list = []
+            for _, row in self.canonical_order.iterrows():
+                zmap_path = validator._find_zmap_file(
+                    row["subject"], row["session"], seed_filter
+                )
+                if zmap_path is None:
+                    logger.error(
+                        f"Zmap not found for {row['subject']} {row['session']} "
+                        "after filtering — unexpected"
+                    )
+                    return False
+                self.zmaps_list.append(str(zmap_path))
+            
+            valid_count = len(self.canonical_order)
+            if len(self.zmaps_list) != valid_count:
+                logger.error(f"Zmap count mismatch: expected {valid_count}, got {len(self.zmaps_list)}")
                 return False
             
-            if valid_count != 72:
-                logger.error(f"Expected 72 valid zmaps, got {valid_count}")
-                return False
-            
-            self.zmaps_list = validator.get_canonical_zmaps_list(
-                validation_df=self.validation_df,
-                seed=seed_filter,
-            )
-            
-            if len(self.zmaps_list) != 72:
-                logger.error(f"Expected 72 zmaps, got {len(self.zmaps_list)}")
-                return False
-            
-            logger.info(f"✓ All 72 zmaps validated and ready")
+            logger.info(f"✓ {valid_count} zmaps validated and ready")
             return True
         
         except Exception as e:
@@ -341,7 +393,8 @@ class GroupStatsRunner:
             
             img = nib.load(str(self.merged_nifti_path))
             shape = img.shape
-            expected_shape = (91, 109, 91, 72)
+            expected_n = len(self.zmaps_list)
+            expected_shape = (91, 109, 91, expected_n)
             
             logger.debug(f"Merged NIfTI shape: {shape}")
             
@@ -485,6 +538,11 @@ class GroupStatsRunner:
             tfce_files = list(randomise_dir.glob("randomise_tfce_corrp_*.nii.gz"))
             logger.debug(f"Found {len(tfce_files)} TFCE output files")
             
+            n_subjects = self.canonical_order["subject"].nunique()
+            n_zmaps = len(self.zmaps_list)
+            n_control = self.canonical_order[self.canonical_order["group"] == "control"]["subject"].nunique()
+            n_walking = self.canonical_order[self.canonical_order["group"] == "walking"]["subject"].nunique()
+
             summary = {
                 "pipeline": {
                     "seed": self.seed,
@@ -493,10 +551,10 @@ class GroupStatsRunner:
                     "n_permutations": self.n_perm,
                 },
                 "inputs": {
-                    "n_subjects": 36,
-                    "n_zmaps": 72,
-                    "n_control": 40,
-                    "n_walking": 32,
+                    "n_subjects": n_subjects,
+                    "n_zmaps": n_zmaps,
+                    "n_control": n_control,
+                    "n_walking": n_walking,
                     "canonical_order_csv": str(self.canonical_order_csv),
                 },
                 "outputs": {

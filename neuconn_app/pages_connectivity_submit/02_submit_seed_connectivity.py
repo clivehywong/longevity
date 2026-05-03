@@ -71,6 +71,16 @@ STATIC_FILE_MANIFEST: list[tuple[str, str, str]] = [
         "script/hpc_submit_subject_level.py",
         "script/hpc_submit_subject_level.py",
     ),
+    (
+        "XCP-D outputs util (HPC)",
+        "neuconn_app/utils/xcpd_outputs.py",
+        "neuconn_app/utils/xcpd_outputs.py",
+    ),
+    (
+        "Seed catalog util (HPC)",
+        "neuconn_app/utils/seed_catalog.py",
+        "neuconn_app/utils/seed_catalog.py",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -840,6 +850,18 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
     seeds: list[dict] = st.session_state.get(f"{STATE_PREFIX}seeds", [])
     manager = ConnectivityWorkflowManager(config)
 
+    # Resolve HPC remote path for command construction (used both in preview and actual submit)
+    _remote_bids_root: str = str(bids_root)  # default: local path
+    _hpc_cfg_preview = None
+    if not is_local:
+        try:
+            from utils.hpc import HPCConfig as _HPCCfg
+            _hpc_cfg_preview = _HPCCfg.from_config(config)
+            if _hpc_cfg_preview.remote_base:
+                _remote_bids_root = _hpc_cfg_preview.remote_base
+        except Exception:
+            pass
+
     def _build_cmd(dry_run: bool = False) -> str:
         subjects_for_cmd = sel_subjects or all_subjects
         preview_subs = subjects_for_cmd[:1] if subjects_for_cmd else ["sub-033"]
@@ -847,11 +869,15 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
             "pipeline": pipeline,
             "measures": ",".join(sel_measures) if sel_measures else ",".join(ALL_MEASURES),
             "seeds": [sd["token"] for sd in seeds],
-            "bids_root": str(bids_root),
+            "bids_root": _remote_bids_root,
             "out_root": out_root,
             "bold_variant": bold_variant,
             "dry_run": dry_run,
         }
+        if not is_local and _hpc_cfg_preview is not None:
+            opts["partition"] = _hpc_cfg_preview.partition
+            opts["conda_env"] = _hpc_cfg_preview.conda_env
+            opts["log_dir"] = f"{_remote_bids_root}/logs"
         return manager.build_subject_level_command(
             "seed_connectivity", opts, preview_subs
         )
@@ -1004,11 +1030,12 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
             else:
                 # ---- HPC: optional re-upload then submit --------------- #
                 try:
+                    from utils.hpc import HPCConfig, HPCConnection
+                    import subprocess as _sp
+                    hpc_cfg = HPCConfig.from_config(config)
+                    # _remote_bids_root already computed above (HPC remote path)
                     if reupload_inputs:
                         with st.spinner("Re-uploading cleaned XCP-D inputs to HPC…"):
-                            from utils.hpc import HPCConfig, HPCConnection
-                            import subprocess as _sp
-                            hpc_cfg = HPCConfig.from_config(config)
                             subjects_for_upload = sel_subjects or all_subjects
                             ssh_opts = (
                                 f"ssh -p {hpc_cfg.port} -o StrictHostKeyChecking=no"
@@ -1034,9 +1061,12 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
                         "pipeline": pipeline,
                         "measures": ",".join(sel_measures or ALL_MEASURES),
                         "seeds": [sd["token"] for sd in seeds],
-                        "bids_root": str(bids_root),
+                        "bids_root": _remote_bids_root,  # HPC remote path
                         "out_root": out_root,
                         "bold_variant": bold_variant,
+                        "log_dir": f"{_remote_bids_root}/logs",  # absolute path on HPC
+                        "partition": hpc_cfg.partition,  # use configured partition
+                        "conda_env": hpc_cfg.conda_env,  # conda environment for jobs
                     }
                     sub_obj = manager.submit(
                         "seed_connectivity", opts, subjects_for_submit, dry_run=False,
