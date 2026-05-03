@@ -44,6 +44,34 @@ except Exception:
 STATE_PREFIX = "submit_seed_"
 
 # ---------------------------------------------------------------------------
+# Static-file manifest for HPC sync
+# ---------------------------------------------------------------------------
+
+# (display_name, local_path_relative_to_project_root, remote_path_relative_to_remote_base)
+STATIC_FILE_MANIFEST: list[tuple[str, str, str]] = [
+    (
+        "Brain mask (HPC)",
+        "atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz",
+        "atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz",
+    ),
+    (
+        "Compute script (HPC)",
+        "script/compute_seed_connectivity_xcpd.py",
+        "script/compute_seed_connectivity_xcpd.py",
+    ),
+    (
+        "Connectivity measures (HPC)",
+        "script/connectivity_measures.py",
+        "script/connectivity_measures.py",
+    ),
+    (
+        "Submit script (HPC)",
+        "script/hpc_submit_subject_level.py",
+        "script/hpc_submit_subject_level.py",
+    ),
+]
+
+# ---------------------------------------------------------------------------
 # Pre-flight check infrastructure
 # ---------------------------------------------------------------------------
 
@@ -149,14 +177,8 @@ def _run_hpc_preflight(
         return results
     results.append(PreflightResult("SSH connection", "pass", f"Connected to {hpc_cfg.host}"))
 
-    file_checks = [
-        ("Brain mask (HPC)",
-         f"{remote_base}/atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz"),
-        ("Compute script (HPC)",
-         f"{remote_base}/script/compute_seed_connectivity_xcpd.py"),
-        ("Submit script (HPC)",
-         f"{remote_base}/script/hpc_submit_subject_level.py"),
-    ]
+    file_checks = [(name, f"{remote_base}/{remote_rel}")
+                   for name, _local, remote_rel in STATIC_FILE_MANIFEST]
     for name, remote_path in file_checks:
         try:
             stdout, _, rc = conn.execute(
@@ -216,6 +238,59 @@ def _run_hpc_preflight(
     return results
 
 
+# ---------------------------------------------------------------------------
+# HPC static-file upload
+# ---------------------------------------------------------------------------
+
+
+class UploadResult(NamedTuple):
+    name: str
+    status: str   # "ok" | "skip" | "error"
+    detail: str
+
+
+def _upload_static_files_to_hpc(
+    project_root: str, config: dict
+) -> list[UploadResult]:
+    """Upload / overwrite all static analysis files to HPC via SFTP.
+
+    Always overwrites (not just missing) so local edits propagate to HPC.
+    Validates all local files exist before connecting.  Returns per-file results.
+    """
+    from utils.hpc import HPCConfig, HPCConnection  # noqa: PLC0415
+
+    root = Path(project_root)
+    results: list[UploadResult] = []
+
+    # ── Validate all local files before connecting ────────────────────────
+    for name, local_rel, _ in STATIC_FILE_MANIFEST:
+        local = root / local_rel
+        if not local.exists():
+            results.append(UploadResult(name, "error", f"Local file not found: {local}"))
+    if any(r.status == "error" for r in results):
+        return results
+
+    hpc_cfg = HPCConfig.from_config(config)
+    conn = HPCConnection(hpc_cfg)
+    try:
+        conn.connect()
+        for name, local_rel, remote_rel in STATIC_FILE_MANIFEST:
+            local = root / local_rel
+            remote = f"{hpc_cfg.remote_base}/{remote_rel}"
+            try:
+                conn.mkdir_p(str(Path(remote).parent))
+                conn.sftp.put(str(local), remote)
+                results.append(UploadResult(name, "ok", remote))
+            except Exception as exc:
+                results.append(UploadResult(name, "error", str(exc)))
+    finally:
+        try:
+            conn.disconnect()
+        except Exception:
+            pass
+
+    return results
+
 def _render_preflight_section(
     bids_root: str,
     pipeline: str,
@@ -225,9 +300,12 @@ def _render_preflight_section(
 ) -> bool:
     """Render the pre-flight checks UI.
 
-    Returns True if no critical checks have failed (safe to submit).
+    Returns True if all critical checks passed (safe to submit).
+    For HPC mode, returns False until at least one preflight has been run and passed.
     """
     st.subheader("🔍 Pre-flight Checks")
+
+    static_check_names = {name for name, _, _ in STATIC_FILE_MANIFEST}
 
     cached: list[dict] | None = st.session_state.get(f"{STATE_PREFIX}preflight_results")
     cached_pipeline = st.session_state.get(f"{STATE_PREFIX}preflight_pipeline")
@@ -238,19 +316,24 @@ def _render_preflight_section(
         st.session_state[f"{STATE_PREFIX}preflight_results"] = None
         st.info("Settings changed — please re-run pre-flight checks.")
 
-    if st.button("Run pre-flight checks", key=f"{STATE_PREFIX}preflight_btn"):
-        with st.spinner("Running checks…"):
-            raw = _run_local_preflight(bids_root, pipeline, subjects)
-            if not is_local:
-                raw += _run_hpc_preflight(bids_root, pipeline, subjects, config)
-        cached = [{"name": r.name, "status": r.status, "detail": r.detail} for r in raw]
-        st.session_state[f"{STATE_PREFIX}preflight_results"] = cached
+    def _run_and_store() -> list[dict]:
+        raw = _run_local_preflight(bids_root, pipeline, subjects)
+        if not is_local:
+            raw += _run_hpc_preflight(bids_root, pipeline, subjects, config)
+        result = [{"name": r.name, "status": r.status, "detail": r.detail} for r in raw]
+        st.session_state[f"{STATE_PREFIX}preflight_results"] = result
         st.session_state[f"{STATE_PREFIX}preflight_pipeline"] = pipeline
         st.session_state[f"{STATE_PREFIX}preflight_is_local"] = is_local
+        return result
+
+    if st.button("Run pre-flight checks", key=f"{STATE_PREFIX}preflight_btn"):
+        with st.spinner("Running checks…"):
+            cached = _run_and_store()
 
     if cached is None:
         st.caption("Click **Run pre-flight checks** to verify required files before submitting.")
-        return True  # Don't block submission before checks are run
+        # Block HPC submission until checks have been run at least once
+        return is_local
 
     n_fail = sum(1 for r in cached if r["status"] == "fail")
     n_warn = sum(1 for r in cached if r["status"] == "warn")
@@ -265,6 +348,48 @@ def _render_preflight_section(
         st.success(f"All critical checks passed ({n_pass} passed{warn_note}).")
     else:
         st.error(f"{n_fail} critical check(s) failed — resolve before submitting.")
+
+    # ── Upload static files section (HPC mode only) ───────────────────────
+    if not is_local:
+        has_static_failures = any(
+            r["status"] == "fail" and r["name"] in static_check_names
+            for r in cached
+        )
+        with st.expander(
+            "📤 Upload / sync static files to HPC"
+            + (" ← fix required" if has_static_failures else ""),
+            expanded=has_static_failures,
+        ):
+            st.caption(
+                "Uploads the brain mask, compute script, connectivity measures, and submit "
+                "script from local to HPC. Always overwrites so local edits propagate."
+            )
+            for name, local_rel, _ in STATIC_FILE_MANIFEST:
+                local_path = Path(bids_root) / local_rel
+                icon = "✅" if local_path.exists() else "❌"
+                st.caption(f"{icon} `{local_rel}`")
+
+            if st.button(
+                "Upload static files to HPC",
+                key=f"{STATE_PREFIX}upload_static_btn",
+                type="primary" if has_static_failures else "secondary",
+            ):
+                with st.spinner("Uploading static files to HPC…"):
+                    upload_results = _upload_static_files_to_hpc(bids_root, config)
+                n_ok = sum(1 for r in upload_results if r.status == "ok")
+                n_err = sum(1 for r in upload_results if r.status == "error")
+                for r in upload_results:
+                    if r.status == "ok":
+                        st.success(f"✅ {r.name} — uploaded")
+                    else:
+                        st.error(f"❌ {r.name} — {r.detail}")
+                if n_err == 0:
+                    st.success(f"All {n_ok} files uploaded. Re-running pre-flight checks…")
+                    with st.spinner("Re-checking…"):
+                        cached = _run_and_store()
+                    st.rerun()
+                else:
+                    st.error(f"{n_err} file(s) failed to upload — check errors above.")
 
     return n_fail == 0
 

@@ -41,7 +41,7 @@ hpc:
   user: "clivewong"
   ssh_key: null
   remote_paths:
-    base: "/home/clivewong/proj/longevity"
+    base: "/home/clivewong/proj/long"
     bids: "${base}/bids"
     fmriprep: "${base}/derivatives/func/preprocessing/fmriprep"
     legacy_fmriprep: "${base}/fmriprep"

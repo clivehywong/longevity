@@ -890,3 +890,116 @@ class TestSeedFullPipeline:
         expect(qm_expander.get_by_text("Mean z", exact=False)).to_be_visible(timeout=5_000)
         expect(qm_expander.get_by_text("Std z", exact=False)).to_be_visible(timeout=5_000)
         _save_screenshot(app_page, "09n_quality_metrics_open")
+
+
+# ---------------------------------------------------------------------------
+# Test 8: HPC Upload Flow — preflight detects missing files → upload → re-check
+# ---------------------------------------------------------------------------
+
+
+class TestHPCUploadFlow:
+    """Verify that missing HPC static files trigger an upload prompt that fixes them.
+
+    The test removes the static files from HPC at the start so it is deterministic
+    regardless of prior state.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _remove_hpc_static_files(self) -> None:
+        """Remove brain mask and connectivity_measures from HPC before test runs."""
+        import subprocess
+        result = subprocess.run(
+            [
+                "ssh", "-o", "BatchMode=yes",
+                "clivewong@hpclogin1.eduhk.hk",
+                "rm -f /home/clivewong/proj/long/atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz "
+                "/home/clivewong/proj/long/script/connectivity_measures.py",
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Failed to remove HPC test files: {result.stderr}"
+        )
+
+    def test_hpc_preflight_detects_missing_and_uploads(self, app_page: Page) -> None:
+        """HPC preflight shows ❌ for missing files, upload button fixes them."""
+        navigate_sidebar(app_page, stage="Subject-Level", analysis="📤 Submit Seed Connectivity")
+        _save_screenshot(app_page, "10a_hpc_upload_page_open")
+
+        # Select 2 subjects
+        _set_single_multiselect(app_page, "Subjects (default: all)", "sub-033")
+        app_page.wait_for_timeout(500)
+
+        # Use sphere seed (doesn't require atlas files)
+        seed_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(
+            has_text="Seed source"
+        )
+        seed_radio.locator("p").filter(has_text="Sphere from coordinates").click()
+        app_page.wait_for_timeout(800)
+
+        sphere_name_widget = app_page.locator(MAIN + " " + '[data-testid="stTextInput"]').filter(
+            has_text="Sphere name"
+        )
+        sphere_name_widget.locator("input").fill("UploadTest_DLPFC")
+        _fill_number_input(app_page, "x (mm)", -46)
+        _fill_number_input(app_page, "y (mm)", 16)
+        _fill_number_input(app_page, "z (mm)", 32)
+        _fill_number_input(app_page, "radius (mm)", 6)
+        add_sphere_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Add sphere")
+        add_sphere_btn.scroll_into_view_if_needed()
+        add_sphere_btn.click()
+        app_page.wait_for_timeout(800)
+
+        # Switch to HPC mode
+        run_radio = app_page.locator(MAIN).locator('[data-testid="stRadio"]').filter(has_text="Run on")
+        run_radio.locator("p").filter(has_text="HPC").click()
+        app_page.wait_for_timeout(1_200)
+        _save_screenshot(app_page, "10b_hpc_mode_selected")
+
+        # Run pre-flight → should detect missing brain mask and/or connectivity_measures
+        preflight_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="pre-flight")
+        preflight_btn.scroll_into_view_if_needed()
+        preflight_btn.click()
+        # SSH checks take longer
+        app_page.wait_for_timeout(20_000)
+        _save_screenshot(app_page, "10c_hpc_preflight_results")
+
+        page_text = app_page.locator(MAIN).text_content() or ""
+        # At least one ❌ must be present (brain mask or connectivity_measures missing)
+        assert "❌" in page_text, (
+            f"Expected ❌ in HPC preflight results (files should be missing). "
+            f"Page snippet: {page_text[:800]}"
+        )
+        assert "Brain mask" in page_text or "Connectivity measures" in page_text, (
+            f"Expected 'Brain mask' or 'Connectivity measures' in preflight results. "
+            f"Page: {page_text[:800]}"
+        )
+
+        # The upload expander should be visible and expanded (has_static_failures=True)
+        upload_expander = app_page.locator(MAIN).locator('[data-testid="stExpander"]').filter(
+            has_text="Upload / sync static files"
+        )
+        expect(upload_expander).to_be_visible(timeout=10_000)
+        _save_screenshot(app_page, "10d_upload_expander_visible")
+
+        # Click the upload button
+        upload_btn = app_page.locator(MAIN).get_by_role("button").filter(
+            has_text="Upload static files to HPC"
+        )
+        upload_btn.scroll_into_view_if_needed()
+        upload_btn.click()
+        # Allow time for SFTP upload (4 files including 100MB+ brain mask)
+        app_page.wait_for_timeout(60_000)
+        _save_screenshot(app_page, "10e_after_upload")
+
+        page_text_after = app_page.locator(MAIN).text_content() or ""
+        # No ❌ for static file checks; all critical checks should now pass
+        assert "All critical checks passed" in page_text_after, (
+            f"Expected 'All critical checks passed' after upload + recheck. "
+            f"Page snippet: {page_text_after[:1000]}"
+        )
+        # Upload status rows: each file shows ✅
+        assert page_text_after.count("✅") >= 4 or "uploaded" in page_text_after.lower(), (
+            f"Expected ✅ rows for each uploaded file. Page: {page_text_after[:1000]}"
+        )
+        _save_screenshot(app_page, "10f_preflight_all_pass")
