@@ -130,7 +130,9 @@ class GroupStatsRunner:
         self.measure = measure
         self.n_perm = n_perm
         self.mask_path = Path(mask_path) if mask_path else None
-        self.correction = correction.upper()
+        _corr = correction.upper()
+        # "CLUSTER" is the canonical name; accept "GRF" as legacy alias
+        self.correction = "GRF" if _corr == "CLUSTER" else _corr
 
         # Set canonical order / participant metadata file
         if canonical_order_csv:
@@ -855,7 +857,8 @@ def main():
     parser.add_argument("--mask-path", "--mask", dest="mask_path", help="FSL mask file path (auto-detect if not provided)")
     # Accept both --canonical-order-csv and --canonical-csv for compatibility
     parser.add_argument("--canonical-order-csv", "--canonical-csv", dest="canonical_order_csv", help="Path to canonical subject order CSV/TSV")
-    parser.add_argument("--correction", default="TFCE", choices=["TFCE", "GRF", "FDR"], help="Multiple comparison correction (default: TFCE)")
+    parser.add_argument("--correction", default="TFCE", choices=["TFCE", "GRF", "Cluster", "FDR"],
+                        help="Correction: TFCE (non-parametric TFCE), Cluster/GRF (non-parametric cluster z=2.3), FDR (BH on vox_p). Default: TFCE")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()

@@ -258,6 +258,45 @@ def _write_filtered_canonical_tsv(
     return str(tsv_path)
 
 
+def _build_group_cmd(
+    bids_root: Any,
+    seed: str,
+    pipeline: str,
+    measure: str,
+    canonical_csv: str,
+    n_perm: int,
+    correction: str,
+    mask: str | None,
+    execution: str,
+    hpc_remote_base: str | None = None,
+) -> str:
+    """Build the group_mixed_design_stats.py command string for preview."""
+    effective_bids = hpc_remote_base if execution == "HPC" and hpc_remote_base else str(bids_root)
+    effective_csv = (
+        canonical_csv.replace(str(bids_root), hpc_remote_base, 1)
+        if execution == "HPC" and hpc_remote_base and canonical_csv.startswith(str(bids_root))
+        else canonical_csv
+    )
+    effective_mask = (
+        mask.replace(str(bids_root), hpc_remote_base, 1)
+        if execution == "HPC" and hpc_remote_base and mask and mask.startswith(str(bids_root))
+        else mask
+    )
+    parts = [
+        "python neuconn_app/scripts/group_mixed_design_stats.py",
+        f"  --bids-root {effective_bids}",
+        f"  --seed {seed}",
+        f"  --pipeline {pipeline}",
+        f"  --measure {measure}",
+        f"  --n-perms {n_perm}",
+        f"  --correction {correction}",
+        f"  --canonical-csv {effective_csv}",
+    ]
+    if effective_mask:
+        parts.append(f"  --mask-path {effective_mask}")
+    return " \\\n".join(parts)
+
+
 def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     """Render mixed-design TFCE workflow section."""
     
@@ -267,7 +306,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     **Paired pre/post × 2-group mixed ANOVA** for longitudinal intervention studies.
     
     - **Input**: 72 zmaps (36 subjects × 2 sessions, ~20 control, ~16 walking)
-    - **Output**: FSL randomise results with TFCE/GRF/FDR correction
+    - **Output**: FSL randomise results with TFCE / Cluster / FDR correction
     - **Design**: Time effect, group effect, subject intercepts
     """)
     
@@ -390,12 +429,21 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     with col2:
         correction = st.radio(
             "Correction method",
-            ["TFCE", "GRF", "FDR"],
-            index=["TFCE", "GRF", "FDR"].index(
-                st.session_state.get(f"{STATE_PREFIX}mixed_correction", "TFCE")
+            ["TFCE", "Cluster", "FDR"],
+            index=["TFCE", "Cluster", "FDR"].index(
+                # migrate legacy "GRF" stored value
+                {"GRF": "Cluster"}.get(
+                    st.session_state.get(f"{STATE_PREFIX}mixed_correction", "TFCE"),
+                    st.session_state.get(f"{STATE_PREFIX}mixed_correction", "TFCE"),
+                )
             ),
             horizontal=True,
             key=f"{STATE_PREFIX}mixed_correction_widget",
+            help=(
+                "**TFCE** — threshold-free cluster enhancement (recommended, no cluster-forming threshold)  \n"
+                "**Cluster** — non-parametric cluster inference via `randomise -c 2.3` (uses permutations)  \n"
+                "**FDR** — permutation voxelwise p-maps + Benjamini-Hochberg FDR correction"
+            ),
         )
         st.session_state[f"{STATE_PREFIX}mixed_correction"] = correction
     
@@ -654,6 +702,39 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         / pipeline / "group" / "seed" / seed_dir_name / f"measure-{measure}"
         if seed_dir_name else None
     )
+
+    # ── Script preview ─────────────────────────────────────────────────────
+    canonical_csv_preview = st.session_state.get(
+        f"{STATE_PREFIX}mixed_canonical_csv",
+        _default_participants_path(str(bids_root)),
+    )
+    _hpc_remote_base = None
+    if execution == "HPC":
+        try:
+            from utils.hpc import HPCConfig as _HPCCfgPrev
+            _hpc_remote_base = _HPCCfgPrev.from_config(config).remote_base or None
+        except Exception:
+            pass
+    effective_preview_n_perm = 100 if (use_test_perms and execution == "Local") else n_perm
+    if seed_input:
+        preview_cmd = _build_group_cmd(
+            bids_root=bids_root,
+            seed=seed_input,
+            pipeline=pipeline,
+            measure=measure,
+            canonical_csv=canonical_csv_preview,
+            n_perm=effective_preview_n_perm,
+            correction=correction,
+            mask=mask_input or None,
+            execution=execution,
+            hpc_remote_base=_hpc_remote_base,
+        )
+        with st.expander("📋 Script preview", expanded=False):
+            st.code(preview_cmd, language="bash")
+            st.caption(
+                f"Output directory: `{expected_output}`  \n"
+                + (f"HPC remote base: `{_hpc_remote_base}`" if _hpc_remote_base else "Local execution")
+            )
 
     col_info, col_submit = st.columns([2, 1])
 
