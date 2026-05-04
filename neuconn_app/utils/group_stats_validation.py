@@ -313,6 +313,28 @@ class SubjectDataValidator:
     STAGE_NO_XCPD = "XCP-D not complete"
     STAGE_NO_SEEDFC = "Seed FC not computed"
 
+    def _get_mean_fd(self, subject: str, session: str, pipeline: Optional[str] = None) -> Optional[float]:
+        """
+        Return mean framewise displacement (mm) for a subject/session from XCP-D motion TSV.
+
+        Returns None if the motion TSV is not found (e.g. XCP-D not run).
+        """
+        pl = pipeline or self.pipeline
+        xcpd_func = (
+            self.bids_root / "derivatives" / "preprocessing"
+            / "xcpd" / pl / subject / session / "func"
+        )
+        motion_files = list(xcpd_func.glob("*_motion.tsv")) if xcpd_func.exists() else []
+        if not motion_files:
+            return None
+        try:
+            df = pd.read_csv(motion_files[0], sep="\t")
+            if "framewise_displacement" in df.columns:
+                return float(df["framewise_displacement"].mean())
+        except Exception:
+            pass
+        return None
+
     def _trace_error_chain(self, subject: str, session: str, pipeline: Optional[str] = None) -> str:
         """
         Trace why a zmap is missing by checking each upstream step.
@@ -518,6 +540,7 @@ class SubjectDataValidator:
                 "group": row["group"],
             }
             result_row.update(validation.to_dict())
+            result_row["mean_fd"] = self._get_mean_fd(subject, session)
             results.append(result_row)
 
         df = pd.DataFrame(results)

@@ -164,15 +164,19 @@ def _seed_to_cli_format(seed_str: str) -> str:
     return f"atlas-4S256Parcels:{seed_str}"
 
 
-def _build_subject_selection_df(validation_df: pd.DataFrame) -> pd.DataFrame:
-    """Build a subject-level selection DF (one row per subject) from session-level validation."""
+def _build_subject_selection_df(validation_df: pd.DataFrame, fd_cutoff: float = 0.5) -> pd.DataFrame:
+    """Build a subject-level selection DF (one row per subject) from session-level validation.
+
+    A subject is included by default only if:
+    - All sessions have a valid zmap (fully complete)
+    - max mean FD across sessions does not exceed fd_cutoff (or FD is unknown)
+    """
     rows = []
     for subject, grp in validation_df.groupby("subject", sort=False):
         group = grp["group"].iloc[0]
         valid_mask = grp["exists"] & grp["error"].isna()
         n_valid = int(valid_mask.sum())
         n_total = len(grp)
-        # Worst (most upstream) failure stage across sessions
         failure_stages = grp.loc[~valid_mask, "error"].dropna().unique().tolist()
         failure_stage = failure_stages[0] if failure_stages else ""
         if n_valid == n_total:
@@ -181,11 +185,16 @@ def _build_subject_selection_df(validation_df: pd.DataFrame) -> pd.DataFrame:
             status = "⚠️ partial"
         else:
             status = "❌ none"
+        # FD: max mean-FD across sessions (NaN if not available)
+        fd_vals = grp["mean_fd"].dropna() if "mean_fd" in grp.columns else pd.Series(dtype=float)
+        max_fd = float(fd_vals.max()) if len(fd_vals) > 0 else float("nan")
+        fd_ok = pd.isna(max_fd) or max_fd <= fd_cutoff
         rows.append({
-            "include": n_valid == n_total,  # default: only include if fully complete
+            "include": n_valid == n_total and fd_ok,
             "subject": subject,
             "group": group,
             "complete": f"{n_valid}/{n_total} sessions",
+            "max_fd": round(max_fd, 3) if not pd.isna(max_fd) else None,
             "status": status,
             "failure_stage": failure_stage,
         })
@@ -464,9 +473,10 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                         st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = summary
                         st.session_state[f"{STATE_PREFIX}mixed_validation_df"] = validation_df
 
-                        # Build subject-level selection DF (one row per subject)
-                        sel_df = _build_subject_selection_df(validation_df)
-                        ctx_hash = f"{seed_input}|{pipeline}|{measure}"
+                        # Build subject-level selection DF using current FD cutoff
+                        fd_cutoff_cur = st.session_state.get(f"{STATE_PREFIX}mixed_fd_cutoff", 0.5)
+                        sel_df = _build_subject_selection_df(validation_df, fd_cutoff=fd_cutoff_cur)
+                        ctx_hash = f"{seed_input}|{pipeline}|{measure}|{fd_cutoff_cur}"
                         st.session_state[f"{STATE_PREFIX}mixed_selection_df"] = sel_df
                         st.session_state[f"{STATE_PREFIX}mixed_selection_ctx"] = ctx_hash
 
@@ -522,15 +532,49 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
             stage_rows = [{"Stage": s, "Sessions": failure_stages[s]} for s in stage_order if s in failure_stages]
             st.dataframe(pd.DataFrame(stage_rows), use_container_width=True, hide_index=True)
 
+    # ── FD cutoff widget ───────────────────────────────────────────────────
+    val_df_exists = st.session_state.get(f"{STATE_PREFIX}mixed_validation_df") is not None
+    fd_cutoff = st.number_input(
+        "Mean FD cutoff (mm) — subjects with max session FD above this are auto-excluded",
+        min_value=0.1,
+        max_value=2.0,
+        value=float(st.session_state.get(f"{STATE_PREFIX}mixed_fd_cutoff", 0.5)),
+        step=0.05,
+        format="%.2f",
+        key=f"{STATE_PREFIX}mixed_fd_cutoff_widget",
+        disabled=not val_df_exists,
+        help="0.5 mm is a common lenient threshold; 0.2 mm is stricter. Applied when Validate Zmaps is run, or when this value changes.",
+    )
+    prev_cutoff = st.session_state.get(f"{STATE_PREFIX}mixed_fd_cutoff", 0.5)
+    st.session_state[f"{STATE_PREFIX}mixed_fd_cutoff"] = fd_cutoff
+    # Rebuild selection when cutoff changes (if validation data exists)
+    if val_df_exists and abs(fd_cutoff - prev_cutoff) > 1e-6:
+        _vdf = st.session_state[f"{STATE_PREFIX}mixed_validation_df"]
+        _new_sel = _build_subject_selection_df(_vdf, fd_cutoff=fd_cutoff)
+        st.session_state[f"{STATE_PREFIX}mixed_selection_df"] = _new_sel
+        st.session_state[f"{STATE_PREFIX}mixed_selection_ctx"] = (
+            f"{seed_input}|{pipeline}|{measure}|{fd_cutoff}"
+        )
+
     # ── Subject selection editor ───────────────────────────────────────────
-    ctx_hash_cur = f"{seed_input}|{pipeline}|{measure}"
+    ctx_hash_cur = f"{seed_input}|{pipeline}|{measure}|{fd_cutoff}"
     if st.session_state.get(f"{STATE_PREFIX}mixed_selection_ctx") != ctx_hash_cur:
         # Params changed — clear stale selection
         st.session_state.pop(f"{STATE_PREFIX}mixed_selection_df", None)
 
     sel_df_state: pd.DataFrame | None = st.session_state.get(f"{STATE_PREFIX}mixed_selection_df")
     if sel_df_state is not None:
-        st.markdown("**Subject selection** — toggle *Include* to add/remove subjects from the analysis:")
+        # Count auto-excluded by FD
+        fd_excluded = int(
+            (~sel_df_state["include"])
+            & (sel_df_state.get("max_fd") is not None)
+            & sel_df_state["max_fd"].notna()
+            & (sel_df_state["max_fd"] > fd_cutoff)
+        ) if "max_fd" in sel_df_state.columns else 0
+        label = "**Subject selection** — toggle *Include* to add/remove subjects:"
+        if fd_excluded:
+            label += f" _(⚠️ {fd_excluded} auto-excluded by FD cutoff)_"
+        st.markdown(label)
         edited_sel = st.data_editor(
             sel_df_state,
             key=f"{STATE_PREFIX}mixed_selection_editor",
@@ -539,6 +583,12 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                 "subject": st.column_config.TextColumn("Subject", disabled=True),
                 "group": st.column_config.TextColumn("Group", disabled=True),
                 "complete": st.column_config.TextColumn("Sessions", disabled=True),
+                "max_fd": st.column_config.NumberColumn(
+                    "Max mean FD (mm)",
+                    format="%.3f",
+                    disabled=True,
+                    help="Maximum mean framewise displacement across sessions. Subjects above cutoff are auto-excluded.",
+                ),
                 "status": st.column_config.TextColumn("Status", disabled=True),
                 "failure_stage": st.column_config.TextColumn("Failure reason", disabled=True),
             },
@@ -570,9 +620,16 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         total_count = st.session_state.get(f"{STATE_PREFIX}mixed_validation_result", {}).get("total_count", 0)
         with st.expander(f"📋 Per-session details ({valid_count} valid / {total_count} total)"):
             is_valid_row = val_df["exists"] & val_df["error"].isna()
-            display_df = val_df[["subject", "session", "group", "exists", "error"]].copy()
+            keep_cols = ["subject", "session", "group", "exists", "error"]
+            if "mean_fd" in val_df.columns:
+                keep_cols.append("mean_fd")
+            display_df = val_df[keep_cols].copy()
             display_df["status"] = is_valid_row.map({True: "✅ valid", False: "❌ missing"})
-            display_df = display_df.rename(columns={"error": "failure reason"}).drop(columns=["exists"])
+            if "mean_fd" in display_df.columns:
+                display_df["mean_fd"] = display_df["mean_fd"].map(
+                    lambda v: f"{v:.3f}" if pd.notna(v) else "—"
+                )
+            display_df = display_df.rename(columns={"error": "failure reason", "mean_fd": "mean FD (mm)"}).drop(columns=["exists"])
             st.dataframe(
                 display_df.style.apply(
                     lambda row: ["background-color: #ffeeba" if "❌" in str(row.get("status", "")) else "" for _ in row],
