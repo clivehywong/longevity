@@ -292,11 +292,13 @@ def render_papaya_viewer_streamlit(
         ov_cmaps = overlay_colormaps or (["Overlay (Positives)"] * len(overlays or []))
         for idx, (ov_path, ov_lut) in enumerate(zip(overlays or [], ov_cmaps)):
             vn = varnames[1 + idx]
+            # Papaya's minPercent/maxPercent are FRACTIONS (0–1), not percentages.
+            # screenMin = imageMax * minPercent, so minPercent=0.3 → 30% threshold.
             image_options[vn] = {
                 "lut": ov_lut,
                 "alpha": float(st.session_state[f"{prefix}_ov_alpha"]),
-                "minPercent": int(st.session_state[f"{prefix}_ov_min"]),
-                "maxPercent": int(st.session_state[f"{prefix}_ov_max"]),
+                "minPercent": st.session_state[f"{prefix}_ov_min"] / 100.0,
+                "maxPercent": st.session_state[f"{prefix}_ov_max"] / 100.0,
             }
 
         container_id = prefix.replace("-", "_").replace(".", "_")
