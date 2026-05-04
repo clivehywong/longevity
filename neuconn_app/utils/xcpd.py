@@ -322,12 +322,14 @@ def _remote_xcpd_preflight(
         configured_format = str(config["xcpd"][pipeline_name].get("file_format", "auto"))
         detected_formats: List[str] = []
         fmriprep_dir = ""
+        dirs_exist: List[str] = []
         searched_candidates = _deduplicate_paths([hpc_cfg.remote_fmriprep, hpc_cfg.remote_legacy_fmriprep])
         for candidate in searched_candidates:
             if not candidate or not _remote_dir_exists(conn, candidate):
                 continue
             if not _remote_file_exists(conn, str(Path(candidate) / "dataset_description.json")):
                 continue
+            dirs_exist.append(candidate)
             candidate_formats = _detect_remote_file_formats(
                 conn,
                 candidate,
@@ -343,10 +345,24 @@ def _remote_xcpd_preflight(
                 detected_formats = candidate_formats
 
         if not fmriprep_dir:
+            subject_hint = ""
+            if participant_labels and dirs_exist:
+                # The directory exists but no preproc_bold found for these subjects —
+                # most likely fMRIPrep completed only partial outputs (anatomy/surfaces
+                # but MNI normalisation failed, so no *desc-preproc_bold.nii.gz).
+                labels = list(participant_labels)
+                subject_hint = (
+                    f" The fMRIPrep directory exists at {dirs_exist[0]} but contains no "
+                    f"*desc-preproc_bold.nii.gz for {', '.join(labels[:5])}. "
+                    "This usually means fMRIPrep ran but MNI normalisation failed for "
+                    "those subjects — please re-run fMRIPrep before submitting XCP-D."
+                )
             raise RuntimeError(
-                "HPC XCP-D preflight failed: no remote fMRIPrep directory with dataset_description.json contains XCP-D-readable inputs under "
+                "HPC XCP-D preflight failed: no remote fMRIPrep directory with dataset_description.json "
+                "contains XCP-D-readable inputs under "
                 + ", ".join(searched_candidates)
                 + "."
+                + subject_hint
             )
         if configured_format != "auto" and configured_format not in detected_formats:
             detected_label = ", ".join(detected_formats) if detected_formats else "none"
