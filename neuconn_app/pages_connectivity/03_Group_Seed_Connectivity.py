@@ -32,12 +32,13 @@ from utils.seed_viz import cli_token_to_seed_dir_name
 
 PAGE_KEY = "group_seed"
 
-# ── Contrast labels (from MixedDesignBuilder) ────────────────────────────────
-# Randomise outputs contrast1=Time, contrast2=Group, contrast3=Interaction
+# ── Contrast labels (from MixedDesignBuilder._build_contrasts) ───────────────
+# contrasts[0]=Interaction, contrasts[1]=Time, contrasts[2]=Group
+# randomise writes these as tstat1, tstat2, tstat3
 _CONTRAST_LABELS = {
-    1: "Time effect (ses-02 > ses-01)",
-    2: "Group effect (walking > control)",
-    3: "Group × Time interaction",
+    1: "Group × Time interaction",
+    2: "Time effect (ses-01 > ses-02)",
+    3: "Group effect (walking > control)",
 }
 
 

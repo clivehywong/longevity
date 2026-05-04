@@ -425,7 +425,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                     )
 
                     col_names = (
-                        ["Time", "Group×Time"]
+                        ["Time (+1=pre, −1=post)", "Group (+1=ctrl, −1=walk)"]
                         + [f"subj_{i+1}" for i in range(len(control) + len(walking))]
                     )
                     with st.expander("View sample rows (first 6)"):
