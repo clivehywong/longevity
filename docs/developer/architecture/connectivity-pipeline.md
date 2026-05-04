@@ -95,7 +95,7 @@ derivatives/connectivity/
     sub-XX/ses-YY/
       seed/<seed_id>/
         *_atlas-<A>_measure-<M>_seed-to-parcel.tsv
-        *_seed-to-voxel_zmap.nii.gz
+        *_measure-<M>_seed-to-voxel_zmap.nii.gz
       network/atlas-<A>/
         *_measure-<M>_relmat.tsv
         *_measure-<M>_relmat-z.tsv   # Fisher-z for correlation measures

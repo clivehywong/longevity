@@ -235,7 +235,7 @@ class TestFindZmapFile:
         seed_dir.mkdir(parents=True, exist_ok=True)
         
         # Copy sample nifti
-        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
         import shutil
         shutil.copy(str(sample_nifti_file), str(zmap_path))
         
@@ -285,7 +285,7 @@ class TestValidateSingleSubject:
         )
         seed_dir.mkdir(parents=True, exist_ok=True)
         
-        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
         import shutil
         shutil.copy(str(sample_nifti_file), str(zmap_path))
         
@@ -314,7 +314,7 @@ class TestValidateSingleSubject:
         # Create wrong shape
         wrong_data = np.random.randn(100, 100, 100).astype(np.float64)
         img = nib.Nifti1Image(wrong_data, np.eye(4))
-        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
         nib.save(img, str(zmap_path))
         
         result = validator_with_csv.validate_subject_file(subject, session)
@@ -339,7 +339,7 @@ class TestValidateSingleSubject:
         data = np.random.randn(91, 109, 91).astype(np.float64)
         data[0, 0, 0] = np.nan
         img = nib.Nifti1Image(data, np.eye(4))
-        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
         nib.save(img, str(zmap_path))
         
         result = validator_with_csv.validate_subject_file(subject, session)
@@ -364,7 +364,7 @@ class TestValidateSingleSubject:
         # Create float32 data (also acceptable)
         data = np.random.randn(91, 109, 91).astype(np.float32)
         img = nib.Nifti1Image(data, np.eye(4))
-        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
         nib.save(img, str(zmap_path))
         
         result = validator_with_csv.validate_subject_file(subject, session)
@@ -434,7 +434,7 @@ class TestCanonicalZmapsList:
             )
             seed_dir.mkdir(parents=True, exist_ok=True)
             
-            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
             import shutil
             shutil.copy(str(sample_nifti_file), str(zmap_path))
         
@@ -469,7 +469,7 @@ class TestSummaryStatistics:
             )
             seed_dir.mkdir(parents=True, exist_ok=True)
             
-            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
             import shutil
             shutil.copy(str(sample_nifti_file), str(zmap_path))
         
@@ -529,7 +529,7 @@ class TestSummaryStatistics:
             )
             seed_dir.mkdir(parents=True, exist_ok=True)
             
-            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
             import shutil
             shutil.copy(str(sample_nifti_file), str(zmap_path))
         
@@ -562,7 +562,7 @@ class TestErrorHandling:
         seed_dir.mkdir(parents=True, exist_ok=True)
         
         # Create corrupted file
-        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+        zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
         zmap_path.write_text("corrupted data")
         
         result = validator_with_csv.validate_subject_file(subject, session)
@@ -588,7 +588,7 @@ class TestErrorHandling:
             )
             seed_dir.mkdir(parents=True, exist_ok=True)
             
-            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
             import shutil
             shutil.copy(str(sample_nifti_file), str(zmap_path))
         
@@ -617,7 +617,7 @@ class TestIntegration:
             )
             seed_dir.mkdir(parents=True, exist_ok=True)
             
-            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
             import shutil
             shutil.copy(str(sample_nifti_file), str(zmap_path))
         
@@ -652,7 +652,7 @@ class TestIntegration:
             )
             seed_dir.mkdir(parents=True, exist_ok=True)
             
-            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_seed-to-voxel_zmap.nii.gz"
+            zmap_path = seed_dir / f"{subject}_{session}_seed-atlas-4S256Parcels_parcel-LH_Cont_Par_1_measure-pearson_seed-to-voxel_zmap.nii.gz"
             import shutil
             shutil.copy(str(sample_nifti_file), str(zmap_path))
         

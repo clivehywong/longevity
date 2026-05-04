@@ -29,7 +29,7 @@ Output layout::
     derivatives/connectivity/{pipeline}/{subject}/{session}/seed/{seed_id}/
     ├── {sub}_{ses}_seed-{id}_atlas-4S256Parcels_measure-pearson_seed-to-parcel.tsv
     ├── ...   (one TSV per atlas × measure)
-    ├── {sub}_{ses}_seed-{id}_seed-to-voxel_zmap.nii.gz
+    ├── {sub}_{ses}_seed-{id}_measure-pearson_seed-to-voxel_zmap.nii.gz
     └── {sub}_{ses}_seed-{id}_meta.json
 """
 
@@ -540,7 +540,7 @@ def _process_seed(
             if force or not p.exists():
                 tsv_needed[(atlas, measure)] = p
 
-    zmap_path = seed_dir / f"{prefix}_seed-to-voxel_zmap.nii.gz"
+    zmap_path = seed_dir / f"{prefix}_measure-pearson_seed-to-voxel_zmap.nii.gz"
     meta_path = seed_dir / f"{prefix}_meta.json"
     zmap_needed = force or not zmap_path.exists()
     meta_needed = force or not meta_path.exists()

@@ -33,7 +33,7 @@ Interactive Streamlit pages for visualizing XCP-D-driven connectivity results.
 derivatives/connectivity/{fc,fc_gsr,ec}/
   sub-XX/ses-YY/seed/<seed_id>/
     *_atlas-<A>_measure-<M>_seed-to-parcel.tsv
-    *_seed-to-voxel_zmap.nii.gz
+    *_measure-<M>_seed-to-voxel_zmap.nii.gz
   group/voxel/...
 ```
 

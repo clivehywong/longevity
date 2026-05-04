@@ -54,7 +54,7 @@ Submits `script/compute_seed_connectivity_xcpd.py` per subject/session.
 
 Outputs per subject/session:
 - `derivatives/connectivity/<pipeline>/sub-XX/ses-YY/seed/<seed_id>/*_atlas-<A>_measure-<M>_seed-to-parcel.tsv`
-- `derivatives/connectivity/<pipeline>/sub-XX/ses-YY/seed/<seed_id>/*_seed-to-voxel_zmap.nii.gz`
+- `derivatives/connectivity/<pipeline>/sub-XX/ses-YY/seed/<seed_id>/*_measure-<M>_seed-to-voxel_zmap.nii.gz`
 
 ---
 

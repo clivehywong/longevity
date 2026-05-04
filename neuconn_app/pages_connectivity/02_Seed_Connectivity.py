@@ -174,7 +174,7 @@ def _build_seed_selector(
 def _render_quality_metrics(sdir: Path, prefix: str) -> None:
     """Render provenance + z-score quality metrics in an expander."""
     meta_path = sdir / f"{prefix}_meta.json"
-    zmap_path = sdir / f"{prefix}_seed-to-voxel_zmap.nii.gz"
+    zmap_path = sdir / f"{prefix}_measure-pearson_seed-to-voxel_zmap.nii.gz"
 
     if not meta_path.exists() and not zmap_path.exists():
         return

@@ -66,7 +66,7 @@ python script/compute_seed_connectivity_xcpd.py \
 
 Outputs per subject/session:
 - `derivatives/connectivity/fc/sub-XX/ses-YY/seed/<seed_id>/*_atlas-X_measure-Y_seed-to-parcel.tsv`
-- `derivatives/connectivity/fc/sub-XX/ses-YY/seed/<seed_id>/*_seed-to-voxel_zmap.nii.gz`
+- `derivatives/connectivity/fc/sub-XX/ses-YY/seed/<seed_id>/*_measure-<M>_seed-to-voxel_zmap.nii.gz`
 
 ### Step 3: Run subject-level network connectivity
 
