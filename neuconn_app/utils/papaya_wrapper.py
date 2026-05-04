@@ -1,501 +1,350 @@
 """
 Papaya Viewer Streamlit Wrapper
 
-Interactive NIfTI viewer component for Streamlit using Papaya.js.
-Features:
-- Load brain maps (NIfTI format, local/URL)
-- Multiple atlas overlays with transparency control
-- Interactive controls: threshold, colormap, coordinates
-- Export to PNG
-- Memory-efficient lazy loading of atlases
+Interactive NIfTI viewer component using Papaya.js, served via a lightweight
+background HTTP file server so Papaya can load files with standard XHR instead
+of unreliable base64 data URIs.
 
-Author: NeuConn
-License: MIT
+Usage::
+
+    from utils.papaya_wrapper import render_papaya_viewer_streamlit
+
+    render_papaya_viewer_streamlit(
+        brain_map_path="/abs/path/to/T1w.nii.gz",
+        overlays=["/abs/path/to/alff.nii.gz"],
+        colormap="Grayscale",
+        overlay_colormaps=["Overlay (Positives)"],
+    )
 """
 
-import streamlit as st
 import base64
 import json
-import os
+import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 import nibabel as nib
 import numpy as np
-import logging
+import streamlit as st
 
 logger = logging.getLogger(__name__)
 
+# Built-in Papaya color table names
+PAPAYA_LUTS = [
+    "Grayscale",
+    "Spectrum",
+    "Overlay (Positives)",
+    "Overlay (Negatives)",
+    "Hot-and-Cold",
+    "Gold",
+    "Red Overlay",
+    "Green Overlay",
+    "Blue Overlay",
+]
+
 
 # ============================================================================
-# File Loading & Caching
+# NIfTI stats (for info display only — no longer used for image loading)
 # ============================================================================
-
-@st.cache_data
-def load_nifti_as_base64(file_path: str) -> str:
-    """
-    Load NIfTI file and convert to base64 for embedding in HTML.
-
-    Args:
-        file_path: Path to .nii or .nii.gz file
-
-    Returns:
-        Base64-encoded file content
-
-    Raises:
-        FileNotFoundError: If file doesn't exist
-        ValueError: If file is not a valid NIfTI format
-    """
-    file_path = str(file_path)
-
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"NIfTI file not found: {file_path}")
-
-    # Validate NIfTI format
-    try:
-        nib.load(file_path)  # Just verify it can be loaded
-    except Exception as e:
-        raise ValueError(f"Invalid NIfTI file {file_path}: {e}")
-
-    with open(file_path, "rb") as f:
-        file_bytes = f.read()
-
-    b64_str = base64.b64encode(file_bytes).decode("utf-8")
-    return b64_str
-
 
 @st.cache_data
 def get_nifti_stats(file_path: str) -> Dict[str, Any]:
-    """
-    Get statistics about NIfTI file for auto-scaling display range.
-
-    Args:
-        file_path: Path to NIfTI file
-
-    Returns:
-        Dictionary with shape, min, max, mean, percentiles
-    """
-    file_path = str(file_path)
-
+    """Return basic statistics about a NIfTI file."""
     try:
         img = nib.load(file_path)
         data = img.get_fdata()
-
-        # Filter out NaN and inf values for statistics
-        valid_data = data[np.isfinite(data)]
-
-        if len(valid_data) == 0:
-            return {
-                "shape": data.shape,
-                "min": 0,
-                "max": 1,
-                "mean": 0,
-                "p5": 0,
-                "p95": 1,
-            }
-
+        valid = data[np.isfinite(data)]
+        if len(valid) == 0:
+            return {"shape": data.shape, "min": 0, "max": 1, "mean": 0, "nonzero_voxels": 0}
         return {
             "shape": data.shape,
-            "min": float(np.min(valid_data)),
-            "max": float(np.max(valid_data)),
-            "mean": float(np.mean(valid_data)),
-            "p5": float(np.percentile(valid_data, 5)),
-            "p95": float(np.percentile(valid_data, 95)),
-            "nonzero_voxels": int(np.count_nonzero(valid_data)),
+            "min": float(np.min(valid)),
+            "max": float(np.max(valid)),
+            "mean": float(np.mean(valid)),
+            "nonzero_voxels": int(np.count_nonzero(valid)),
         }
-    except Exception as e:
-        logger.error(f"Error getting NIfTI stats for {file_path}: {e}")
-        return {
-            "shape": (0, 0, 0),
-            "min": 0,
-            "max": 1,
-            "mean": 0,
-            "p5": 0,
-            "p95": 1,
-        }
+    except Exception as exc:
+        logger.error("Error reading NIfTI stats for %s: %s", file_path, exc)
+        return {"shape": (0, 0, 0), "min": 0, "max": 1, "mean": 0, "nonzero_voxels": 0}
 
 
 # ============================================================================
-# HTML/JavaScript Generation
+# HTML generation — proper Papaya JS array params API
 # ============================================================================
 
 def _create_papaya_html(
-    brain_map_path: str,
-    overlays: Optional[List[str]] = None,
-    colormap: str = "Hot",
-    threshold_range: Tuple[float, float] = (0, 100),
-    overlay_alpha: float = 0.5,
-    overlay_colormaps: Optional[List[str]] = None,
+    images: List[str],
+    image_options: Optional[Dict[str, Dict]] = None,
+    global_options: Optional[Dict] = None,
     height: int = 600,
     container_id: str = "papayaViewer",
+    encoded_images: Optional[List[Tuple[str, str]]] = None,
 ) -> str:
-    """
-    Generate HTML/JavaScript for Papaya viewer.
+    """Generate Papaya viewer HTML using the official JavaScript array params API.
 
     Args:
-        brain_map_path: Primary brain map (local file or URL)
-        overlays: List of overlay file paths (local or base64-encoded)
-        colormap: Primary image colormap
-        threshold_range: (min, max) threshold percentiles
-        overlay_alpha: Transparency for overlay (0-1)
-        overlay_colormaps: List of colormaps for each overlay
-        height: Viewer height in pixels
-        container_id: HTML container ID
-
-    Returns:
-        HTML string with embedded JavaScript
+        images: Ordered list of image filenames (used as keys in params).
+            When *encoded_images* is supplied these are "virtual" filenames
+            that do not need to be real URLs — Papaya matches them by position
+            to the JS variable names in ``params["encodedImages"]``.
+        image_options: ``{filename: {lut, alpha, minPercent, …}}``.
+        global_options: Papaya global params such as ``showOrientation``.
+        height: Viewer height in pixels.
+        container_id: HTML element ID for the Papaya container.
+        encoded_images: List of ``(js_varname, base64_data)`` tuples.
+            If provided, the data is embedded directly in the page as JS
+            variables — no XHR/file-server required (works over SSH tunnels).
     """
-    min_thresh, max_thresh = threshold_range
+    lines: List[str] = [
+        "    var params = [];",
+    ]
 
-    # Prepare image array for Papaya params
-    images = [brain_map_path]
-    if overlays:
-        images.extend(overlays)
+    if encoded_images:
+        # encodedImages API: list of variable NAME strings — Papaya reads window[name]
+        # IMPORTANT: do NOT also set params["images"] — loadNextImage checks images FIRST
+        # and never reaches encodedImages if images is present (even as empty array).
+        varnames = [vn for vn, _ in encoded_images]
+        lines.append(f"    params[\"encodedImages\"] = {json.dumps(varnames)};")
+        for fname, opts in (image_options or {}).items():
+            lines.append(f"    params[{json.dumps(fname)}] = {json.dumps(opts)};")
+    else:
+        lines.append(f"    params[\"images\"] = {json.dumps(images)};")
+        for fname, opts in (image_options or {}).items():
+            lines.append(f"    params[{json.dumps(fname)}] = {json.dumps(opts)};")
 
-    # Default colormaps for overlays
-    if overlay_colormaps is None:
-        overlay_colormaps = ["spectrum"] * len(overlays or [])
+    for key, val in (global_options or {}).items():
+        lines.append(f"    params[{json.dumps(key)}] = {json.dumps(val)};")
+    # No explicit addViewer() — Papaya auto-initializes from the global `params`
+    # variable when its script loads and finds the .papaya div.
 
-    # Create params JSON — Papaya expects {images: [...]} not [[...]]
-    params_json = json.dumps({"images": images})
+    params_block = "\n".join(lines)
 
-    html = f"""
-    <script src="https://cdn.jsdelivr.net/gh/rii-mango/Papaya@master/release/current/standard/papaya.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rii-mango/Papaya@master/release/current/standard/papaya.css">
+    # Declare base64 JS variables before the params block
+    var_decls = ""
+    if encoded_images:
+        var_decls = "\n".join(
+            f'var {vn} = "{data}";' for vn, data in encoded_images
+        ) + "\n"
 
-    <div id="{container_id}" class="papaya" style="width: 100%; height: {height}px;"></div>
-
-    <div id="papayaCoords" style="position: fixed; top: 20px; right: 20px; 
-        background: rgba(0, 0, 0, 0.7); color: #0f0; padding: 12px; 
-        font-family: monospace; border-radius: 5px; z-index: 1000; font-size: 12px;">
-        MNI: (0.0, 0.0, 0.0) mm<br>
-        Voxel: (0, 0, 0)
-    </div>
-
-    <script>
-        // Initialize Papaya viewer — params must be an object with named keys
-        var params = {params_json};
-        papaya.Container.addViewer("{container_id}", params);
-
-        // Configure display settings after viewer and image finish loading
-        setTimeout(function() {{
-            // addViewer() returns undefined; access container via papayaContainers
-            var container = papayaContainers && papayaContainers[papayaContainers.length - 1];
-            if (container && container.viewer) {{
-                var screenVolumes = container.viewer.screenVolumes;
-
-                // Primary image settings
-                if (screenVolumes && screenVolumes.length > 0) {{
-                    var primary = screenVolumes[0];
-                    primary.colorMap = "{colormap}";
-                    primary.intensityMin = {min_thresh};
-                    primary.intensityMax = {max_thresh};
-                }}
-
-                // Overlay settings
-                if (screenVolumes && screenVolumes.length > 1) {{
-                    for (var i = 1; i < screenVolumes.length; i++) {{
-                        screenVolumes[i].alpha = {overlay_alpha};
-                        var colormaps = {json.dumps(overlay_colormaps)};
-                        if (i - 1 < colormaps.length) {{
-                            screenVolumes[i].colorMap = colormaps[i - 1];
-                        }}
-                    }}
-                }}
-
-                container.viewer.drawViewer(true);
-            }}
-        }}, 1500);
-
-        // Update coordinate display on mouse move
-        document.addEventListener("mousemove", function(event) {{
-            var container = papayaContainers && papayaContainers[papayaContainers.length - 1];
-            if (container && container.viewer && container.viewer.currentCoord) {{
-                var coords = container.viewer.currentCoord;
-                var voxel = container.viewer.currentVoxel;
-                var coordBox = document.getElementById("papayaCoords");
-                if (coordBox) {{
-                    coordBox.innerHTML =
-                        "MNI: (" + coords[0].toFixed(1) + ", " +
-                        coords[1].toFixed(1) + ", " +
-                        coords[2].toFixed(1) + ") mm<br>" +
-                        "Voxel: (" + (voxel ? voxel[0] : 0) + ", " +
-                        (voxel ? voxel[1] : 0) + ", " +
-                        (voxel ? voxel[2] : 0) + ")";
-                }}
-            }}
-        }});
-
-        // Export function (accessible from Streamlit)
-        window.papayaExport = function() {{
-            var container = papayaContainers && papayaContainers[papayaContainers.length - 1];
-            if (container && container.viewer && container.viewer.canvas) {{
-                var canvas = container.viewer.canvas;
-                var link = document.createElement("a");
-                link.href = canvas.toDataURL("image/png");
-                link.download = "brain_view_" + new Date().getTime() + ".png";
-                link.click();
-            }}
-        }};
-    </script>
-    """
-
-    return html
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<script src="https://cdn.jsdelivr.net/gh/rii-mango/Papaya@master/release/current/standard/papaya.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rii-mango/Papaya@master/release/current/standard/papaya.css">
+<style>
+  body {{ margin: 0; padding: 0; background: #000; }}
+  .papaya {{ width: 100%; height: {height}px; }}
+</style>
+</head>
+<body>
+<div id="{container_id}" class="papaya" data-params="params"></div>
+<script>
+{var_decls}{params_block}
+</script>
+</body>
+</html>"""
 
 
 # ============================================================================
-# Main Component
+# File encoding (replaces file server — works over SSH tunnels)
+# ============================================================================
+
+@st.cache_data(max_entries=20, ttl=3600)
+def _load_nifti_b64(file_path: str) -> str:
+    """Base64-encode a NIfTI file (cached per path)."""
+    with open(file_path, "rb") as fh:
+        return base64.b64encode(fh.read()).decode("ascii")
+
+
+# ============================================================================
+# Session-state helpers
+# ============================================================================
+
+def _init_state(prefix: str, colormap: str, ov_alpha: float,
+                ov_min: int, ov_max: int) -> None:
+    defaults = {
+        f"{prefix}_colormap": colormap,
+        f"{prefix}_ov_alpha": ov_alpha,
+        f"{prefix}_ov_min": ov_min,
+        f"{prefix}_ov_max": ov_max,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+# ============================================================================
+# Main component
 # ============================================================================
 
 def render_papaya_viewer_streamlit(
     brain_map_path: str,
-    title: str = "Brain Viewer",
+    title: str = "",
     overlays: Optional[List[str]] = None,
-    colormap: str = "Hot",
-    threshold_range: Optional[Tuple[float, float]] = None,
+    colormap: str = "Grayscale",
+    overlay_colormaps: Optional[List[str]] = None,
+    overlay_alpha: float = 0.7,
+    overlay_min_pct: int = 30,
+    overlay_max_pct: int = 100,
     height: int = 600,
     key: Optional[str] = None,
-    enable_export: bool = True,
-    show_info: bool = True,
+    enable_export: bool = False,
+    show_info: bool = False,
+    serve_dir: Optional[str] = None,  # kept for API compat; no longer used
+    **_kwargs,  # absorb deprecated params for backward compatibility
 ) -> Dict[str, Any]:
-    """
-    Render Papaya viewer in Streamlit with interactive controls.
+    """Render a Papaya NIfTI viewer in Streamlit.
 
-    Main function for integrating Papaya viewer into Streamlit apps.
+    NIfTI files are base64-encoded and embedded directly in the HTML page
+    via Papaya's ``encodedImages`` API.  This avoids the need for an
+    auxiliary file server and works over SSH tunnels.
 
     Args:
-        brain_map_path: Path to primary NIfTI file (local or URL, or base64 data URI)
-        title: Header title for viewer section
-        overlays: List of overlay NIfTI paths or base64 data URIs
-        colormap: Colormap for primary image ('Hot', 'Cool', 'Grayscale', 'Spectrum', 'Red', 'Green', 'Blue')
-        threshold_range: (min_percentile, max_percentile) for display range, defaults to auto
-        height: Viewer height in pixels (default 600)
-        key: Streamlit component key for state management
-        enable_export: Show export button (default True)
-        show_info: Show file information sidebar (default True)
-
-    Returns:
-        Dictionary with current viewer state:
-        {
-            "threshold_min": float,
-            "threshold_max": float,
-            "colormap": str,
-            "overlay_alpha": float,
-            "coordinates_mni": [x, y, z],
-            "exported": bool
-        }
-
-    Example:
-        >>> state = render_papaya_viewer_streamlit(
-        ...     brain_map_path="derivatives/mni_brain.nii.gz",
-        ...     overlays=["atlases/DiFuMo_256_MNI152_2mm.nii.gz"],
-        ...     colormap="Hot",
-        ...     height=700
-        ... )
+        brain_map_path: Background NIfTI image (local path).
+        title: Optional section heading.
+        overlays: Overlay NIfTI images (local paths).
+        colormap: Papaya LUT name for the background image.
+        overlay_colormaps: Per-overlay Papaya LUT names.
+        overlay_alpha: Initial opacity for overlays (0–1).
+        overlay_min_pct: Initial lower threshold for overlays (0–100 %).
+        overlay_max_pct: Initial upper threshold for overlays (0–100 %).
+        height: Viewer height in pixels.
+        key: Streamlit component key / session-state prefix.
+        enable_export: Unused; kept for API compatibility.
+        show_info: Show NIfTI stats beneath the controls.
+        serve_dir: Unused; kept for API compatibility.
     """
+    if title:
+        st.markdown(f"### {title}")
 
-    # Validate inputs
-    if not brain_map_path:
-        st.error("brain_map_path is required")
-        return {}
+    prefix = key or "papaya"
+    _init_state(prefix, colormap, overlay_alpha, overlay_min_pct, overlay_max_pct)
 
-    # Header
-    st.markdown(f"### {title}")
+    col_main, col_ctrl = st.columns([3, 1])
 
-    # Create container for layout (left: viewer, right: controls)
-    col_main, col_sidebar = st.columns([3, 1])
-
-    # ====================================================================
-    # LEFT COLUMN: Viewer
-    # ====================================================================
-
-    with col_main:
-        # Initialize session state for viewer controls
-        state_key_prefix = key or "papaya"
-        if f"{state_key_prefix}_threshold_min" not in st.session_state:
-            st.session_state[f"{state_key_prefix}_threshold_min"] = 0
-        if f"{state_key_prefix}_threshold_max" not in st.session_state:
-            st.session_state[f"{state_key_prefix}_threshold_max"] = 100
-        if f"{state_key_prefix}_colormap" not in st.session_state:
-            st.session_state[f"{state_key_prefix}_colormap"] = colormap
-        if f"{state_key_prefix}_overlay_alpha" not in st.session_state:
-            st.session_state[f"{state_key_prefix}_overlay_alpha"] = 0.5
-        if f"{state_key_prefix}_exported" not in st.session_state:
-            st.session_state[f"{state_key_prefix}_exported"] = False
-
-        # Load primary brain map
-        try:
-            if brain_map_path.startswith("data:") or brain_map_path.startswith("http"):
-                # Already a data URI or URL
-                primary_image = brain_map_path
-                stats = None
-            else:
-                # Local file path
-                primary_image = load_nifti_as_base64(brain_map_path)
-                stats = get_nifti_stats(brain_map_path)
-
-            # Load overlays
-            overlay_images = []
-            if overlays:
-                for overlay_path in overlays:
-                    try:
-                        if overlay_path.startswith("data:") or overlay_path.startswith("http"):
-                            overlay_images.append(overlay_path)
-                        else:
-                            overlay_images.append(load_nifti_as_base64(overlay_path))
-                    except Exception as e:
-                        st.warning(f"Could not load overlay {overlay_path}: {e}")
-
-        except FileNotFoundError as e:
-            st.error(f"❌ {e}")
-            return {}
-        except ValueError as e:
-            st.error(f"❌ {e}")
-            return {}
-
-        # Prepare threshold range
-        if threshold_range:
-            min_thresh, max_thresh = threshold_range
-        elif stats:
-            # Auto-scale based on data
-            p5 = stats["p5"]
-            p95 = stats["p95"]
-            min_thresh = max(0, (p5 - stats["min"]) / (stats["max"] - stats["min"]) * 100)
-            max_thresh = min(100, (p95 - stats["min"]) / (stats["max"] - stats["min"]) * 100)
-            min_thresh, max_thresh = int(min_thresh), int(max_thresh)
-        else:
-            min_thresh, max_thresh = 0, 100
-
-        # Get current control values from sidebar
-        threshold_min = st.session_state[f"{state_key_prefix}_threshold_min"]
-        threshold_max = st.session_state[f"{state_key_prefix}_threshold_max"]
-        current_colormap = st.session_state[f"{state_key_prefix}_colormap"]
-        overlay_alpha = st.session_state[f"{state_key_prefix}_overlay_alpha"]
-
-        # Generate and render HTML
-        overlay_colormaps = ["spectrum"] * len(overlay_images)  # Default colormaps
-        html_viewer = _create_papaya_html(
-            brain_map_path=f"data:application/octet-stream;base64,{primary_image}"
-            if not (brain_map_path.startswith("data:") or brain_map_path.startswith("http"))
-            else primary_image,
-            overlays=overlay_images,
-            colormap=current_colormap,
-            threshold_range=(threshold_min, threshold_max),
-            overlay_alpha=overlay_alpha,
-            overlay_colormaps=overlay_colormaps,
-            height=height,
-        )
-
-        st.components.v1.html(html_viewer, height=height + 50)
-
-    # ====================================================================
-    # RIGHT COLUMN: Controls
-    # ====================================================================
-
-    with col_sidebar:
+    # ── Controls ──────────────────────────────────────────────────────────
+    with col_ctrl:
         st.markdown("**⚙️ Controls**")
 
-        # Threshold slider
-        st.session_state[f"{state_key_prefix}_threshold_min"] = st.slider(
-            "Threshold Min (%)",
-            min_value=0,
-            max_value=100,
-            value=threshold_min,
-            step=1,
-            key=f"{state_key_prefix}_thresh_min_slider",
-        )
-
-        st.session_state[f"{state_key_prefix}_threshold_max"] = st.slider(
-            "Threshold Max (%)",
-            min_value=0,
-            max_value=100,
-            value=threshold_max,
-            step=1,
-            key=f"{state_key_prefix}_thresh_max_slider",
-        )
-
-        # Colormap selector
-        colormap_options = ["Hot", "Cool", "Grayscale", "Spectrum", "Red", "Green", "Blue"]
-        selected_colormap = st.selectbox(
-            "Colormap",
-            options=colormap_options,
-            index=colormap_options.index(current_colormap),
-            key=f"{state_key_prefix}_colormap_select",
-        )
-        st.session_state[f"{state_key_prefix}_colormap"] = selected_colormap
-
-        # Overlay transparency
-        if overlay_images:
-            st.session_state[f"{state_key_prefix}_overlay_alpha"] = st.slider(
-                "Overlay Opacity",
-                min_value=0.0,
-                max_value=1.0,
-                value=overlay_alpha,
-                step=0.05,
-                key=f"{state_key_prefix}_alpha_slider",
+        if overlays:
+            st.markdown("**🌡️ Stat Map**")
+            st.session_state[f"{prefix}_ov_min"] = st.slider(
+                "Threshold Min (%)", 0, 100,
+                st.session_state[f"{prefix}_ov_min"], 1,
+                key=f"{prefix}_ov_min_sl",
             )
+            st.session_state[f"{prefix}_ov_max"] = st.slider(
+                "Threshold Max (%)", 0, 100,
+                st.session_state[f"{prefix}_ov_max"], 1,
+                key=f"{prefix}_ov_max_sl",
+            )
+            st.session_state[f"{prefix}_ov_alpha"] = st.slider(
+                "Opacity", 0.0, 1.0,
+                st.session_state[f"{prefix}_ov_alpha"], 0.05,
+                key=f"{prefix}_ov_alpha_sl",
+            )
+            st.markdown("**🧠 Background**")
 
-        # Export button
-        if enable_export:
-            st.markdown("**📥 Export**")
-            if st.button(
-                "Export to PNG",
-                key=f"{state_key_prefix}_export_btn",
-                help="Right-click on Papaya viewer to also access native export",
-            ):
-                st.session_state[f"{state_key_prefix}_exported"] = True
-                # Note: Actual export happens via JavaScript in the HTML viewer
-                st.info("📸 Click 'Export as PNG' in the viewer to download")
+        cur_cmap = st.session_state[f"{prefix}_colormap"]
+        if cur_cmap not in PAPAYA_LUTS:
+            cur_cmap = PAPAYA_LUTS[0]
+        st.session_state[f"{prefix}_colormap"] = st.selectbox(
+            "Colormap",
+            PAPAYA_LUTS,
+            index=PAPAYA_LUTS.index(cur_cmap),
+            key=f"{prefix}_cmap_sel",
+        )
 
-        # File info
-        if show_info and stats:
-            st.markdown("**ℹ️ File Info**")
-            st.caption(f"Shape: {stats['shape']}")
-            st.caption(f"Min: {stats['min']:.2f}")
-            st.caption(f"Max: {stats['max']:.2f}")
-            st.caption(f"Nonzero: {stats['nonzero_voxels']}")
+        if show_info and brain_map_path:
+            try:
+                stats = get_nifti_stats(brain_map_path)
+                st.markdown("**ℹ️ File Info**")
+                st.caption(f"Shape: {stats['shape']}")
+                st.caption(f"Min: {stats['min']:.3f}")
+                st.caption(f"Max: {stats['max']:.3f}")
+                st.caption(f"Nonzero: {stats['nonzero_voxels']}")
+            except Exception:
+                pass
 
-    # Return state
+    # ── Viewer ────────────────────────────────────────────────────────────
+    with col_main:
+        all_paths = [brain_map_path] + (overlays or [])
+        encoded_images: List[Tuple[str, str]] = []
+        varnames: List[str] = []
+        for i, p in enumerate(all_paths):
+            vn = f"nii_{prefix.replace('-', '_').replace('.', '_')}_{i}"
+            try:
+                data = _load_nifti_b64(p)
+            except Exception as exc:
+                logger.error("Cannot encode %s: %s", p, exc)
+                st.error(f"Cannot load image: {Path(p).name}")
+                return {}
+            encoded_images.append((vn, data))
+            varnames.append(vn)
+
+        # Build image_options using the variable names that encodedImages references
+        image_options: Dict[str, Dict] = {
+            varnames[0]: {
+                "lut": st.session_state[f"{prefix}_colormap"],
+            }
+        }
+
+        ov_cmaps = overlay_colormaps or (["Overlay (Positives)"] * len(overlays or []))
+        for idx, (ov_path, ov_lut) in enumerate(zip(overlays or [], ov_cmaps)):
+            vn = varnames[1 + idx]
+            image_options[vn] = {
+                "lut": ov_lut,
+                "alpha": float(st.session_state[f"{prefix}_ov_alpha"]),
+                "minPercent": int(st.session_state[f"{prefix}_ov_min"]),
+                "maxPercent": int(st.session_state[f"{prefix}_ov_max"]),
+            }
+
+        container_id = prefix.replace("-", "_").replace(".", "_")
+        html = _create_papaya_html(
+            images=[],  # unused when encoded_images is supplied
+            image_options=image_options,
+            global_options={"showOrientation": True},
+            height=height,
+            container_id=container_id,
+            encoded_images=encoded_images,
+        )
+        st.components.v1.html(html, height=height + 30)
+
     return {
-        "threshold_min": threshold_min,
-        "threshold_max": threshold_max,
-        "colormap": current_colormap,
-        "overlay_alpha": overlay_alpha,
-        "exported": st.session_state.get(f"{state_key_prefix}_exported", False),
+        "colormap": st.session_state[f"{prefix}_colormap"],
+        "overlay_alpha": st.session_state[f"{prefix}_ov_alpha"],
+        "overlay_min_pct": st.session_state[f"{prefix}_ov_min"],
+        "overlay_max_pct": st.session_state[f"{prefix}_ov_max"],
     }
 
 
 # ============================================================================
-# Convenience Functions
+# Convenience helpers (kept for backward compatibility)
 # ============================================================================
+
+@st.cache_data
+def load_nifti_as_base64(file_path: str) -> str:
+    """Load NIfTI file as base64 string (kept for external callers)."""
+    import base64
+    import os
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"NIfTI file not found: {file_path}")
+    with open(file_path, "rb") as fh:
+        return base64.b64encode(fh.read()).decode("utf-8")
+
 
 def render_atlas_comparison(
     atlases: Dict[str, str],
     brain_template_path: Optional[str] = None,
     height: int = 600,
 ) -> None:
-    """
-    Render multiple atlases in tabs for side-by-side comparison.
-
-    Args:
-        atlases: Dictionary mapping atlas name to file path
-        brain_template_path: Optional template to use as primary image
-        height: Viewer height in pixels
-
-    Example:
-        >>> atlases = {
-        ...     "DiFuMo 256": "atlases/DiFuMo_256_MNI152_2mm.nii.gz",
-        ...     "AAL": "atlases/AAL_1mm_MNI152.nii.gz",
-        ... }
-        >>> render_atlas_comparison(atlases)
-    """
+    """Render multiple atlases in tabs (kept for backward compatibility)."""
     tabs = st.tabs(list(atlases.keys()))
-
     for tab, (atlas_name, atlas_path) in zip(tabs, atlases.items()):
         with tab:
             render_papaya_viewer_streamlit(
-                brain_map_path=brain_template_path
-                or "https://www.nitrc.org/frs/download.php/11342/MNI152_T1_1mm_brain.nii.gz",
-                overlays=[atlas_path],
+                brain_map_path=brain_template_path or atlas_path,
+                overlays=[atlas_path] if brain_template_path else None,
                 title=atlas_name,
                 height=height,
                 key=f"atlas_{atlas_name.replace(' ', '_')}",
@@ -503,54 +352,14 @@ def render_atlas_comparison(
 
 
 def get_available_atlases() -> Dict[str, str]:
-    """
-    Get dictionary of available atlases in project.
-
-    Returns:
-        Dictionary mapping atlas name to file path
-    """
-    atlas_base = Path("/home/clivewong/proj/longevity/atlases")
-    atlases = {}
-
-    if atlas_base.exists():
-        # DiFuMo
-        if (atlas_base / "difumo256.nii").exists():
-            atlases["DiFuMo 256"] = str(atlas_base / "difumo256.nii")
-
-        # Schaefer
-        schaefer_path = atlas_base / "schaefer200_7net.nii"
-        if schaefer_path.exists():
-            atlases["Schaefer 200"] = str(schaefer_path)
-
-        # AAL
-        aal_dir = atlas_base / "aal"
-        if aal_dir.exists():
-            aal_files = list(aal_dir.glob("*.nii*"))
-            if aal_files:
-                atlases["AAL"] = str(aal_files[0])
-
+    """Get dictionary of available atlases in the project."""
+    atlas_base = Path(__file__).resolve().parents[2] / "atlases"
+    atlases: Dict[str, str] = {}
+    if (atlas_base / "difumo256.nii").exists():
+        atlases["DiFuMo 256"] = str(atlas_base / "difumo256.nii")
+    schaefer = atlas_base / "schaefer200_7net.nii"
+    if schaefer.exists():
+        atlases["Schaefer 200"] = str(schaefer)
     return atlases
 
 
-if __name__ == "__main__":
-    # Simple test
-    st.set_page_config(layout="wide")
-    st.title("Papaya Viewer Test")
-
-    # Test with MNI template
-    mni_template = "https://www.nitrc.org/frs/download.php/11342/MNI152_T1_1mm_brain.nii.gz"
-
-    st.markdown("## Test 1: Basic Viewer")
-    render_papaya_viewer_streamlit(
-        brain_map_path=mni_template,
-        title="MNI Template",
-        height=600,
-    )
-
-    st.markdown("## Test 2: With Atlases")
-    available = get_available_atlases()
-    if available:
-        st.markdown("### Atlas Comparison")
-        render_atlas_comparison(available, brain_template_path=mni_template)
-    else:
-        st.info("No local atlases found")
