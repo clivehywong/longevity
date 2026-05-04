@@ -58,7 +58,7 @@ def render() -> None:
         return
 
     if not inventory.empty:
-        counts = inventory[inventory["artifact_type"].isin(["alff", "falff", "reho"])]
+        counts = inventory[inventory["artifact_type"].isin(["alff", "reho"])]
         if not counts.empty:
             cols = st.columns(min(3, len(counts)))
             for col, (_, row) in zip(cols, counts.iterrows()):
@@ -67,7 +67,7 @@ def render() -> None:
                 col.metric(f"{label}{atlas_text}", int(row["count"]))
 
     if local_measures.empty:
-        st.info("No fALFF / ALFF / ReHo outputs were found in the configured XCP-D FC directory.")
+        st.info("No ALFF / ReHo outputs were found in the configured XCP-D FC directory.")
         return
 
     st.subheader("Indexed local-measure files")
