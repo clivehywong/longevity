@@ -66,10 +66,11 @@ def _scan_group_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.Dat
             measure = measure_dir.name.removeprefix("measure-")
             rand_dir = measure_dir / "randomise_outputs"
             tstats = sorted(rand_dir.glob("randomise_tstat*.nii.gz")) if rand_dir.exists() else []
-            # Accept TFCE or GRF (clustere) corrected p-value maps
+            # Accept TFCE, GRF (clustere), or FDR corrected p-value maps
             tfce = (
                 sorted(rand_dir.glob("randomise_tfce_corrp_tstat*.nii.gz"))
                 + sorted(rand_dir.glob("randomise_clustere_corrp_tstat*.nii.gz"))
+                + sorted(rand_dir.glob("randomise_fdr_corrp_tstat*.nii.gz"))
             ) if rand_dir.exists() else []
             summary = measure_dir / "stats_summary.json"
             rows.append({
@@ -248,9 +249,16 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
     tstat_path = rand_dir / f"randomise_tstat{contrast_idx}.nii.gz"
     tfce_path = rand_dir / f"randomise_tfce_corrp_tstat{contrast_idx}.nii.gz"
     grf_path = rand_dir / f"randomise_clustere_corrp_tstat{contrast_idx}.nii.gz"
-    # Use GRF cluster-corrected map when TFCE is not available
-    corrp_path = tfce_path if tfce_path.exists() else (grf_path if grf_path.exists() else None)
-    corrp_label = "TFCE" if tfce_path.exists() else "GRF cluster"
+    fdr_path = rand_dir / f"randomise_fdr_corrp_tstat{contrast_idx}.nii.gz"
+    # Use the first available corrected map: TFCE > GRF > FDR
+    if tfce_path.exists():
+        corrp_path, corrp_label = tfce_path, "TFCE"
+    elif grf_path.exists():
+        corrp_path, corrp_label = grf_path, "GRF cluster"
+    elif fdr_path.exists():
+        corrp_path, corrp_label = fdr_path, "FDR (BH)"
+    else:
+        corrp_path, corrp_label = None, ""
 
     if not tstat_path.exists():
         st.error(f"T-stat file not found: `{tstat_path}`")
@@ -282,7 +290,7 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
     else:
         st.warning("Could not render t-stat map.")
 
-    # ── Corrected p-value map (TFCE or GRF) ─────────────────────────────────
+    # ── Corrected p-value map (TFCE / GRF / FDR) ────────────────────────────
     if corrp_path:
         st.markdown(f"**📊 {corrp_label} corrected p-values** (p < 0.05 threshold → 1 − p > 0.95)")
         corrp_mtime = corrp_path.stat().st_mtime

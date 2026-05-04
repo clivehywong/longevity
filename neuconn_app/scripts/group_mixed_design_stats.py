@@ -496,7 +496,8 @@ class GroupStatsRunner:
                 cmd.append("-T")
             elif self.correction == "GRF":
                 cmd.extend(["-c", "2.3"])  # cluster-based thresholding (z=2.3)
-            # FDR: no extra flag — randomise applies FDR correction by default
+            # FDR: no extra randomise flag — vox_p maps are always written; we
+            # apply Benjamini-Hochberg correction in Python after randomise completes.
             
             logger.debug(f"Command: {' '.join(cmd)}")
             
@@ -520,14 +521,68 @@ class GroupStatsRunner:
             
             logger.debug(f"randomise logs saved to {logs_dir}")
             logger.info(f"✓ randomise completed ({self.n_perm} permutations)")
+
+            # ── FDR post-processing ───────────────────────────────────────
+            if self.correction == "FDR":
+                self._apply_fdr_correction(randomise_dir, mask)
+
             return True
-        
-        except Exception as e:
-            logger.error(f"Failed to run randomise: {e}")
+
         except Exception as e:
             logger.error(f"Failed to run randomise: {e}")
             return False
     
+    def _apply_fdr_correction(self, randomise_dir: Path, mask_path: str) -> None:
+        """Apply Benjamini-Hochberg FDR correction to randomise vox_p maps.
+
+        randomise (without -T/-c) writes ``randomise_vox_p_tstat*.nii.gz``
+        containing (1 - uncorrected permutation p).  We load each map,
+        apply BH FDR within the brain mask, and write
+        ``randomise_fdr_corrp_tstat*.nii.gz`` in the same format so the
+        viewer and report code treat them like TFCE/GRF corrp maps.
+        """
+        from scipy.stats import rankdata  # noqa: PLC0415
+
+        try:
+            mask_img = nib.load(mask_path)
+            mask_data = mask_img.get_fdata().astype(bool)
+        except Exception as exc:
+            logger.warning(f"Could not load mask for FDR; skipping: {exc}")
+            return
+
+        vox_p_files = sorted(randomise_dir.glob("randomise_vox_p_tstat*.nii.gz"))
+        if not vox_p_files:
+            logger.warning("No randomise_vox_p_tstat*.nii.gz found for FDR correction.")
+            return
+
+        for vox_p_path in vox_p_files:
+            try:
+                img = nib.load(str(vox_p_path))
+                data = img.get_fdata()  # values = 1-p (0=not sig, 1=highly sig)
+
+                p_vals = 1.0 - data  # convert to p-values
+                in_mask = mask_data & np.isfinite(p_vals)
+                flat_p = p_vals[in_mask]
+
+                # Benjamini-Hochberg FDR
+                n = len(flat_p)
+                order = np.argsort(flat_p)
+                ranks = rankdata(flat_p, method="ordinal")
+                q_vals = np.minimum(1.0, flat_p * n / ranks)
+                # Enforce monotonicity (BH requires cumulative min from right)
+                q_vals[order] = np.minimum.accumulate(q_vals[order[::-1]])[::-1]
+
+                corrp = np.zeros_like(data)
+                corrp[in_mask] = np.clip(1.0 - q_vals, 0.0, 1.0)
+
+                out_name = vox_p_path.name.replace("_vox_p_tstat", "_fdr_corrp_tstat")
+                out_path = randomise_dir / out_name
+                nib.save(nib.Nifti1Image(corrp, img.affine, img.header), str(out_path))
+                sig = (corrp > 0.95).sum()
+                logger.info(f"FDR: {out_name} — {sig} voxels q<0.05")
+            except Exception as exc:
+                logger.warning(f"FDR correction failed for {vox_p_path.name}: {exc}")
+
     def _step_generate_report(self) -> bool:
         """Step 7: Generate summary report."""
         logger.info("\n[Step 7] Generating summary report...")
@@ -581,31 +636,44 @@ class GroupStatsRunner:
             return False
     
     def _parse_randomise_outputs(self, randomise_dir: Path) -> Dict[str, Any]:
-        """Parse randomise outputs for statistics."""
-        stats = {"tfce_files": [], "fstat_files": []}
-        
+        """Parse randomise outputs for statistics (TFCE, GRF, or FDR)."""
+        stats: Dict[str, Any] = {"corrp_files": [], "fstat_files": []}
+
+        # Corrected p-value maps — pattern depends on correction method
+        corrp_patterns = [
+            "randomise_tfce_corrp_*.nii.gz",       # TFCE
+            "randomise_clustere_corrp_*.nii.gz",    # GRF cluster
+            "randomise_fdr_corrp_*.nii.gz",         # FDR (our post-processed output)
+        ]
         try:
-            tfce_corrp_files = sorted(randomise_dir.glob("randomise_tfce_corrp_*.nii.gz"))
-            for fpath in tfce_corrp_files:
+            for pattern in corrp_patterns:
+                for fpath in sorted(randomise_dir.glob(pattern)):
+                    try:
+                        img = nib.load(str(fpath))
+                        data = img.get_fdata()
+                        voxels_sig = int((data > 0.95).sum())
+                        stats["corrp_files"].append({
+                            "filename": fpath.name,
+                            "correction": (
+                                "TFCE" if "tfce" in fpath.name
+                                else "GRF" if "clustere" in fpath.name
+                                else "FDR"
+                            ),
+                            "voxels_significant": voxels_sig,
+                            "data_range": [float(np.min(data)), float(np.max(data))],
+                        })
+                    except Exception as e:
+                        logger.debug(f"Failed to parse {fpath.name}: {e}")
+
+            # Keep backward-compat key
+            stats["tfce_files"] = [
+                r for r in stats["corrp_files"] if r["correction"] == "TFCE"
+            ]
+
+            for fpath in sorted(randomise_dir.glob("randomise_fstat*.nii.gz")):
                 try:
                     img = nib.load(str(fpath))
                     data = img.get_fdata()
-                    voxels_sig = (data > 0.95).sum()
-                    
-                    stats["tfce_files"].append({
-                        "filename": fpath.name,
-                        "voxels_significant": int(voxels_sig),
-                        "data_range": [float(np.min(data)), float(np.max(data))],
-                    })
-                except Exception as e:
-                    logger.debug(f"Failed to parse {fpath.name}: {e}")
-            
-            fstat_files = sorted(randomise_dir.glob("randomise_fstat*.nii.gz"))
-            for fpath in fstat_files:
-                try:
-                    img = nib.load(str(fpath))
-                    data = img.get_fdata()
-                    
                     stats["fstat_files"].append({
                         "filename": fpath.name,
                         "max_fstat": float(np.max(data)),
@@ -613,10 +681,10 @@ class GroupStatsRunner:
                     })
                 except Exception as e:
                     logger.debug(f"Failed to parse {fpath.name}: {e}")
-        
+
         except Exception as e:
             logger.debug(f"Error parsing outputs: {e}")
-        
+
         return stats
     
     def _generate_html_report(self) -> None:
