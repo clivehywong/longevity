@@ -161,12 +161,13 @@ def _load_nifti_b64(file_path: str) -> str:
 # ============================================================================
 
 def _init_state(prefix: str, colormap: str, ov_alpha: float,
-                ov_min: int, ov_max: int) -> None:
+                ov_min: float, ov_max: float) -> None:
+    # Keys use _val suffix to avoid collision with old int-based keys
     defaults = {
         f"{prefix}_colormap": colormap,
         f"{prefix}_ov_alpha": ov_alpha,
-        f"{prefix}_ov_min": ov_min,
-        f"{prefix}_ov_max": ov_max,
+        f"{prefix}_ov_min_val": ov_min,
+        f"{prefix}_ov_max_val": ov_max,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -184,14 +185,15 @@ def render_papaya_viewer_streamlit(
     colormap: str = "Grayscale",
     overlay_colormaps: Optional[List[str]] = None,
     overlay_alpha: float = 0.7,
-    overlay_min_pct: int = 30,
-    overlay_max_pct: int = 100,
+    overlay_min: Optional[float] = None,   # actual value; None → auto (20% of imageMax)
+    overlay_max: Optional[float] = None,   # actual value; None → auto (imageMax)
+    overlay_mode: str = "positive",        # "positive" | "bidirectional" (future)
     height: int = 600,
     key: Optional[str] = None,
     enable_export: bool = False,
     show_info: bool = False,
-    serve_dir: Optional[str] = None,  # kept for API compat; no longer used
-    **_kwargs,  # absorb deprecated params for backward compatibility
+    serve_dir: Optional[str] = None,
+    **_kwargs,  # absorb deprecated overlay_min_pct/overlay_max_pct
 ) -> Dict[str, Any]:
     """Render a Papaya NIfTI viewer in Streamlit.
 
@@ -206,8 +208,10 @@ def render_papaya_viewer_streamlit(
         colormap: Papaya LUT name for the background image.
         overlay_colormaps: Per-overlay Papaya LUT names.
         overlay_alpha: Initial opacity for overlays (0–1).
-        overlay_min_pct: Initial lower threshold for overlays (0–100 %).
-        overlay_max_pct: Initial upper threshold for overlays (0–100 %).
+        overlay_min: Initial lower threshold in actual image units (None → 20% of imageMax).
+        overlay_max: Initial upper threshold in actual image units (None → imageMax).
+        overlay_mode: ``"positive"`` (default) for ALFF/ReHo-style maps; ``"bidirectional"``
+            for z-scores/t-stats with both positive and negative values (future).
         height: Viewer height in pixels.
         key: Streamlit component key / session-state prefix.
         enable_export: Unused; kept for API compatibility.
@@ -218,7 +222,20 @@ def render_papaya_viewer_streamlit(
         st.markdown(f"### {title}")
 
     prefix = key or "papaya"
-    _init_state(prefix, colormap, overlay_alpha, overlay_min_pct, overlay_max_pct)
+
+    # Read overlay image stats upfront so slider range and defaults are data-driven.
+    # get_nifti_stats is cached, so this is cheap after the first call.
+    img_max = 1.0
+    img_min = 0.0
+    if overlays:
+        ov_stats = get_nifti_stats(overlays[0])
+        img_max = max(float(ov_stats.get("max", 1.0)), 1e-6)
+        img_min = float(ov_stats.get("min", 0.0))
+
+    default_ov_min = overlay_min if overlay_min is not None else round(img_max * 0.2, 2)
+    default_ov_max = overlay_max if overlay_max is not None else img_max
+
+    _init_state(prefix, colormap, overlay_alpha, default_ov_min, default_ov_max)
 
     col_main, col_ctrl = st.columns([3, 1])
 
@@ -227,15 +244,19 @@ def render_papaya_viewer_streamlit(
         st.markdown("**⚙️ Controls**")
 
         if overlays:
+            step = max(round(img_max / 100, 2), 0.01)
+
             st.markdown("**🌡️ Stat Map**")
-            st.session_state[f"{prefix}_ov_min"] = st.slider(
-                "Threshold Min (%)", 0, 100,
-                st.session_state[f"{prefix}_ov_min"], 1,
+            st.session_state[f"{prefix}_ov_min_val"] = st.slider(
+                "Threshold Min", 0.0, float(img_max),
+                float(st.session_state[f"{prefix}_ov_min_val"]),
+                step, format="%.2f",
                 key=f"{prefix}_ov_min_sl",
             )
-            st.session_state[f"{prefix}_ov_max"] = st.slider(
-                "Threshold Max (%)", 0, 100,
-                st.session_state[f"{prefix}_ov_max"], 1,
+            st.session_state[f"{prefix}_ov_max_val"] = st.slider(
+                "Threshold Max", 0.0, float(img_max),
+                float(st.session_state[f"{prefix}_ov_max_val"]),
+                step, format="%.2f",
                 key=f"{prefix}_ov_max_sl",
             )
             st.session_state[f"{prefix}_ov_alpha"] = st.slider(
@@ -260,8 +281,8 @@ def render_papaya_viewer_streamlit(
                 stats = get_nifti_stats(brain_map_path)
                 st.markdown("**ℹ️ File Info**")
                 st.caption(f"Shape: {stats['shape']}")
-                st.caption(f"Min: {stats['min']:.3f}")
-                st.caption(f"Max: {stats['max']:.3f}")
+                st.caption(f"Min: {stats['min']:.2f}")
+                st.caption(f"Max: {stats['max']:.2f}")
                 st.caption(f"Nonzero: {stats['nonzero_voxels']}")
             except Exception:
                 pass
@@ -282,7 +303,6 @@ def render_papaya_viewer_streamlit(
             encoded_images.append((vn, data))
             varnames.append(vn)
 
-        # Build image_options using the variable names that encodedImages references
         image_options: Dict[str, Dict] = {
             varnames[0]: {
                 "lut": st.session_state[f"{prefix}_colormap"],
@@ -292,18 +312,21 @@ def render_papaya_viewer_streamlit(
         ov_cmaps = overlay_colormaps or (["Overlay (Positives)"] * len(overlays or []))
         for idx, (ov_path, ov_lut) in enumerate(zip(overlays or [], ov_cmaps)):
             vn = varnames[1 + idx]
-            # Papaya's minPercent/maxPercent are FRACTIONS (0–1), not percentages.
-            # screenMin = imageMax * minPercent, so minPercent=0.3 → 30% threshold.
+            ov_min_val = float(st.session_state[f"{prefix}_ov_min_val"])
+            ov_max_val = float(st.session_state[f"{prefix}_ov_max_val"])
+            # Papaya's minPercent/maxPercent are FRACTIONS (0–1), not percentages:
+            #   screenMin = imageMax * minPercent
+            #   screenMax = imageMax * maxPercent
             image_options[vn] = {
                 "lut": ov_lut,
                 "alpha": float(st.session_state[f"{prefix}_ov_alpha"]),
-                "minPercent": st.session_state[f"{prefix}_ov_min"] / 100.0,
-                "maxPercent": st.session_state[f"{prefix}_ov_max"] / 100.0,
+                "minPercent": ov_min_val / img_max,
+                "maxPercent": ov_max_val / img_max,
             }
 
         container_id = prefix.replace("-", "_").replace(".", "_")
         html = _create_papaya_html(
-            images=[],  # unused when encoded_images is supplied
+            images=[],
             image_options=image_options,
             global_options={"showOrientation": True},
             height=height,
@@ -315,8 +338,8 @@ def render_papaya_viewer_streamlit(
     return {
         "colormap": st.session_state[f"{prefix}_colormap"],
         "overlay_alpha": st.session_state[f"{prefix}_ov_alpha"],
-        "overlay_min_pct": st.session_state[f"{prefix}_ov_min"],
-        "overlay_max_pct": st.session_state[f"{prefix}_ov_max"],
+        "overlay_min": st.session_state[f"{prefix}_ov_min_val"],
+        "overlay_max": st.session_state[f"{prefix}_ov_max_val"],
     }
 
 

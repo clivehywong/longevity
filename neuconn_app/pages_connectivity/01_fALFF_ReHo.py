@@ -101,8 +101,6 @@ def _render_voxel_view(
         overlays=overlays,
         colormap=bg_cmap,
         overlay_colormaps=overlay_cmaps,
-        overlay_min_pct=20,   # show top 80% of ALFF/ReHo range; user can adjust slider
-        overlay_max_pct=100,
         overlay_alpha=0.7,
         title="",
         height=550,

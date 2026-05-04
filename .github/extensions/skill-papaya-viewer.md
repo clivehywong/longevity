@@ -16,6 +16,108 @@ When to use Papaya vs static maps:
 - Use static plots (matplotlib, plotly) for **publication figures** (more control, consistent styling)
 - Papaya excels for **clinician-friendly interfaces** and **atlas comparison tools**
 
+---
+
+## ⚠️ Critical API Gotchas (Lessons from Production)
+
+These are hard-won lessons from production use. Violating any of these causes **silent failures**.
+
+### 1. Use `encodedImages` — the ONLY reliable loading method over SSH tunnels
+
+Papaya's default URL loading (`params["images"]`) requires browser HTTP requests. Over SSH tunnels `127.0.0.1` on the server ≠ `127.0.0.1` in the browser, so any local file server is unreachable (`ERR_CONNECTION_RESET`). The only solution is to embed base64 NIfTI data directly in the HTML:
+
+```javascript
+// Declare base64 data as JS variables — raw base64 only, NO data URI prefix
+var mni_bg = "H4sI...==";
+var alff_ov = "H4sI...==";
+
+var params = [];
+// encodedImages: array of JS variable NAME strings (not the data values)
+params["encodedImages"] = ["mni_bg", "alff_ov"];
+// Per-image options keyed by the same variable names
+params["mni_bg"]  = { lut: "Grayscale" };
+params["alff_ov"] = { lut: "Overlay (Positives)", alpha: 0.7, minPercent: 0.2, maxPercent: 1.0 };
+```
+
+In Python (papaya_wrapper.py):
+```python
+import base64
+
+with open(nifti_path, "rb") as fh:
+    b64 = base64.b64encode(fh.read()).decode("ascii")  # no prefix!
+```
+
+### 2. NEVER set `params["images"]` when using `encodedImages`
+
+Papaya's `loadNextImage` checks `params.images` **first**. If it exists (even as `[]`), `params.encodedImages` is **never reached** — silent failure, black viewer.
+
+```javascript
+// ❌ WRONG — params.images silently swallows all other loading methods
+params["images"] = [];
+params["encodedImages"] = ["mni_bg"];  // ignored!
+
+// ✅ CORRECT — only one mechanism, never both
+params["encodedImages"] = ["mni_bg"];
+```
+
+### 3. `minPercent`/`maxPercent` are FRACTIONS (0–1), NOT percentages
+
+Papaya computes display range as:
+```javascript
+screenMin = imageMax * minPercent;   // expects 0.0–1.0
+screenMax = imageMax * maxPercent;
+```
+
+Passing `maxPercent: 100` inflates `screenMax` by 100×, squashing the entire colormap to the bottom 1% — everything appears as the minimum LUT color regardless of slider position.
+
+```javascript
+// ❌ WRONG — passing percent integers
+params["alff_ov"] = { minPercent: 20, maxPercent: 100 };  // screenMax = imageMax * 100!
+
+// ✅ CORRECT — pass fractions
+params["alff_ov"] = { minPercent: 0.2, maxPercent: 1.0 };
+```
+
+In Python, convert actual threshold values to fractions before passing to Papaya:
+```python
+"minPercent": threshold_min_value / image_max,   # actual value ÷ imageMax → fraction
+"maxPercent": threshold_max_value / image_max,
+```
+
+### 4. Do NOT call `addViewer()` explicitly
+
+Papaya auto-initializes from a `.papaya` div with `data-params="params"`. Calling `addViewer()` creates a duplicate blank viewer.
+
+```html
+<!-- ✅ CORRECT: div attribute triggers auto-init -->
+<div class="papaya" data-params="params"></div>
+<script>
+  var params = [];
+  params["encodedImages"] = ["nii_0"];
+  // No addViewer() needed!
+</script>
+```
+
+### 5. Bidirectional maps (z-scores, t-stats): load the file twice with complementary LUTs
+
+`"Overlay (Positives)"` is transparent for negative values; `"Overlay (Negatives)"` is transparent for positive values. Load the **same file twice** with both LUTs to show the full range:
+
+```javascript
+var stat_pos = "H4sI...==";  // same base64 data
+var stat_neg = "H4sI...==";  // duplicated as a separate JS variable
+
+var params = [];
+params["encodedImages"] = ["stat_pos", "stat_neg"];
+params["stat_pos"] = { lut: "Overlay (Positives)", minPercent: 0.17, maxPercent: 1.0 };
+params["stat_neg"] = { lut: "Overlay (Negatives)", minPercent: 0.17, maxPercent: 1.0 };
+```
+
+In Python with `papaya_wrapper.py` for bidirectional mode, pass the same overlay path twice and use `overlay_colormaps=["Overlay (Positives)", "Overlay (Negatives)"]`:
+- Positive threshold: `minPercent = pos_threshold / imageMax`
+- Negative threshold: `minPercent = abs(neg_threshold) / abs(imageMin)`
+
+---
+
 ## Setup & Installation
 
 ### CDN vs Local Setup
