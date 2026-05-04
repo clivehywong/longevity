@@ -566,10 +566,11 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     if sel_df_state is not None:
         # Count auto-excluded by FD
         fd_excluded = int(
-            (~sel_df_state["include"])
-            & (sel_df_state.get("max_fd") is not None)
-            & sel_df_state["max_fd"].notna()
-            & (sel_df_state["max_fd"] > fd_cutoff)
+            (
+                (~sel_df_state["include"])
+                & sel_df_state["max_fd"].notna()
+                & (sel_df_state["max_fd"] > fd_cutoff)
+            ).sum()
         ) if "max_fd" in sel_df_state.columns else 0
         label = "**Subject selection** — toggle *Include* to add/remove subjects:"
         if fd_excluded:
