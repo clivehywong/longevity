@@ -919,18 +919,22 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
     all_subjects = list(sub_ses.keys())
     all_sessions = sorted({s for slist in sub_ses.values() for s in slist})
 
+    _stored_subjects = st.session_state.get(f"{STATE_PREFIX}subjects") or all_subjects
+    _valid_default_subjects = [s for s in _stored_subjects if s in all_subjects] or all_subjects
     sel_subjects = st.multiselect(
         "Subjects (default: all)",
         options=all_subjects,
-        default=st.session_state.get(f"{STATE_PREFIX}subjects") or all_subjects,
+        default=_valid_default_subjects,
         key=f"{STATE_PREFIX}subj_widget",
     )
     st.session_state[f"{STATE_PREFIX}subjects"] = sel_subjects
 
+    _stored_sessions = st.session_state.get(f"{STATE_PREFIX}sessions") or all_sessions
+    _valid_default_sessions = [s for s in _stored_sessions if s in all_sessions] or all_sessions
     sel_sessions = st.multiselect(
         "Sessions (default: all)",
         options=all_sessions,
-        default=st.session_state.get(f"{STATE_PREFIX}sessions") or all_sessions,
+        default=_valid_default_sessions,
         key=f"{STATE_PREFIX}ses_widget",
     )
     st.session_state[f"{STATE_PREFIX}sessions"] = sel_sessions

@@ -307,6 +307,43 @@ class SubjectDataValidator:
 
         return None
 
+    # Failure stage labels (ordered from most upstream to most downstream)
+    STAGE_NO_BIDS = "No BIDS session data"
+    STAGE_NO_FMRIPREP = "fMRIPrep not complete"
+    STAGE_NO_XCPD = "XCP-D not complete"
+    STAGE_NO_SEEDFC = "Seed FC not computed"
+
+    def _trace_error_chain(self, subject: str, session: str, pipeline: Optional[str] = None) -> str:
+        """
+        Trace why a zmap is missing by checking each upstream step.
+
+        Returns a human-readable stage label from most upstream failure.
+        """
+        pl = pipeline or self.pipeline
+
+        # Step 1: BIDS session func directory
+        bids_func = self.bids_root / "bids" / subject / session / "func"
+        if not bids_func.exists() or not any(bids_func.glob("*_bold.nii.gz")):
+            return self.STAGE_NO_BIDS
+
+        # Step 2: fMRIPrep output for this session
+        fmriprep_func = (
+            self.bids_root / "derivatives" / "preprocessing"
+            / "fmriprep" / subject / session / "func"
+        )
+        if not fmriprep_func.exists() or not any(fmriprep_func.iterdir()):
+            return self.STAGE_NO_FMRIPREP
+
+        # Step 3: XCP-D atlas timeseries TSVs for this session/pipeline
+        xcpd_func = (
+            self.bids_root / "derivatives" / "preprocessing"
+            / "xcpd" / pl / subject / session / "func"
+        )
+        if not xcpd_func.exists() or not any(xcpd_func.glob("*_timeseries.tsv")):
+            return self.STAGE_NO_XCPD
+
+        return self.STAGE_NO_SEEDFC
+
     def validate_subject_file(
         self,
         subject: str,
@@ -352,7 +389,7 @@ class SubjectDataValidator:
             if zmap_path is None:
                 return ValidationResult(
                     exists=False,
-                    error=f"Zmap not found for {subject} {session}",
+                    error=self._trace_error_chain(subject, session, pipeline),
                 )
 
             if not zmap_path.exists():
@@ -592,12 +629,25 @@ class SubjectDataValidator:
         valid = df[df["exists"] & df["error"].isna()]
         invalid = df[~(df["exists"] & df["error"].isna())]
 
-        # Error summary
-        error_summary = {}
+        # Failure stage counts (from error column, now contains trace labels for missing files)
+        stage_labels = [
+            SubjectDataValidator.STAGE_NO_BIDS,
+            SubjectDataValidator.STAGE_NO_FMRIPREP,
+            SubjectDataValidator.STAGE_NO_XCPD,
+            SubjectDataValidator.STAGE_NO_SEEDFC,
+        ]
+        failure_stages = {
+            label: int((df["error"] == label).sum())
+            for label in stage_labels
+            if (df["error"] == label).sum() > 0
+        }
+
+        # Other errors (NaN, shape mismatch, etc.)
+        other_errors = {}
         for _, row in invalid.iterrows():
-            if row["error"]:
-                error_type = str(row["error"]).split(":")[0]
-                error_summary[error_type] = error_summary.get(error_type, 0) + 1
+            err = row["error"]
+            if err and err not in stage_labels:
+                other_errors[err] = other_errors.get(err, 0) + 1
 
         # Mean statistics (only from valid files)
         mean_stats = {}
@@ -626,9 +676,10 @@ class SubjectDataValidator:
         summary = {
             "total_count": len(df),
             "valid_count": len(valid),
-            "missing_count": (df["error"] == "Zmap not found").sum(),
+            "missing_count": len(invalid),
             "error_count": len(invalid),
-            "error_summary": error_summary,
+            "failure_stages": failure_stages,
+            "other_errors": other_errors,
             "mean_stats": mean_stats,
             "group_summary": group_summary,
         }

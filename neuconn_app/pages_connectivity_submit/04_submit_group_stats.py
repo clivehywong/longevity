@@ -164,6 +164,91 @@ def _seed_to_cli_format(seed_str: str) -> str:
     return f"atlas-4S256Parcels:{seed_str}"
 
 
+def _build_subject_selection_df(validation_df: pd.DataFrame) -> pd.DataFrame:
+    """Build a subject-level selection DF (one row per subject) from session-level validation."""
+    rows = []
+    for subject, grp in validation_df.groupby("subject", sort=False):
+        group = grp["group"].iloc[0]
+        valid_mask = grp["exists"] & grp["error"].isna()
+        n_valid = int(valid_mask.sum())
+        n_total = len(grp)
+        # Worst (most upstream) failure stage across sessions
+        failure_stages = grp.loc[~valid_mask, "error"].dropna().unique().tolist()
+        failure_stage = failure_stages[0] if failure_stages else ""
+        if n_valid == n_total:
+            status = "✅ complete"
+        elif n_valid > 0:
+            status = "⚠️ partial"
+        else:
+            status = "❌ none"
+        rows.append({
+            "include": n_valid == n_total,  # default: only include if fully complete
+            "subject": subject,
+            "group": group,
+            "complete": f"{n_valid}/{n_total} sessions",
+            "status": status,
+            "failure_stage": failure_stage,
+        })
+    return pd.DataFrame(rows)
+
+
+def _preview_design(control: list[str], walking: list[str]) -> None:
+    """Display design matrix preview for the given subject lists."""
+    if not control and not walking:
+        st.warning("No subjects selected.")
+        return
+    if not control:
+        st.error("No control subjects selected.")
+        return
+    if not walking:
+        st.error("No walking subjects selected.")
+        return
+    builder = MixedDesignBuilder.from_paired_two_group(control, walking)
+    design_mat, _, _, _ = builder.build()
+    st.info(
+        f"**Design Matrix:** shape {design_mat.shape}, "
+        f"rank {int(np.linalg.matrix_rank(design_mat))}  \n"
+        f"Subjects: {len(control)} control, {len(walking)} walking · 2 sessions (pre/post)"
+    )
+    col_names = (
+        ["Time (+1=pre, −1=post)", "Group (+1=ctrl, −1=walk)"]
+        + [f"subj_{i + 1}" for i in range(len(control) + len(walking))]
+    )
+    with st.expander("View sample rows (first 6)"):
+        st.dataframe(
+            pd.DataFrame(design_mat[:6], columns=col_names[:design_mat.shape[1]]),
+            use_container_width=True,
+        )
+
+
+def _write_filtered_canonical_tsv(
+    validation_df: pd.DataFrame,
+    selection_df: pd.DataFrame,
+    seed_dir_name: str,
+    bids_root: Any,
+) -> str:
+    """
+    Write a filtered canonical TSV in expanded row_index/subject/session/group format
+    for only the selected (included) subjects — both sessions per subject.
+
+    Returns the path to the written TSV.
+    """
+    import time as _time
+    included_subjects = set(selection_df[selection_df["include"]]["subject"].tolist())
+    filtered = validation_df[validation_df["subject"].isin(included_subjects)].copy()
+    filtered = filtered.sort_values(["group", "subject", "session"]).reset_index(drop=True)
+    filtered["row_index"] = range(len(filtered))
+    out_cols = ["row_index", "subject", "session", "group"]
+    out_df = filtered[out_cols]
+
+    out_dir = Path(bids_root) / "tmp" / "group_stats_subsets"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe_seed = seed_dir_name.replace("/", "_").replace(":", "_")
+    tsv_path = out_dir / f"{safe_seed}_{int(_time.time())}.tsv"
+    out_df.to_csv(tsv_path, sep="\t", index=False)
+    return str(tsv_path)
+
+
 def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     """Render mixed-design TFCE workflow section."""
     
@@ -348,17 +433,17 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     else:
         st.info("ℹ️ HPC: Will upload design files and submit SLURM job")
     
-    # ===== Section 4: Preview & Validation =====
-    st.markdown("#### 👁️ Section 4: Preview & Validation")
-    
+    # ===== Section 4: Validate & Select Subjects =====
+    st.markdown("#### 👁️ Section 4: Validate & Select Subjects")
+
     col_val, col_prev = st.columns([1, 1])
-    
+
     with col_val:
         if st.button("🔍 Validate Zmaps", key=f"{STATE_PREFIX}mixed_validate"):
             if not seed_input:
                 st.warning("Select a seed first before validating zmaps.")
             else:
-                with st.spinner("Validating zmaps..."):
+                with st.spinner("Validating zmaps…"):
                     try:
                         canonical_csv = st.session_state.get(
                             f"{STATE_PREFIX}mixed_canonical_csv",
@@ -378,18 +463,23 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
 
                         st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = summary
                         st.session_state[f"{STATE_PREFIX}mixed_validation_df"] = validation_df
+
+                        # Build subject-level selection DF (one row per subject)
+                        sel_df = _build_subject_selection_df(validation_df)
+                        ctx_hash = f"{seed_input}|{pipeline}|{measure}"
+                        st.session_state[f"{STATE_PREFIX}mixed_selection_df"] = sel_df
+                        st.session_state[f"{STATE_PREFIX}mixed_selection_ctx"] = ctx_hash
+
                         valid_count = summary.get("valid_count", 0)
                         total_count = summary.get("total_count", 0)
                         error_count = summary.get("error_count", 0)
-                        # For HPC: allow partial zmaps (script uses whatever exists remotely)
-                        # For local: require all zmaps present
                         hpc_mode = execution == "HPC"
                         st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = (
                             valid_count > 0 if hpc_mode else error_count == 0
                         )
 
                         if valid_count > 0:
-                            msg = f"✓ {valid_count}/{total_count} zmaps valid for seed: `{seed_dir_name}`"
+                            msg = f"✓ {valid_count}/{total_count} zmaps found for seed: `{seed_dir_name}`"
                             if hpc_mode and error_count > 0:
                                 msg += f" ({error_count} missing locally — HPC uses remote files)"
                                 st.warning(msg)
@@ -403,87 +493,103 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
 
     with col_prev:
         if st.button("📊 Preview Design", key=f"{STATE_PREFIX}mixed_preview"):
-            with st.spinner("Building design preview..."):
-                try:
-                    canonical_csv = st.session_state.get(
-                        f"{STATE_PREFIX}mixed_canonical_csv",
-                        _default_participants_path(str(bids_root)),
-                    )
+            sel_df_cur: pd.DataFrame | None = st.session_state.get(f"{STATE_PREFIX}mixed_selection_df")
+            if sel_df_cur is None:
+                st.warning("Run Validate Zmaps first.")
+            else:
+                with st.spinner("Building design preview…"):
+                    try:
+                        included = sel_df_cur[sel_df_cur["include"]]
+                        control = sorted(included[included["group"] == "control"]["subject"].tolist())
+                        walking = sorted(included[included["group"] == "walking"]["subject"].tolist())
+                        _preview_design(control, walking)
+                    except Exception as e:
+                        st.error(f"Preview failed: {e}")
 
-                    df = _read_subject_table(canonical_csv)
-                    group_values = df["group"].astype(str).str.strip().str.lower()
-                    control = sorted(df.loc[group_values == "control", "participant_id"].dropna().unique())
-                    walking = sorted(df.loc[group_values == "walking", "participant_id"].dropna().unique())
-
-                    builder = MixedDesignBuilder.from_paired_two_group(control, walking)
-                    design_mat, _, _, _ = builder.build()
-
-                    st.info(
-                        f"**Design Matrix:** shape {design_mat.shape}, "
-                        f"rank {int(np.linalg.matrix_rank(design_mat))}  \n"
-                        f"Subjects: {len(control)} control, {len(walking)} walking · 2 sessions (pre/post)"
-                    )
-
-                    col_names = (
-                        ["Time (+1=pre, −1=post)", "Group (+1=ctrl, −1=walk)"]
-                        + [f"subj_{i+1}" for i in range(len(control) + len(walking))]
-                    )
-                    with st.expander("View sample rows (first 6)"):
-                        st.dataframe(
-                            pd.DataFrame(design_mat[:6], columns=col_names[:design_mat.shape[1]]),
-                            use_container_width=True,
-                        )
-
-                except Exception as e:
-                    st.error(f"Preview failed: {e}")
-
-    # Show validation result + per-subject breakdown
+    # ── Summary metrics + failure-stage breakdown ──────────────────────────
     if st.session_state.get(f"{STATE_PREFIX}mixed_validation_result"):
         val_result = st.session_state[f"{STATE_PREFIX}mixed_validation_result"]
-        valid_count = val_result.get("valid_count", 0)
-        total_count = val_result.get("total_count", 0)
-
         c1, c2, c3 = st.columns(3)
-        c1.metric("Valid zmaps", valid_count)
+        c1.metric("Valid zmaps", val_result.get("valid_count", 0))
         c2.metric("Missing", val_result.get("missing_count", 0))
-        c3.metric("Total expected", total_count)
+        c3.metric("Total expected", val_result.get("total_count", 0))
 
-        # Per-group breakdown
-        group_summary = val_result.get("group_summary", {})
-        if group_summary:
-            rows = [
-                {"Group": g, "Valid": v["valid"], "Missing": v["invalid"], "Total": v["total"]}
-                for g, v in group_summary.items()
-            ]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        failure_stages = val_result.get("failure_stages", {})
+        if failure_stages:
+            from utils.group_stats_validation import SubjectDataValidator as _SDV
+            st.markdown("**Missing sessions by failure stage:**")
+            stage_order = [_SDV.STAGE_NO_BIDS, _SDV.STAGE_NO_FMRIPREP, _SDV.STAGE_NO_XCPD, _SDV.STAGE_NO_SEEDFC]
+            stage_rows = [{"Stage": s, "Sessions": failure_stages[s]} for s in stage_order if s in failure_stages]
+            st.dataframe(pd.DataFrame(stage_rows), use_container_width=True, hide_index=True)
 
-        # Per-subject table
-        val_df: pd.DataFrame | None = st.session_state.get(f"{STATE_PREFIX}mixed_validation_df")
-        if val_df is not None:
-            with st.expander(f"📋 Per-subject details ({valid_count} valid / {total_count} total)"):
-                display_df = val_df[["subject", "session", "group", "exists", "error"]].copy()
-                display_df["status"] = display_df["exists"].map(
-                    {True: "✅ valid", False: "❌ missing"}
-                )
-                display_df = display_df.drop(columns=["exists"])
-                st.dataframe(
-                    display_df.style.apply(
-                        lambda row: ["background-color: #ffeeba" if row["status"].startswith("❌") else "" for _ in row],
-                        axis=1,
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-    
+    # ── Subject selection editor ───────────────────────────────────────────
+    ctx_hash_cur = f"{seed_input}|{pipeline}|{measure}"
+    if st.session_state.get(f"{STATE_PREFIX}mixed_selection_ctx") != ctx_hash_cur:
+        # Params changed — clear stale selection
+        st.session_state.pop(f"{STATE_PREFIX}mixed_selection_df", None)
+
+    sel_df_state: pd.DataFrame | None = st.session_state.get(f"{STATE_PREFIX}mixed_selection_df")
+    if sel_df_state is not None:
+        st.markdown("**Subject selection** — toggle *Include* to add/remove subjects from the analysis:")
+        edited_sel = st.data_editor(
+            sel_df_state,
+            key=f"{STATE_PREFIX}mixed_selection_editor",
+            column_config={
+                "include": st.column_config.CheckboxColumn("Include", default=True),
+                "subject": st.column_config.TextColumn("Subject", disabled=True),
+                "group": st.column_config.TextColumn("Group", disabled=True),
+                "complete": st.column_config.TextColumn("Sessions", disabled=True),
+                "status": st.column_config.TextColumn("Status", disabled=True),
+                "failure_stage": st.column_config.TextColumn("Failure reason", disabled=True),
+            },
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+        )
+        # Persist edits (different key from widget)
+        st.session_state[f"{STATE_PREFIX}mixed_selection_df"] = edited_sel
+
+        # Composition summary
+        included_rows = edited_sel[edited_sel["include"]]
+        n_ctrl = (included_rows["group"] == "control").sum()
+        n_walk = (included_rows["group"] == "walking").sum()
+        n_total = len(included_rows)
+        if n_total == 0:
+            st.error("⛔ No subjects selected.")
+        elif n_ctrl == 0 or n_walk == 0:
+            st.error(f"⛔ Both groups must have subjects. Selected: {n_ctrl} control, {n_walk} walking.")
+        elif n_ctrl < 2 or n_walk < 2:
+            st.warning(f"⚠️ Fewer than 2 subjects per group ({n_ctrl} ctrl, {n_walk} walk). Results may be unreliable.")
+        else:
+            st.success(f"✅ {n_total} subjects selected: {n_ctrl} control + {n_walk} walking")
+
+    # ── Per-subject session details ────────────────────────────────────────
+    val_df: pd.DataFrame | None = st.session_state.get(f"{STATE_PREFIX}mixed_validation_df")
+    if val_df is not None:
+        valid_count = st.session_state.get(f"{STATE_PREFIX}mixed_validation_result", {}).get("valid_count", 0)
+        total_count = st.session_state.get(f"{STATE_PREFIX}mixed_validation_result", {}).get("total_count", 0)
+        with st.expander(f"📋 Per-session details ({valid_count} valid / {total_count} total)"):
+            is_valid_row = val_df["exists"] & val_df["error"].isna()
+            display_df = val_df[["subject", "session", "group", "exists", "error"]].copy()
+            display_df["status"] = is_valid_row.map({True: "✅ valid", False: "❌ missing"})
+            display_df = display_df.rename(columns={"error": "failure reason"}).drop(columns=["exists"])
+            st.dataframe(
+                display_df.style.apply(
+                    lambda row: ["background-color: #ffeeba" if "❌" in str(row.get("status", "")) else "" for _ in row],
+                    axis=1,
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
     # ===== Section 5: Submit =====
     st.markdown("#### 📤 Section 5: Submit Analysis")
-    
+
     canonical_csv = st.session_state.get(
         f"{STATE_PREFIX}mixed_canonical_csv",
         _default_participants_path(str(bids_root)),
     )
 
-    # Let the backend resolve the canonical output path (derivatives/connectivity/...)
     seed_dir_name = cli_token_to_seed_dir_name(seed_input) if seed_input else ""
     expected_output = (
         Path(bids_root) / "derivatives" / "connectivity"
@@ -494,16 +600,27 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     col_info, col_submit = st.columns([2, 1])
 
     with col_info:
-        st.info(f"""
-        **Execution Settings:**
-        - **Location**: {execution}
-        - **Seed dir**: `{seed_dir_name or '(none selected)'}`
-        - **Output**: `{expected_output or '(select a seed)'}`
-        - **N Permutations**: {100 if use_test_perms and execution == "Local" else n_perm}
-        - **Correction**: {correction}
-        """)
+        sel_df_submit: pd.DataFrame | None = st.session_state.get(f"{STATE_PREFIX}mixed_selection_df")
+        n_selected = len(sel_df_submit[sel_df_submit["include"]]) if sel_df_submit is not None else "?"
+        st.info(
+            f"**Execution:** {execution} · **Correction:** {correction}  \n"
+            f"**Seed:** `{seed_dir_name or '(none)'}` · **Subjects:** {n_selected} selected  \n"
+            f"**Output:** `{expected_output or '(select a seed)'}`  \n"
+            f"**N Permutations:** {100 if use_test_perms and execution == 'Local' else n_perm}"
+        )
 
-    is_valid = st.session_state.get(f"{STATE_PREFIX}mixed_zmaps_valid", False) and seed_input
+    sel_df_submit = st.session_state.get(f"{STATE_PREFIX}mixed_selection_df")
+    has_valid_selection = (
+        sel_df_submit is not None
+        and len(sel_df_submit[sel_df_submit["include"]]) > 0
+        and (sel_df_submit[sel_df_submit["include"]]["group"] == "control").sum() >= 1
+        and (sel_df_submit[sel_df_submit["include"]]["group"] == "walking").sum() >= 1
+    )
+    is_valid = (
+        st.session_state.get(f"{STATE_PREFIX}mixed_zmaps_valid", False)
+        and seed_input
+        and has_valid_selection
+    )
 
     with col_submit:
         if st.button(
@@ -513,11 +630,19 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
             disabled=not is_valid,
         ):
             if not is_valid:
-                st.error("Please validate zmaps first and select a seed")
+                st.error("Validate zmaps, select a seed, and ensure both groups have subjects")
             else:
                 with st.spinner("Submitting analysis..."):
                     try:
                         effective_n_perm = 100 if (use_test_perms and execution == "Local") else n_perm
+                        # Build filtered canonical TSV from selected subjects
+                        val_df_submit: pd.DataFrame = st.session_state[f"{STATE_PREFIX}mixed_validation_df"]
+                        effective_csv = _write_filtered_canonical_tsv(
+                            val_df_submit,
+                            sel_df_submit,
+                            seed_dir_name,
+                            bids_root,
+                        )
 
                         if execution == "Local":
                             _submit_mixed_design_local(
@@ -525,7 +650,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                                 seed_input,
                                 pipeline,
                                 measure,
-                                canonical_csv,
+                                effective_csv,
                                 effective_n_perm,
                                 correction,
                                 mask_input or None,
@@ -537,7 +662,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                                 seed_input,
                                 pipeline,
                                 measure,
-                                canonical_csv,
+                                effective_csv,
                                 n_perm,
                                 correction,
                                 mask_input or None,
@@ -621,6 +746,22 @@ def _submit_mixed_design_hpc(
     remote_mask = _remap_path(mask)
     remote_canonical_csv = _remap_path(canonical_csv)
     remote_log_dir = f"{remote_bids_root}/logs"
+
+    # Rsync the filtered canonical TSV to HPC (it's in tmp/ which won't exist remotely)
+    if canonical_csv and Path(canonical_csv).exists():
+        remote_tsv_dir = f"{remote_bids_root}/tmp/group_stats_subsets"
+        rsync_cmd = [
+            "rsync", "-a", "--mkpath",
+            canonical_csv,
+            "-e", f"ssh -p {hpc_cfg.port or 22}",
+            f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_tsv_dir}/",
+        ]
+        try:
+            result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                st.warning(f"⚠️ Could not rsync subset TSV to HPC: {result.stderr[:200]}")
+        except Exception as _e:
+            st.warning(f"⚠️ rsync failed: {_e}")
 
     manager = ConnectivityWorkflowManager(config)
     opts: dict = {
