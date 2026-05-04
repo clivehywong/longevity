@@ -37,7 +37,7 @@ PAGE_KEY = "falff_reho"
 @st.cache_data(ttl=60)
 def _get_xcpd(bids_root_str: str, pipeline: str, subject: str, session: str):
     """Cached XCP-D output discovery for a single subject/session."""
-    from neuconn_app.utils.xcpd_outputs import XcpdDiscovery
+    from utils.xcpd_outputs import XcpdDiscovery
     disc = XcpdDiscovery(Path(bids_root_str), pipeline=pipeline)
     return disc.get(subject, session, pipeline)
 
@@ -152,7 +152,7 @@ def _render_parcellated_view(
     net_options: list[str] = ["(all)"]
     if _HAS_SEED_CATALOG:
         try:
-            from neuconn_app.utils.seed_catalog import SeedCatalog, _infer_network
+            from utils.seed_catalog import SeedCatalog, _infer_network
             networks = sorted(
                 {_infer_network(atlas, p) for p in parcel_df["parcel"]}
                 - {None}
@@ -170,7 +170,7 @@ def _render_parcellated_view(
 
     if selected_net != "(all)" and _HAS_SEED_CATALOG:
         try:
-            from neuconn_app.utils.seed_catalog import _infer_network
+            from utils.seed_catalog import _infer_network
             parcel_df = parcel_df[
                 parcel_df["parcel"].apply(
                     lambda p: _infer_network(atlas, p) == selected_net
@@ -215,9 +215,12 @@ def render() -> None:
     st.header("📊 Local Measures: fALFF & ReHo")
 
     config = st.session_state.get("config", {})
+    # XcpdDiscovery expects the project root (where derivatives/ lives),
+    # not the BIDS sub-directory.
     bids_root = Path(
-        config.get("paths", {}).get("bids_dir", "")
-        or Path(__file__).resolve().parents[3]
+        config.get("paths", {}).get("project_root", "")
+        or Path(config.get("paths", {}).get("bids_dir", "") or "").parent
+        or Path(__file__).resolve().parents[2]
     )
 
     # ── Top selector row ──────────────────────────────────────────────────

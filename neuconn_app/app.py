@@ -328,8 +328,8 @@ def render_fmri_analysis():
         import importlib.util
 
         if analysis == "📊 Local Measures Viewer":
-            page_path = Path(__file__).parent / "pages_fmri" / "subject_level" / "01_local_measures.py"
-            module_name = "fmri_subject_local_measures"
+            page_path = Path(__file__).parent / "pages_connectivity" / "01_fALFF_ReHo.py"
+            module_name = "conn_falff_reho_viewer"
         elif analysis == "🎯 Seed Connectivity Viewer":
             page_path = Path(__file__).parent / "pages_connectivity" / "02_Seed_Connectivity.py"
             module_name = "conn_seed_connectivity_viewer"
