@@ -270,7 +270,7 @@ def _build_group_cmd(
     execution: str,
     hpc_remote_base: str | None = None,
 ) -> str:
-    """Build the group_mixed_design_stats.py command string for preview."""
+    """Build the analysis command string for preview."""
     effective_bids = hpc_remote_base if execution == "HPC" and hpc_remote_base else str(bids_root)
     effective_csv = (
         canonical_csv.replace(str(bids_root), hpc_remote_base, 1)
@@ -282,6 +282,20 @@ def _build_group_cmd(
         if execution == "HPC" and hpc_remote_base and mask and mask.startswith(str(bids_root))
         else mask
     )
+
+    if correction.upper() == "PARAMETRIC":
+        parts = [
+            "python script/group_lmm_stats.py",
+            f"  --bids-root {effective_bids}",
+            f"  --seed {seed}",
+            f"  --pipeline {pipeline}",
+            f"  --measure {measure}",
+            f"  --canonical-csv {effective_csv}",
+        ]
+        if effective_mask:
+            parts.append(f"  --mask-path {effective_mask}")
+        return " \\\n".join(parts)
+
     parts = [
         "python neuconn_app/scripts/group_mixed_design_stats.py",
         f"  --bids-root {effective_bids}",
@@ -413,48 +427,54 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     # ===== Section 2: FSL TFCE Parameters =====
     st.markdown("#### ⚙️ Section 2: FSL TFCE Parameters")
     
+    _CORRECTION_OPTIONS = ["TFCE", "Cluster", "FDR", "Parametric"]
+    _CORRECTION_LEGACY = {"GRF": "Cluster"}
+    _stored_correction = st.session_state.get(f"{STATE_PREFIX}mixed_correction", "TFCE")
+    _stored_correction = _CORRECTION_LEGACY.get(_stored_correction, _stored_correction)
+    if _stored_correction not in _CORRECTION_OPTIONS:
+        _stored_correction = "TFCE"
+
     col1, col2 = st.columns(2)
-    
-    with col1:
-        n_perm = st.slider(
-            "Number of permutations",
-            min_value=100,
-            max_value=10000,
-            value=st.session_state.get(f"{STATE_PREFIX}mixed_n_perm", 5000),
-            step=100,
-            key=f"{STATE_PREFIX}mixed_n_perm_widget",
-        )
-        st.session_state[f"{STATE_PREFIX}mixed_n_perm"] = n_perm
-    
+
     with col2:
         correction = st.radio(
             "Correction method",
-            ["TFCE", "Cluster", "FDR"],
-            index=["TFCE", "Cluster", "FDR"].index(
-                # migrate legacy "GRF" stored value
-                {"GRF": "Cluster"}.get(
-                    st.session_state.get(f"{STATE_PREFIX}mixed_correction", "TFCE"),
-                    st.session_state.get(f"{STATE_PREFIX}mixed_correction", "TFCE"),
-                )
-            ),
+            _CORRECTION_OPTIONS,
+            index=_CORRECTION_OPTIONS.index(_stored_correction),
             horizontal=True,
             key=f"{STATE_PREFIX}mixed_correction_widget",
             help=(
                 "**TFCE** — threshold-free cluster enhancement (recommended, no cluster-forming threshold)  \n"
                 "**Cluster** — non-parametric cluster inference via `randomise -c 2.3` (uses permutations)  \n"
-                "**FDR** — permutation voxelwise p-maps + Benjamini-Hochberg FDR correction"
+                "**FDR** — permutation voxelwise p-maps + Benjamini-Hochberg FDR correction  \n"
+                "**Parametric** — fast voxelwise t-tests (change-score), GRF cluster correction; local only"
             ),
         )
         st.session_state[f"{STATE_PREFIX}mixed_correction"] = correction
+
+    with col1:
+        if correction == "Parametric":
+            n_perm = 0
+            st.info("⚡ Parametric t-tests — no permutations needed. Runs in seconds.", icon="⚡")
+        else:
+            n_perm = st.slider(
+                "Number of permutations",
+                min_value=100,
+                max_value=10000,
+                value=st.session_state.get(f"{STATE_PREFIX}mixed_n_perm", 5000),
+                step=100,
+                key=f"{STATE_PREFIX}mixed_n_perm_widget",
+            )
+            st.session_state[f"{STATE_PREFIX}mixed_n_perm"] = n_perm
     
     mask_input = st.text_input(
         "Brain mask",
         value=st.session_state.get(
             f"{STATE_PREFIX}mixed_mask",
-            str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"),
+            str(Path(bids_root) / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"),
         ),
         key=f"{STATE_PREFIX}mixed_mask_widget",
-        help="Dilated MNI brain mask (AGENTS.md §6). Defaults to project atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz",
+        help="Dilated MNI brain mask (AGENTS.md §6). Defaults to project atlases/MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz",
     )
     st.session_state[f"{STATE_PREFIX}mixed_mask"] = mask_input
     if not mask_input:
@@ -462,33 +482,38 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     elif not Path(mask_input).exists():
         st.warning(f"⚠️ Mask file not found on this machine: `{mask_input}`")
     
-    if n_perm < 1000:
+    if correction != "Parametric" and n_perm < 1000:
         st.warning("⚠️ <1000 permutations gives unreliable p-values")
-    
+
     # ===== Section 3: Execution Options =====
     st.markdown("#### 🚀 Section 3: Execution Options")
-    
-    execution = st.radio(
-        "Execution location",
-        ["Local", "HPC"],
-        index=["Local", "HPC"].index(
-            st.session_state.get(f"{STATE_PREFIX}mixed_execution", "Local")
-        ),
-        horizontal=True,
-        key=f"{STATE_PREFIX}mixed_execution_widget",
-    )
-    st.session_state[f"{STATE_PREFIX}mixed_execution"] = execution
+
+    if correction == "Parametric":
+        execution = "Local"
+        st.info("⚡ **Parametric** correction runs locally only (completes in seconds).")
+    else:
+        execution = st.radio(
+            "Execution location",
+            ["Local", "HPC"],
+            index=["Local", "HPC"].index(
+                st.session_state.get(f"{STATE_PREFIX}mixed_execution", "Local")
+            ),
+            horizontal=True,
+            key=f"{STATE_PREFIX}mixed_execution_widget",
+        )
+        st.session_state[f"{STATE_PREFIX}mixed_execution"] = execution
     
     use_test_perms = False
-    if execution == "Local":
-        use_test_perms = st.checkbox(
-            "Use reduced permutations for testing (100 instead of configured)",
-            value=st.session_state.get(f"{STATE_PREFIX}mixed_test_mode", False),
-            key=f"{STATE_PREFIX}mixed_test_mode_widget",
-        )
-        st.session_state[f"{STATE_PREFIX}mixed_test_mode"] = use_test_perms
-    else:
-        st.info("ℹ️ HPC: Will upload design files and submit SLURM job")
+    if correction != "Parametric":
+        if execution == "Local":
+            use_test_perms = st.checkbox(
+                "Use reduced permutations for testing (100 instead of configured)",
+                value=st.session_state.get(f"{STATE_PREFIX}mixed_test_mode", False),
+                key=f"{STATE_PREFIX}mixed_test_mode_widget",
+            )
+            st.session_state[f"{STATE_PREFIX}mixed_test_mode"] = use_test_perms
+        else:
+            st.info("ℹ️ HPC: Will upload design files and submit SLURM job")
     
     # ===== Section 4: Validate & Select Subjects =====
     st.markdown("#### 👁️ Section 4: Validate & Select Subjects")
@@ -741,11 +766,14 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     with col_info:
         sel_df_submit: pd.DataFrame | None = st.session_state.get(f"{STATE_PREFIX}mixed_selection_df")
         n_selected = len(sel_df_submit[sel_df_submit["include"]]) if sel_df_submit is not None else "?"
+        perm_display = "N/A (parametric)" if correction == "Parametric" else str(
+            100 if use_test_perms and execution == "Local" else n_perm
+        )
         st.info(
             f"**Execution:** {execution} · **Correction:** {correction}  \n"
             f"**Seed:** `{seed_dir_name or '(none)'}` · **Subjects:** {n_selected} selected  \n"
             f"**Output:** `{expected_output or '(select a seed)'}`  \n"
-            f"**N Permutations:** {100 if use_test_perms and execution == 'Local' else n_perm}"
+            f"**N Permutations:** {perm_display}"
         )
 
     sel_df_submit = st.session_state.get(f"{STATE_PREFIX}mixed_selection_df")
@@ -821,38 +849,58 @@ def _submit_mixed_design_local(
     mask: str | None = None,
 ) -> None:
     """Submit mixed-design analysis locally (output path resolved by backend)."""
-    cmd = [
-        "python", "neuconn_app/scripts/group_mixed_design_stats.py",
-        "--bids-root", str(bids_root),
-        "--seed", seed,
-        "--pipeline", pipeline,
-        "--measure", measure,
-        "--n-perms", str(n_perm),
-        "--correction", correction,
-        "--canonical-csv", canonical_csv,
-    ]
+    seed_dir = cli_token_to_seed_dir_name(seed)
+    out_base = (
+        Path(bids_root) / "derivatives" / "connectivity"
+        / pipeline / "group" / "seed" / seed_dir / f"measure-{measure}"
+    )
 
-    if mask:
-        cmd.extend(["--mask", mask])
+    if correction.upper() == "PARAMETRIC":
+        cmd = [
+            "python", "script/group_lmm_stats.py",
+            "--bids-root", str(bids_root),
+            "--seed", seed,
+            "--pipeline", pipeline,
+            "--measure", measure,
+            "--canonical-csv", canonical_csv,
+        ]
+        if mask:
+            cmd.extend(["--mask-path", mask])
+        spinner_msg = "Running parametric analysis… (usually <30 seconds)"
+        timeout_s = 300
+        out_subdir = out_base / "lmm_outputs"
+    else:
+        cmd = [
+            "python", "neuconn_app/scripts/group_mixed_design_stats.py",
+            "--bids-root", str(bids_root),
+            "--seed", seed,
+            "--pipeline", pipeline,
+            "--measure", measure,
+            "--n-perms", str(n_perm),
+            "--correction", correction,
+            "--canonical-csv", canonical_csv,
+        ]
+        if mask:
+            cmd.extend(["--mask", mask])
+        spinner_msg = "Running analysis… (this may take 10+ minutes for full permutations)"
+        timeout_s = 3600
+        out_subdir = out_base / "randomise_outputs"
 
     st.code(" ".join(cmd), language="bash")
 
-    with st.spinner("Running analysis... (this may take 10+ minutes for full permutations)"):
+    with st.spinner(spinner_msg):
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
 
             if result.returncode == 0:
                 st.success("✅ Analysis completed!")
-                seed_dir = cli_token_to_seed_dir_name(seed)
-                out = (
-                    Path(bids_root) / "derivatives" / "connectivity"
-                    / pipeline / "group" / "seed" / seed_dir / f"measure-{measure}"
-                )
-                st.info(f"Results saved to: `{out}`")
+                st.info(f"Results saved to: `{out_subdir}`")
             else:
                 st.error(f"Analysis failed (exit {result.returncode}):\n```\n{result.stderr[-2000:]}\n```")
         except subprocess.TimeoutExpired:
-            st.error("Analysis timed out (>1 hour)")
+            st.error(f"Analysis timed out (>{timeout_s}s)")
+        except Exception as e:
+            st.error(f"Execution error: {e}")
         except Exception as e:
             st.error(f"Execution error: {e}")
 
@@ -1116,7 +1164,7 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}group_csv", default_participants_path)
     st.session_state.setdefault(f"{STATE_PREFIX}out_root", _DEFAULT_OUT_ROOT)
     # Voxel defaults — pre-fill dilated mask (AGENTS.md §6)
-    _dilated_mask_path = str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz")
+    _dilated_mask_path = str(Path(bids_root) / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz")
     st.session_state.setdefault(f"{STATE_PREFIX}measure", "alff")
     st.session_state.setdefault(f"{STATE_PREFIX}contrast", "ses-02_minus_ses-01")
     st.session_state.setdefault(f"{STATE_PREFIX}method", "GRF")
@@ -1141,7 +1189,7 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_correction", "TFCE")
     st.session_state.setdefault(
         f"{STATE_PREFIX}mixed_mask",
-        str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"),
+        str(Path(bids_root) / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"),
     )
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_execution", "Local")
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_test_mode", False)
@@ -1272,7 +1320,7 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
             "Brain mask path",
             value=st.session_state.get(f"{STATE_PREFIX}mask", _dilated_mask_path),
             key=f"{STATE_PREFIX}mask_widget",
-            help="Dilated MNI brain mask (required per AGENTS.md §6). Defaults to project atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz",
+            help="Dilated MNI brain mask (required per AGENTS.md §6). Defaults to project atlases/MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz",
         )
         st.session_state[f"{STATE_PREFIX}mask"] = mask
         if not mask:

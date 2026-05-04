@@ -52,11 +52,12 @@ def _group_base(bids_root: Path, pipeline: str) -> Path:
 
 @st.cache_data(ttl=30)
 def _scan_group_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataFrame:
-    """Scan group output dirs; returns DataFrame with cols: seed_dir, measure, has_tstat, has_tfce, has_summary, n_contrasts."""
+    """Scan group output dirs; returns DataFrame with cols:
+    seed_dir, measure, has_tstat, has_tfce, has_summary, n_contrasts, has_lmm."""
     base = _group_base(Path(bids_root_str), pipeline)
     rows = []
     if not base.exists():
-        return pd.DataFrame(columns=["seed_dir", "measure", "has_tstat", "has_tfce", "has_summary", "n_contrasts"])
+        return pd.DataFrame(columns=["seed_dir", "measure", "has_tstat", "has_tfce", "has_summary", "n_contrasts", "has_lmm"])
 
     for seed_dir in sorted(base.iterdir()):
         if not seed_dir.is_dir():
@@ -65,40 +66,57 @@ def _scan_group_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.Dat
             if not measure_dir.is_dir() or not measure_dir.name.startswith("measure-"):
                 continue
             measure = measure_dir.name.removeprefix("measure-")
+
+            # randomise outputs
             rand_dir = measure_dir / "randomise_outputs"
             tstats = sorted(rand_dir.glob("randomise_tstat*.nii.gz")) if rand_dir.exists() else []
-            # Accept TFCE, GRF (clustere), or FDR corrected p-value maps
             tfce = (
                 sorted(rand_dir.glob("randomise_tfce_corrp_tstat*.nii.gz"))
                 + sorted(rand_dir.glob("randomise_clustere_corrp_tstat*.nii.gz"))
                 + sorted(rand_dir.glob("randomise_fdr_corrp_tstat*.nii.gz"))
             ) if rand_dir.exists() else []
+
+            # lmm (parametric) outputs
+            lmm_dir = measure_dir / "lmm_outputs"
+            lmm_tstats = sorted(lmm_dir.glob("lmm_tstat*.nii.gz")) if lmm_dir.exists() else []
+
             summary = measure_dir / "stats_summary.json"
+            has_tstat = len(tstats) > 0 or len(lmm_tstats) > 0
+            n_contrasts = max(len(tstats), len(lmm_tstats))
             rows.append({
                 "seed_dir": seed_dir.name,
                 "measure": measure,
-                "has_tstat": len(tstats) > 0,
+                "has_tstat": has_tstat,
                 "has_tfce": len(tfce) > 0,
                 "has_summary": summary.exists(),
-                "n_contrasts": len(tstats),
+                "n_contrasts": n_contrasts,
+                "has_lmm": len(lmm_tstats) > 0,
             })
 
     return pd.DataFrame(rows) if rows else pd.DataFrame(
-        columns=["seed_dir", "measure", "has_tstat", "has_tfce", "has_summary", "n_contrasts"]
+        columns=["seed_dir", "measure", "has_tstat", "has_tfce", "has_summary", "n_contrasts", "has_lmm"]
     )
 
 
-def _list_contrasts(bids_root: Path, pipeline: str, seed_dir: str, measure: str) -> list[int]:
+def _list_contrasts(bids_root: Path, pipeline: str, seed_dir: str, measure: str,
+                    source: str = "randomise") -> list[int]:
     """Return list of contrast indices (1-based) that have tstat files."""
-    rand_dir = (
-        _group_base(bids_root, pipeline) / seed_dir / f"measure-{measure}" / "randomise_outputs"
-    )
-    if not rand_dir.exists():
+    import re
+    measure_dir = _group_base(bids_root, pipeline) / seed_dir / f"measure-{measure}"
+    if source == "lmm":
+        out_dir = measure_dir / "lmm_outputs"
+        pattern = r"lmm_tstat(\d+)\.nii\.gz$"
+        glob_pat = "lmm_tstat*.nii.gz"
+    else:
+        out_dir = measure_dir / "randomise_outputs"
+        pattern = r"randomise_tstat(\d+)\.nii\.gz$"
+        glob_pat = "randomise_tstat*.nii.gz"
+
+    if not out_dir.exists():
         return []
-    files = sorted(rand_dir.glob("randomise_tstat*.nii.gz"))
     indices = []
-    for f in files:
-        m = __import__("re").search(r"randomise_tstat(\d+)\.nii\.gz$", f.name)
+    for f in sorted(out_dir.glob(glob_pat)):
+        m = re.search(pattern, f.name)
         if m:
             indices.append(int(m.group(1)))
     return sorted(indices)
@@ -183,9 +201,11 @@ def _render_dashboard(bids_root: Path, pipeline: str) -> None:
     # Status table
     def _status(row: pd.Series) -> str:
         if row["has_tstat"] and row["has_tfce"]:
-            return "✅ Complete"
+            return "✅ Complete (randomise)"
+        if row.get("has_lmm", False) and row["has_tstat"]:
+            return "✅ Complete (parametric)"
         if row["has_tstat"]:
-            return "⚠️ No TFCE"
+            return "⚠️ No corrp"
         if row["has_summary"]:
             return "🔄 Running?"
         return "❌ No outputs"
@@ -193,9 +213,14 @@ def _render_dashboard(bids_root: Path, pipeline: str) -> None:
     display = df.copy()
     display["Status"] = df.apply(_status, axis=1)
     display["Contrasts"] = df["n_contrasts"].apply(lambda n: str(n) if n > 0 else "—")
+    display["Source"] = df.apply(
+        lambda r: ("randomise+LMM" if (r["has_tstat"] and r.get("has_lmm", False))
+                   else ("LMM" if r.get("has_lmm", False) else "randomise")),
+        axis=1,
+    )
     display = display.rename(columns={"seed_dir": "Seed directory", "measure": "Measure"})
     st.dataframe(
-        display[["Seed directory", "Measure", "Status", "Contrasts"]],
+        display[["Seed directory", "Measure", "Source", "Status", "Contrasts"]],
         use_container_width=True,
         hide_index=True,
     )
@@ -231,8 +256,31 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
         measures = sorted(completed.loc[completed["seed_dir"] == seed_dir, "measure"].unique())
         measure = st.selectbox("Measure", measures, key=f"{PAGE_KEY}_viewer_measure")
 
+    # ── Source selector (randomise vs LMM) ────────────────────────────────
+    measure_dir = _group_base(bids_root, pipeline) / seed_dir / f"measure-{measure}"
+    has_rand = (measure_dir / "randomise_outputs").exists() and bool(
+        list((measure_dir / "randomise_outputs").glob("randomise_tstat*.nii.gz"))
+    )
+    has_lmm = (measure_dir / "lmm_outputs").exists() and bool(
+        list((measure_dir / "lmm_outputs").glob("lmm_tstat*.nii.gz"))
+    )
+
+    if has_rand and has_lmm:
+        source = st.radio(
+            "Result source",
+            ["randomise (permutation)", "parametric (fast)"],
+            horizontal=True,
+            key=f"{PAGE_KEY}_viewer_source",
+        )
+        source = "lmm" if "parametric" in source else "randomise"
+    elif has_lmm:
+        source = "lmm"
+        st.caption("Source: parametric (fast)")
+    else:
+        source = "randomise"
+
     with col_contrast:
-        contrast_indices = _list_contrasts(bids_root, pipeline, seed_dir, measure)
+        contrast_indices = _list_contrasts(bids_root, pipeline, seed_dir, measure, source)
         contrast_opts = {i: _CONTRAST_LABELS.get(i, f"Contrast {i}") for i in contrast_indices}
         if not contrast_opts:
             st.warning("No contrast files found.")
@@ -244,22 +292,29 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
             format_func=lambda i: f"#{i}  {contrast_opts[i]}",
         )
 
-    rand_dir = (
-        _group_base(bids_root, pipeline) / seed_dir / f"measure-{measure}" / "randomise_outputs"
-    )
-    tstat_path = rand_dir / f"randomise_tstat{contrast_idx}.nii.gz"
-    tfce_path = rand_dir / f"randomise_tfce_corrp_tstat{contrast_idx}.nii.gz"
-    grf_path = rand_dir / f"randomise_clustere_corrp_tstat{contrast_idx}.nii.gz"
-    fdr_path = rand_dir / f"randomise_fdr_corrp_tstat{contrast_idx}.nii.gz"
-    # Use the first available corrected map: TFCE > GRF > FDR
-    if tfce_path.exists():
-        corrp_path, corrp_label = tfce_path, "TFCE"
-    elif grf_path.exists():
-        corrp_path, corrp_label = grf_path, "GRF cluster"
-    elif fdr_path.exists():
-        corrp_path, corrp_label = fdr_path, "FDR (BH)"
+    # ── Resolve paths based on source ─────────────────────────────────────
+    if source == "lmm":
+        out_dir = measure_dir / "lmm_outputs"
+        tstat_path = out_dir / f"lmm_tstat{contrast_idx}.nii.gz"
+        corrp_cand = out_dir / f"lmm_cluster_corrp_tstat{contrast_idx}.nii.gz"
+        corrp_path = corrp_cand if corrp_cand.exists() else None
+        corrp_label = "GRF cluster (parametric)"
+        summary_json = out_dir / "lmm_summary.json"
     else:
-        corrp_path, corrp_label = None, ""
+        out_dir = measure_dir / "randomise_outputs"
+        tstat_path = out_dir / f"randomise_tstat{contrast_idx}.nii.gz"
+        tfce_path = out_dir / f"randomise_tfce_corrp_tstat{contrast_idx}.nii.gz"
+        grf_path = out_dir / f"randomise_clustere_corrp_tstat{contrast_idx}.nii.gz"
+        fdr_path = out_dir / f"randomise_fdr_corrp_tstat{contrast_idx}.nii.gz"
+        if tfce_path.exists():
+            corrp_path, corrp_label = tfce_path, "TFCE"
+        elif grf_path.exists():
+            corrp_path, corrp_label = grf_path, "GRF cluster"
+        elif fdr_path.exists():
+            corrp_path, corrp_label = fdr_path, "FDR (BH)"
+        else:
+            corrp_path, corrp_label = None, ""
+        summary_json = measure_dir / "stats_summary.json"
 
     if not tstat_path.exists():
         st.error(f"T-stat file not found: `{tstat_path}`")
@@ -291,7 +346,7 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
     else:
         st.warning("Could not render t-stat map.")
 
-    # ── Corrected p-value map (TFCE / GRF / FDR) ────────────────────────────
+    # ── Corrected p-value map ─────────────────────────────────────────────
     if corrp_path:
         st.markdown(f"**📊 {corrp_label} corrected p-values** (p < 0.05 threshold → 1 − p > 0.95)")
         corrp_mtime = corrp_path.stat().st_mtime
@@ -307,7 +362,7 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
         st.info("Corrected p-value map not found (analysis may still be running).")
 
     # ── Metadata ──────────────────────────────────────────────────────────
-    summary_path = rand_dir.parent / "stats_summary.json"
+    summary_path = summary_json
     if summary_path.exists():
         with st.expander("📄 Analysis metadata"):
             try:
