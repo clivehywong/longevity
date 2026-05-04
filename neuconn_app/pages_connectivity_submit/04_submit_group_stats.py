@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -376,6 +377,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                         summary = validator.summarize_validation(validation_df)
 
                         st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = summary
+                        st.session_state[f"{STATE_PREFIX}mixed_validation_df"] = validation_df
                         valid_count = summary.get("valid_count", 0)
                         total_count = summary.get("total_count", 0)
                         error_count = summary.get("error_count", 0)
@@ -398,7 +400,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                     except Exception as e:
                         st.error(f"Validation failed: {e}")
                         st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = False
-    
+
     with col_prev:
         if st.button("📊 Preview Design", key=f"{STATE_PREFIX}mixed_preview"):
             with st.spinner("Building design preview..."):
@@ -412,31 +414,66 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                     group_values = df["group"].astype(str).str.strip().str.lower()
                     control = sorted(df.loc[group_values == "control", "participant_id"].dropna().unique())
                     walking = sorted(df.loc[group_values == "walking", "participant_id"].dropna().unique())
-                    
+
                     builder = MixedDesignBuilder.from_paired_two_group(control, walking)
                     design_mat, _, _, _ = builder.build()
-                    
-                    st.info(f"""
-                    **Design Matrix:**
-                    - Shape: {design_mat.shape}
-                    - Rank: {int(np.linalg.matrix_rank(design_mat))}
-                    - Subjects: {len(control)} control, {len(walking)} walking
-                    - Sessions: 2 (pre/post)
-                    """)
-                    
-                    with st.expander("View sample rows"):
-                        st.dataframe(pd.DataFrame(design_mat[:5]))
-                    
+
+                    st.info(
+                        f"**Design Matrix:** shape {design_mat.shape}, "
+                        f"rank {int(np.linalg.matrix_rank(design_mat))}  \n"
+                        f"Subjects: {len(control)} control, {len(walking)} walking · 2 sessions (pre/post)"
+                    )
+
+                    col_names = (
+                        ["Time", "Group×Time"]
+                        + [f"subj_{i+1}" for i in range(len(control) + len(walking))]
+                    )
+                    with st.expander("View sample rows (first 6)"):
+                        st.dataframe(
+                            pd.DataFrame(design_mat[:6], columns=col_names[:design_mat.shape[1]]),
+                            use_container_width=True,
+                        )
+
                 except Exception as e:
                     st.error(f"Preview failed: {e}")
-    
-    # Show validation result if available
+
+    # Show validation result + per-subject breakdown
     if st.session_state.get(f"{STATE_PREFIX}mixed_validation_result"):
         val_result = st.session_state[f"{STATE_PREFIX}mixed_validation_result"]
-        st.metric(
-            "Validation Status",
-            f"{val_result.get('valid_count', 0)}/{val_result.get('total_count', 0)} zmaps",
-        )
+        valid_count = val_result.get("valid_count", 0)
+        total_count = val_result.get("total_count", 0)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Valid zmaps", valid_count)
+        c2.metric("Missing", val_result.get("missing_count", 0))
+        c3.metric("Total expected", total_count)
+
+        # Per-group breakdown
+        group_summary = val_result.get("group_summary", {})
+        if group_summary:
+            rows = [
+                {"Group": g, "Valid": v["valid"], "Missing": v["invalid"], "Total": v["total"]}
+                for g, v in group_summary.items()
+            ]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        # Per-subject table
+        val_df: pd.DataFrame | None = st.session_state.get(f"{STATE_PREFIX}mixed_validation_df")
+        if val_df is not None:
+            with st.expander(f"📋 Per-subject details ({valid_count} valid / {total_count} total)"):
+                display_df = val_df[["subject", "session", "group", "exists", "error"]].copy()
+                display_df["status"] = display_df["exists"].map(
+                    {True: "✅ valid", False: "❌ missing"}
+                )
+                display_df = display_df.drop(columns=["exists"])
+                st.dataframe(
+                    display_df.style.apply(
+                        lambda row: ["background-color: #ffeeba" if row["status"].startswith("❌") else "" for _ in row],
+                        axis=1,
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
     
     # ===== Section 5: Submit =====
     st.markdown("#### 📤 Section 5: Submit Analysis")
