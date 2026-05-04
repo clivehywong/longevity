@@ -100,13 +100,9 @@ def _build_contrast_options(csv_path: str) -> list[str]:
 
 
 def _load_seed_catalog(bids_root: str, pipeline: str) -> SeedCatalog | None:
-    """Load seed catalog from XCP-D outputs. Returns None if unavailable."""
+    """Load seed catalog from local XCP-D outputs."""
     try:
-        from utils.xcpd_outputs import XcpdDiscovery
-        disc = XcpdDiscovery(Path(bids_root), pipeline=pipeline)
-        if not hasattr(disc, "get_seed_catalog"):
-            return None
-        return disc.get_seed_catalog()
+        return SeedCatalog(Path(bids_root), xcpd_pipeline=pipeline)
     except Exception:
         return None
 
