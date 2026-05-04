@@ -793,18 +793,28 @@ def _parse_args(argv=None) -> argparse.Namespace:
 def main(argv=None) -> None:
     args = _parse_args(argv)
     measures = [m.strip() for m in args.measures.split(",") if m.strip()]
-    run(
-        bids_root=args.bids_root,
-        subject=args.subject,
-        session=args.session,
-        pipeline=args.pipeline,
-        seed_specs=args.seeds,
-        measures=measures,
-        bold_variant=args.bold_variant,
-        out_root=args.out_root,
-        tr=args.tr,
-        force=args.force,
-    )
+    try:
+        run(
+            bids_root=args.bids_root,
+            subject=args.subject,
+            session=args.session,
+            pipeline=args.pipeline,
+            seed_specs=args.seeds,
+            measures=measures,
+            bold_variant=args.bold_variant,
+            out_root=args.out_root,
+            tr=args.tr,
+            force=args.force,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if "No atlas timeseries available" in msg or "atlas timeseries" in msg.lower():
+            # XCP-D data is missing for this subject/session — skip gracefully
+            # so the SLURM task exits 0 (not failed) and the job shows Completed.
+            _LOG.warning("SKIP: %s — no XCP-D atlas data, skipping subject.", msg)
+            import sys as _sys
+            _sys.exit(0)
+        raise
 
 
 if __name__ == "__main__":

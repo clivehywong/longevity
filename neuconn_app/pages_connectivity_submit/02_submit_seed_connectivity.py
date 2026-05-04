@@ -16,6 +16,7 @@ Scripts are sourced from ``neuconn_app/scripts/connectivity/`` (symlinks to
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
@@ -157,21 +158,26 @@ def _run_local_preflight(
 
 def _run_hpc_preflight(
     bids_root: str, pipeline: str, subjects: list[str], config: dict
-) -> list[PreflightResult]:
-    """HPC-specific checks via SSH."""
+) -> tuple[list[PreflightResult], list[str]]:
+    """HPC-specific checks via SSH.
+
+    Returns (results, missing_xcpd_subjects) where missing_xcpd_subjects is the
+    list of subjects that have no atlas timeseries TSV data on HPC.
+    """
     results: list[PreflightResult] = []
+    missing_xcpd: list[str] = []
 
     try:
         from utils.hpc import HPCConfig, HPCConnection  # noqa: PLC0415
         hpc_cfg = HPCConfig.from_config(config)
     except Exception as exc:
-        return [PreflightResult("HPC config", "fail", f"Could not load HPC config: {exc}")]
+        return [PreflightResult("HPC config", "fail", f"Could not load HPC config: {exc}")], []
 
     if not hpc_cfg.host or not hpc_cfg.user:
         return [PreflightResult(
             "HPC config", "fail",
             "host or user not set — check longevity_config.yaml hpc section"
-        )]
+        )], []
     results.append(PreflightResult("HPC config", "pass", f"{hpc_cfg.user}@{hpc_cfg.host}"))
 
     remote_base = hpc_cfg.remote_base
@@ -179,14 +185,14 @@ def _run_hpc_preflight(
         return results + [PreflightResult(
             "HPC remote base", "fail",
             "remote_paths.base not configured"
-        )]
+        )], []
 
     conn = HPCConnection(hpc_cfg)
     try:
         conn.connect()
     except Exception as exc:
         results.append(PreflightResult("SSH connection", "fail", str(exc)))
-        return results
+        return results, []
     results.append(PreflightResult("SSH connection", "pass", f"Connected to {hpc_cfg.host}"))
 
     file_checks = [(name, f"{remote_base}/{remote_rel}")
@@ -223,23 +229,49 @@ def _run_hpc_preflight(
     except Exception as exc:
         results.append(PreflightResult(f"XCP-D outputs ({pipeline}) on HPC", "fail", str(exc)))
 
+    # ── Per-subject XCP-D atlas timeseries check ──────────────────────────
+    # Run a single batch SSH command that counts TSV files per subject in func/
+    # dirs, so we can identify subjects missing data without N round-trips.
     if subjects:
-        first_sub = subjects[0]
-        sub_dir = f"{xcpd_dir}/{first_sub}"
+        subs_arg = " ".join(subjects)
+        batch_cmd = (
+            f"for s in {subs_arg}; do "
+            f"  n=$(find {xcpd_dir}/$s -maxdepth 3 -name '*.tsv' -path '*/func/*' "
+            f"      2>/dev/null | wc -l); "
+            f"  echo $s:$n; "
+            f"done"
+        )
         try:
-            stdout, _, rc = conn.execute(f"test -d {sub_dir} && echo OK", timeout=15)
-            if rc == 0 and "OK" in stdout:
+            stdout, _, rc = conn.execute(batch_cmd, timeout=60)
+            counts: dict[str, int] = {}
+            for line in stdout.strip().splitlines():
+                line = line.strip()
+                if ":" in line:
+                    sub, n = line.rsplit(":", 1)
+                    try:
+                        counts[sub.strip()] = int(n.strip())
+                    except ValueError:
+                        pass
+            missing_xcpd = [s for s in subjects if counts.get(s, 0) == 0]
+            has_data = len(subjects) - len(missing_xcpd)
+            if not missing_xcpd:
                 results.append(PreflightResult(
-                    f"Subject data ({first_sub}) on HPC", "pass", sub_dir
+                    "XCP-D atlas timeseries on HPC",
+                    "pass",
+                    f"All {has_data} subject(s) have atlas TSV data on HPC"
                 ))
             else:
+                sample = ", ".join(missing_xcpd[:5]) + ("…" if len(missing_xcpd) > 5 else "")
                 results.append(PreflightResult(
-                    f"Subject data ({first_sub}) on HPC", "warn",
-                    f"Not found on HPC: {sub_dir}"
+                    "XCP-D atlas timeseries on HPC",
+                    "warn",
+                    f"{len(missing_xcpd)}/{len(subjects)} subjects lack atlas TSVs on HPC: "
+                    f"{sample} — upload their XCP-D data before submitting"
                 ))
         except Exception as exc:
             results.append(PreflightResult(
-                f"Subject data ({first_sub}) on HPC", "fail", str(exc)
+                "XCP-D atlas timeseries on HPC", "warn",
+                f"Could not check per-subject TSV data: {exc}"
             ))
 
     try:
@@ -247,7 +279,7 @@ def _run_hpc_preflight(
     except Exception:
         pass
 
-    return results
+    return results, missing_xcpd
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +335,64 @@ def _upload_static_files_to_hpc(
 
     return results
 
+
+def _upload_xcpd_subjects_to_hpc(
+    subjects: list[str], pipeline: str, bids_root: str, config: dict
+) -> list[UploadResult]:
+    """Rsync XCP-D derivatives for *subjects* from local to HPC.
+
+    Uploads the full ``derivatives/preprocessing/xcpd/<pipeline>/<subject>/``
+    tree for each subject that is missing on HPC.  Uses a single rsync process
+    per subject so progress is easy to track.
+    """
+    from utils.hpc import HPCConfig  # noqa: PLC0415
+
+    hpc_cfg = HPCConfig.from_config(config)
+    root = Path(bids_root)
+    results: list[UploadResult] = []
+
+    ssh_opts = (
+        f"ssh -p {hpc_cfg.port}"
+        " -o StrictHostKeyChecking=no"
+        " -o ServerAliveInterval=60"
+        " -o ServerAliveCountMax=10"
+    )
+    remote_xcpd = (
+        f"{hpc_cfg.user}@{hpc_cfg.host}:"
+        f"{hpc_cfg.remote_base}/derivatives/preprocessing/xcpd/{pipeline}"
+    )
+
+    for subject in subjects:
+        local_xcpd = root / "derivatives" / "preprocessing" / "xcpd" / pipeline / subject
+        if not local_xcpd.exists():
+            results.append(UploadResult(
+                subject, "error", f"Local XCP-D directory not found: {local_xcpd}"
+            ))
+            continue
+
+        cmd = [
+            "rsync", "-avz", "--mkpath",
+            "-e", ssh_opts,
+            f"{local_xcpd}/",
+            f"{remote_xcpd}/{subject}/",
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if proc.returncode == 0:
+                results.append(UploadResult(subject, "ok", f"→ {remote_xcpd}/{subject}/"))
+            else:
+                results.append(UploadResult(
+                    subject, "error",
+                    proc.stderr.strip()[:300] or proc.stdout.strip()[:300]
+                ))
+        except subprocess.TimeoutExpired:
+            results.append(UploadResult(subject, "error", "Timeout after 10 min"))
+        except Exception as exc:
+            results.append(UploadResult(subject, "error", str(exc)))
+
+    return results
+
+
 def _render_preflight_section(
     bids_root: str,
     pipeline: str,
@@ -330,12 +420,15 @@ def _render_preflight_section(
 
     def _run_and_store() -> list[dict]:
         raw = _run_local_preflight(bids_root, pipeline, subjects)
+        missing_xcpd: list[str] = []
         if not is_local:
-            raw += _run_hpc_preflight(bids_root, pipeline, subjects, config)
+            hpc_results, missing_xcpd = _run_hpc_preflight(bids_root, pipeline, subjects, config)
+            raw += hpc_results
         result = [{"name": r.name, "status": r.status, "detail": r.detail} for r in raw]
         st.session_state[f"{STATE_PREFIX}preflight_results"] = result
         st.session_state[f"{STATE_PREFIX}preflight_pipeline"] = pipeline
         st.session_state[f"{STATE_PREFIX}preflight_is_local"] = is_local
+        st.session_state[f"{STATE_PREFIX}hpc_missing_xcpd"] = missing_xcpd
         return result
 
     if st.button("Run pre-flight checks", key=f"{STATE_PREFIX}preflight_btn"):
@@ -402,6 +495,73 @@ def _render_preflight_section(
                     st.rerun()
                 else:
                     st.error(f"{n_err} file(s) failed to upload — check errors above.")
+
+        # ── Upload missing XCP-D subject data (HPC mode only) ────────────
+        missing_xcpd: list[str] = st.session_state.get(f"{STATE_PREFIX}hpc_missing_xcpd", [])
+        if missing_xcpd:
+            with st.expander(
+                f"📤 Upload missing XCP-D data to HPC ({len(missing_xcpd)} subjects) ← required",
+                expanded=True,
+            ):
+                st.caption(
+                    "The following subjects have no atlas timeseries TSV data on HPC. "
+                    "Upload their local XCP-D derivatives so the SLURM job can process them."
+                )
+                root = Path(bids_root)
+                local_xcpd_base = root / "derivatives" / "preprocessing" / "xcpd" / pipeline
+                rows = []
+                for sub in missing_xcpd:
+                    local_path = local_xcpd_base / sub
+                    has_local = local_path.exists() and any(local_path.rglob("*.tsv"))
+                    rows.append(
+                        f"{'✅' if has_local else '❌'} **{sub}** — "
+                        f"{'local data available' if has_local else 'no local XCP-D data either'}"
+                    )
+                st.markdown("\n\n".join(rows))
+
+                uploadable = [
+                    s for s in missing_xcpd
+                    if (local_xcpd_base / s).exists()
+                    and any((local_xcpd_base / s).rglob("*.tsv"))
+                ]
+                if not uploadable:
+                    st.warning(
+                        "None of the missing subjects have local XCP-D data to upload. "
+                        "Run XCP-D locally first, then return here."
+                    )
+                else:
+                    if st.button(
+                        f"📤 Upload {len(uploadable)} subject(s) to HPC",
+                        key=f"{STATE_PREFIX}upload_xcpd_btn",
+                        type="primary",
+                    ):
+                        progress = st.progress(0.0, text="Starting upload…")
+                        upload_results = []
+                        for i, sub in enumerate(uploadable):
+                            progress.progress(
+                                i / len(uploadable), text=f"Uploading {sub}…"
+                            )
+                            res = _upload_xcpd_subjects_to_hpc(
+                                [sub], pipeline, bids_root, config
+                            )
+                            upload_results.extend(res)
+                        progress.progress(1.0, text="Done")
+                        n_ok = sum(1 for r in upload_results if r.status == "ok")
+                        n_err = sum(1 for r in upload_results if r.status == "error")
+                        for r in upload_results:
+                            if r.status == "ok":
+                                st.success(f"✅ {r.name} — {r.detail}")
+                            else:
+                                st.error(f"❌ {r.name} — {r.detail}")
+                        if n_err == 0:
+                            st.success(
+                                f"Uploaded {n_ok} subject(s). Re-running pre-flight checks…"
+                            )
+                            with st.spinner("Re-checking…"):
+                                cached = _run_and_store()
+                            st.rerun()
+                        else:
+                            st.error(f"{n_err} subject(s) failed — check errors above.")
 
     return n_fail == 0
 
