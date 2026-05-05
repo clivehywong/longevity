@@ -361,7 +361,7 @@ def render_fmri_analysis():
         # Level 3: Analysis type — submit page is always accessible; viewer pages are gate-locked
         analysis = st.sidebar.selectbox(
             "Analysis:",
-            ["📤 Submit Group Statistics", "🗺️ Group Seed Viewer", "Voxelwise", "ROI Analysis", "Graph Theory", "Visualization"]
+            ["📤 Submit Group Statistics", "🗺️ Group Results Viewer", "📊 Results Summary", "Voxelwise", "ROI Analysis", "Graph Theory", "Visualization"]
         )
 
         import importlib.util
@@ -373,9 +373,16 @@ def render_fmri_analysis():
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             module.render()
-        elif analysis == "🗺️ Group Seed Viewer":
+        elif analysis == "🗺️ Group Results Viewer":
             page_path = Path(__file__).parent / "pages_connectivity" / "03_Group_Seed_Connectivity.py"
             module_name = "conn_group_seed_viewer"
+            spec = importlib.util.spec_from_file_location(module_name, page_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.render()
+        elif analysis == "📊 Results Summary":
+            page_path = Path(__file__).parent / "pages_connectivity" / "04_Group_Results_Summary.py"
+            module_name = "conn_group_results_summary"
             spec = importlib.util.spec_from_file_location(module_name, page_path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
