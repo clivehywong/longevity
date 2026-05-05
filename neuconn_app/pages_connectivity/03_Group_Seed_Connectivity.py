@@ -24,11 +24,23 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.connectivity_viewer import pipeline_picker
 from utils.seed_viz import cli_token_to_seed_dir_name
+
+try:
+    from utils.group_cluster_analysis import (
+        ClusterResult,
+        fsl_available,
+        run_grf_cluster,
+        run_tfce_cluster,
+    )
+    _HAS_CLUSTER_UTILS = True
+except ImportError:
+    _HAS_CLUSTER_UTILS = False
 
 PAGE_KEY = "group_seed"
 
@@ -161,6 +173,34 @@ def _render_stat_map_png(
         return buf.read()
     except Exception:
         plt.close("all")
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _render_interactive_viewer_html(
+    nifti_path_str: str,
+    mtime: float,
+    threshold: float,
+    vmax: float,
+    title: str,
+    cmap: str = "cold_hot",
+) -> str | None:
+    """Render interactive nilearn view_img HTML. Returns HTML string or None on failure."""
+    from nilearn import plotting  # noqa: PLC0415
+
+    try:
+        view = plotting.view_img(
+            nifti_path_str,
+            threshold=threshold,
+            vmax=vmax,
+            bg_img="MNI152",
+            colorbar=True,
+            title=title,
+            cmap=cmap,
+            symmetric_cmap=True,
+        )
+        return view._repr_html_()
+    except Exception:
         return None
 
 
@@ -334,19 +374,21 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
             key=f"{PAGE_KEY}_vmax",
         )
 
-    # ── T-stat map ────────────────────────────────────────────────────────
+    # ── T-stat map (interactive nilearn viewer) ───────────────────────────
     st.markdown(f"**🧠 T-statistic map** — contrast #{contrast_idx}: {contrast_opts[contrast_idx]}")
     tstat_mtime = tstat_path.stat().st_mtime
-    png_t = _render_stat_map_png(
-        str(tstat_path), tstat_mtime, threshold=thr, vmax=vmax_t,
-        cmap="cold_hot", title=f"tstat{contrast_idx}  [{seed_dir}  ·  {measure}]",
+    html_t = _render_interactive_viewer_html(
+        str(tstat_path), tstat_mtime,
+        threshold=thr, vmax=vmax_t,
+        title=f"tstat{contrast_idx}  [{seed_dir}  ·  {measure}]",
+        cmap="cold_hot",
     )
-    if png_t:
-        st.image(png_t, use_container_width=True)
+    if html_t:
+        components.html(html_t, height=500, scrolling=False)
     else:
-        st.warning("Could not render t-stat map.")
+        st.warning("Could not render interactive t-stat map.")
 
-    # ── Corrected p-value map ─────────────────────────────────────────────
+    # ── Corrected p-value map (static PNG) ───────────────────────────────
     if corrp_path:
         st.markdown(f"**📊 {corrp_label} corrected p-values** (p < 0.05 threshold → 1 − p > 0.95)")
         corrp_mtime = corrp_path.stat().st_mtime
@@ -361,6 +403,134 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
     else:
         st.info("Corrected p-value map not found (analysis may still be running).")
 
+    # ── Cluster Analysis ──────────────────────────────────────────────────
+    st.markdown("#### 📊 Cluster Analysis")
+
+    if not _HAS_CLUSTER_UTILS:
+        st.warning("Cluster utilities not available (import error in group_cluster_analysis).")
+    else:
+        use_tfce_controls = corrp_label in ("TFCE", "GRF cluster (parametric)")
+        cluster_key = (
+            f"{PAGE_KEY}_cluster_result_{source}_{seed_dir}_{measure}_{contrast_idx}"
+        )
+
+        if use_tfce_controls:
+            col_c1, col_c2, col_c3 = st.columns(3)
+            with col_c1:
+                corrp_thr_preset = st.selectbox(
+                    "Corrp threshold",
+                    ["0.95 (p<0.05)", "0.99 (p<0.01)", "Custom"],
+                    key=f"{PAGE_KEY}_cluster_corrp_preset",
+                )
+                if corrp_thr_preset == "Custom":
+                    corrp_thr = st.number_input(
+                        "Custom corrp threshold",
+                        min_value=0.0, max_value=1.0, value=0.95, step=0.01,
+                        key=f"{PAGE_KEY}_cluster_corrp_custom",
+                    )
+                else:
+                    corrp_thr = 0.99 if "0.99" in corrp_thr_preset else 0.95
+            with col_c2:
+                cz_raw = st.number_input(
+                    "Cluster Z threshold (0 = auto-detect)",
+                    min_value=0.0, max_value=10.0, value=0.0, step=0.1,
+                    key=f"{PAGE_KEY}_cluster_cz_thr",
+                )
+                cluster_z_thr: float | None = None if cz_raw <= 0.0 else cz_raw
+            with col_c3:
+                k_tfce = int(st.number_input(
+                    "Min cluster voxels", min_value=1, value=50,
+                    key=f"{PAGE_KEY}_cluster_k_tfce",
+                ))
+        else:
+            col_g1, col_g2, col_g3 = st.columns(3)
+            with col_g1:
+                z_thr = st.number_input(
+                    "Z threshold", min_value=0.0, max_value=10.0, value=2.3, step=0.1,
+                    key=f"{PAGE_KEY}_cluster_z_thr",
+                )
+            with col_g2:
+                p_thr = st.number_input(
+                    "FWE p threshold",
+                    min_value=0.001, max_value=0.1, value=0.05, step=0.01,
+                    key=f"{PAGE_KEY}_cluster_p_thr",
+                )
+            with col_g3:
+                k_grf = int(st.number_input(
+                    "Min cluster voxels", min_value=1, value=1,
+                    key=f"{PAGE_KEY}_cluster_k_grf",
+                ))
+
+            col_sm, col_tail = st.columns(2)
+            with col_sm:
+                smoothness_raw = st.radio(
+                    "Smoothness estimation",
+                    ["From z-stat (recommended)", "From residuals (res4d/dof)"],
+                    key=f"{PAGE_KEY}_cluster_smoothness",
+                )
+                smoothness = "z" if "z-stat" in smoothness_raw else "r"
+            with col_tail:
+                tail_raw = st.radio(
+                    "Tail",
+                    ["Both (pos + neg)", "Positive only", "Negative only"],
+                    key=f"{PAGE_KEY}_cluster_tail",
+                )
+                match tail_raw:
+                    case "Positive only":
+                        tail = "pos"
+                    case "Negative only":
+                        tail = "neg"
+                    case _:
+                        tail = "both"
+
+        if st.button("🔍 Run Cluster Analysis", key=f"{PAGE_KEY}_run_cluster"):
+            mask_path = (
+                bids_root / "atlases"
+                / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"
+            )
+            if not mask_path.exists():
+                import os  # noqa: PLC0415
+                fsl_dir = os.environ.get("FSLDIR", "")
+                if fsl_dir:
+                    mask_path = (
+                        Path(fsl_dir) / "data" / "standard"
+                        / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
+                    )
+
+            cluster_out_dir = out_dir / "cluster_analysis" / f"contrast{contrast_idx}"
+
+            if use_tfce_controls:
+                with st.spinner("Running TFCE cluster analysis…"):
+                    result = run_tfce_cluster(
+                        corrp_path=corrp_path,
+                        tstat_path=tstat_path,
+                        out_dir=cluster_out_dir,
+                        corrp_thr=corrp_thr,
+                        cluster_z_thr=cluster_z_thr,
+                        k=k_tfce,
+                    )
+            else:
+                with st.spinner("Running GRF cluster analysis…"):
+                    result = run_grf_cluster(
+                        tstat_path=tstat_path,
+                        mask_path=mask_path,
+                        out_dir=cluster_out_dir,
+                        z_thr=z_thr,
+                        p_thr=p_thr,
+                        k=k_grf,
+                        smoothness=smoothness,
+                        tail=tail,
+                    )
+            st.session_state[cluster_key] = result
+
+        # Show cached cluster result
+        if cluster_key in st.session_state:
+            result: ClusterResult = st.session_state[cluster_key]
+            if result.error:
+                st.error(f"Cluster analysis error: {result.error}")
+            else:
+                _render_cluster_tables(result)
+
     # ── Metadata ──────────────────────────────────────────────────────────
     summary_path = summary_json
     if summary_path.exists():
@@ -370,6 +540,55 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
                 st.json(meta)
             except Exception:
                 st.text(summary_path.read_text()[:2000])
+
+
+# ============================================================================
+# Cluster result display
+# ============================================================================
+
+def _render_cluster_tables(result: "ClusterResult") -> None:  # noqa: F821
+    """Display cluster result tables with NeuroSynth links."""
+    _TAIL_LABELS = {"pos": "Activation (positive)", "neg": "Deactivation (negative)"}
+
+    for tail_key, df in result.tables.items():
+        label = _TAIL_LABELS.get(tail_key, tail_key.capitalize())
+        st.markdown(f"**{label}**")
+
+        if df.empty:
+            st.info("No significant clusters")
+            continue
+
+        # Add NeuroSynth link column from peak coordinates
+        if {"X(mm)", "Y(mm)", "Z(mm)"}.issubset(df.columns):
+            df = df.copy()
+            df["NeuroSynth"] = df.apply(
+                lambda r: (
+                    f"https://neurosynth.org/locations/"
+                    f"{int(r['X(mm)'])}_{int(r['Y(mm)'])}_{int(r['Z(mm)'])}_6/"
+                ),
+                axis=1,
+            )
+
+        # Build column config
+        col_cfg: dict = {}
+        if "Cluster" in df.columns:
+            col_cfg["Cluster"] = st.column_config.NumberColumn("Cluster", width="small", format="%d")
+        if "Voxels" in df.columns:
+            col_cfg["Voxels"] = st.column_config.NumberColumn("Voxels", width="small", format="%d")
+        for p_col in ("p(FWE)", "p"):
+            if p_col in df.columns:
+                col_cfg[p_col] = st.column_config.NumberColumn(p_col, format="%.4f")
+        if "Peak Z" in df.columns:
+            col_cfg["Peak Z"] = st.column_config.NumberColumn("Peak Z", format="%.2f")
+        for coord in ("X(mm)", "Y(mm)", "Z(mm)"):
+            if coord in df.columns:
+                col_cfg[coord] = st.column_config.NumberColumn(coord, format="%.1f")
+        if "NeuroSynth" in df.columns:
+            col_cfg["NeuroSynth"] = st.column_config.LinkColumn(
+                "NeuroSynth", display_text="🔗 View"
+            )
+
+        st.dataframe(df, use_container_width=True, hide_index=True, column_config=col_cfg)
 
 
 # ============================================================================
