@@ -901,21 +901,7 @@ def _render_autorun_section(df: pd.DataFrame, bids_root: Path) -> None:
             st.rerun()
 
     with col_dl:
-        results_available = any(
-            f"{PAGE_KEY}_cluster_{row['_row_id']}" in st.session_state
-            for _, row in eligible.iterrows()
-        )
-        if results_available:
-            if st.button("📥 Generate HTML Report", key=f"{PAGE_KEY}_gen_html"):
-                with st.spinner("Generating report…"):
-                    html = _generate_html_report(df, bids_root)
-                st.download_button(
-                    "⬇️ Download Report",
-                    data=html.encode("utf-8"),
-                    file_name=f"group_results_report_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
-                    mime="text/html",
-                    key=f"{PAGE_KEY}_dl_html",
-                )
+        st.caption("HTML report available below after selecting analyses.")
 
 
 def _img_to_b64(png_bytes: Optional[bytes]) -> str:
@@ -974,20 +960,25 @@ def _render_cluster_mean_plot_png(df: pd.DataFrame, title: str) -> Optional[byte
         return None
 
 
-def _generate_html_report(df: pd.DataFrame, bids_root: Path) -> str:
-    """Generate a self-contained HTML report with all images embedded as base64."""
-    pipeline = df["pipeline"].iloc[0] if "pipeline" in df.columns and not df.empty else "unknown"
+def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path) -> str:
+    """Generate a self-contained HTML report for selected rows with significant clusters."""
+    pipeline = selected_rows["pipeline"].iloc[0] if "pipeline" in selected_rows.columns and not selected_rows.empty else "unknown"
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    needs_run = df.get("needs_cluster_run", df["significant"])
     rows_with_results = []
-    for _, row in df[df["significant"] | needs_run].iterrows():
+    for _, row in selected_rows.iterrows():
         state_key = f"{PAGE_KEY}_cluster_{row['_row_id']}"
         result = st.session_state.get(state_key)
         if result is None:
             result = _load_cluster_from_disk(row)
+        # Only include rows with non-empty cluster tables (actual significant clusters)
         if result is not None and not result.error:
-            rows_with_results.append((row, result))
+            has_clusters = any(
+                t is not None and not t.empty
+                for t in result.tables.values()
+            )
+            if has_clusters:
+                rows_with_results.append((row, result))
 
     css = """
     body{font-family:Arial,sans-serif;max-width:1400px;margin:auto;padding:20px;background:#fff;color:#333}
@@ -1303,6 +1294,25 @@ def render() -> None:
     if selected_rows.empty:
         st.info("No analyses selected. Check 'Include' boxes above to view results.")
         return
+
+    # ── HTML report button (uses selected_rows, filters to non-empty clusters) ─
+    results_available = any(
+        f"{PAGE_KEY}_cluster_{row['_row_id']}" in st.session_state
+        or _load_cluster_from_disk(row) is not None
+        for _, row in selected_rows.iterrows()
+    )
+    if results_available:
+        if st.button("📥 Generate HTML Report", key=f"{PAGE_KEY}_gen_html",
+                     help="Generates a report for selected analyses with significant clusters only."):
+            with st.spinner("Generating report…"):
+                html = _generate_html_report(selected_rows, bids_root)
+            st.download_button(
+                "⬇️ Download Report",
+                data=html.encode("utf-8"),
+                file_name=f"group_results_report_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+                mime="text/html",
+                key=f"{PAGE_KEY}_dl_html",
+            )
 
     st.markdown(f"### Results ({len(selected_rows)} selected)")
 
