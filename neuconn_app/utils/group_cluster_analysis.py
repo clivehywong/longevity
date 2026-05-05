@@ -254,6 +254,8 @@ def run_tfce_cluster(
     """
     if not fsl_available():
         return ClusterResult(error="FSL not available")
+    if corrp_path is None or not Path(corrp_path).exists():
+        return ClusterResult(error=f"Corrp file not found: {corrp_path}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
 

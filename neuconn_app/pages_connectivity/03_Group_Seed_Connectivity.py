@@ -409,7 +409,7 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
     if not _HAS_CLUSTER_UTILS:
         st.warning("Cluster utilities not available (import error in group_cluster_analysis).")
     else:
-        use_tfce_controls = corrp_label in ("TFCE", "GRF cluster (parametric)")
+        use_tfce_controls = corrp_label in ("TFCE", "GRF cluster (parametric)") and corrp_path is not None
         cluster_key = (
             f"{PAGE_KEY}_cluster_result_{source}_{seed_dir}_{measure}_{contrast_idx}"
         )
@@ -486,7 +486,7 @@ def _render_viewer(bids_root: Path, pipeline: str) -> None:
         if st.button("🔍 Run Cluster Analysis", key=f"{PAGE_KEY}_run_cluster"):
             mask_path = (
                 bids_root / "atlases"
-                / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"
+                / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
             )
             if not mask_path.exists():
                 import os  # noqa: PLC0415
