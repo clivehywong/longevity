@@ -84,7 +84,7 @@ def _parse_smoothest(stdout: str) -> dict | None:
 
 @functools.lru_cache(maxsize=512)
 def query_atlasq_label(x: int, y: int, z: int) -> str:
-    """Query atlas label for a single MNI coordinate. Uses batch internally; lru_cached."""
+    """Query atlas label for a single MNI coordinate (coordinate-based, lru_cached)."""
     results = query_atlasq_labels_batch(((x, y, z),))
     return results[0] if results else "Unknown"
 
@@ -92,58 +92,153 @@ def query_atlasq_label(x: int, y: int, z: int) -> str:
 def query_atlasq_labels_batch(
     coords: tuple[tuple[int, int, int], ...] | list[tuple[int, int, int]],
 ) -> list[str]:
-    """Query anatomical labels for multiple MNI coordinates in two batch calls.
-
-    Strategy:
-      1. Run AAL3v1 for all coords in one call (~0.8s for any N).
-      2. For any coord that returned 'NA', run Harvard-Oxford Cortical for just those.
-
-    Returns a list of label strings, one per input coordinate.
-    """
+    """Coordinate-based fallback: query top label per coord via AAL3v1 + HO Cortical."""
     coords = list(coords)
     if not coords:
         return []
 
     labels = ["NA"] * len(coords)
 
-    def _batch_query(atlas: str, idxs: list[int]) -> list[str]:
+    def _coord_batch(atlas: str, idxs: list[int]) -> list[str]:
         args = ["atlasq", "query", atlas, "-s"]
         for i in idxs:
             x, y, z = coords[i]
             args += ["-c", str(x), str(y), str(z)]
         try:
             r = subprocess.run(args, capture_output=True, text=True, timeout=300)
-            out_labels = []
+            out = []
             for line in r.stdout.strip().splitlines():
                 parts = line.split("\t")
                 if len(parts) >= 3:
-                    # "RegionName probability" — strip trailing number
                     region = re.sub(r"\s+[\d.]+$", "", parts[2]).strip()
-                    out_labels.append(region if region else "NA")
+                    out.append(region if region else "NA")
                 else:
-                    out_labels.append("NA")
-            # Pad/trim to match requested count
-            while len(out_labels) < len(idxs):
-                out_labels.append("NA")
-            return out_labels[:len(idxs)]
+                    out.append("NA")
+            while len(out) < len(idxs):
+                out.append("NA")
+            return out[:len(idxs)]
         except Exception:
             return ["Unknown"] * len(idxs)
 
-    all_idxs = list(range(len(coords)))
-
-    # Pass 1: AAL3v1 (very fast ~0.8s for any N)
-    aal_labels = _batch_query("AAL3v1", all_idxs)
-    for i, lbl in enumerate(aal_labels):
+    aal = _coord_batch("AAL3v1", list(range(len(coords))))
+    for i, lbl in enumerate(aal):
         labels[i] = lbl
-
-    # Pass 2: Harvard-Oxford Cortical for coords that returned NA
     na_idxs = [i for i, lbl in enumerate(labels) if lbl == "NA"]
     if na_idxs:
-        ho_labels = _batch_query("Harvard-Oxford Cortical Structural Atlas", na_idxs)
-        for i, lbl in zip(na_idxs, ho_labels):
+        ho = _coord_batch("Harvard-Oxford Cortical Structural Atlas", na_idxs)
+        for i, lbl in zip(na_idxs, ho):
             labels[i] = lbl if lbl != "NA" else "Unknown"
-
     return labels
+
+
+def _find_atlas_space() -> tuple[Path | None, list | None]:
+    """Return (atlas_nifti_path, affine) for AAL3v1 at 2mm, or None if not found."""
+    import os
+    fsldir = os.environ.get("FSLDIR", "/home/clivewong/fsl")
+    candidate = Path(fsldir) / "data" / "atlases" / "AAL3" / "AAL3v1.nii.gz"
+    if candidate.exists():
+        try:
+            import nibabel as nib
+            img = nib.load(str(candidate))
+            return candidate, img.affine
+        except Exception:
+            pass
+    return None, None
+
+
+def query_atlasq_labels_by_mask(
+    cluster_index_path: Path,
+    cluster_ids: list[int],
+    top_n: int = 3,
+) -> list[str]:
+    """Query anatomical labels for clusters using mask-based atlasq query.
+
+    For each cluster ID, extracts a binary mask from cluster_index_path, then
+    queries AAL3v1 (and HO Cortical fallback for all-NA results) in a single
+    batch call. Returns top_n non-NA region names joined by ' / ' for each cluster.
+
+    The cluster image is assumed to be in MNI RAS space (fMRIPrep/XCP-D standard).
+    Masks are x-flipped to match the FSL atlas radiological convention before querying.
+    """
+    import tempfile, shutil
+    try:
+        import nibabel as nib
+        import numpy as np
+    except ImportError:
+        return ["Unknown"] * len(cluster_ids)
+
+    if not cluster_ids:
+        return []
+
+    _, atlas_affine = _find_atlas_space()
+    if atlas_affine is None:
+        return query_atlasq_labels_batch(
+            [(0, 0, 0)] * len(cluster_ids)  # fallback: coordinate at origin
+        )
+
+    # Load cluster index
+    try:
+        ci_img = nib.load(str(cluster_index_path))
+        ci_data = np.asanyarray(ci_img.dataobj)
+    except Exception:
+        return ["Unknown"] * len(cluster_ids)
+
+    tmpdir = tempfile.mkdtemp(prefix="atlasq_masks_")
+    mask_paths: list[str] = []
+    try:
+        for cid in cluster_ids:
+            mask_data = (ci_data == cid).astype(np.uint8)
+            # x-flip to match FSL atlas radiological convention
+            mask_data = mask_data[::-1, :, :]
+            mask_img = nib.Nifti1Image(mask_data, atlas_affine)
+            p = str(Path(tmpdir) / f"cluster_{cid}.nii.gz")
+            nib.save(mask_img, p)
+            mask_paths.append(p)
+
+        def _mask_batch(atlas: str, idxs: list[int]) -> list[list[str]]:
+            """Run atlasq for selected mask indices; return list of label lists."""
+            args = ["atlasq", "query", atlas, "-s"]
+            for i in idxs:
+                args += ["-m", mask_paths[i]]
+            try:
+                r = subprocess.run(args, capture_output=True, text=True, timeout=300)
+                results = []
+                for line in r.stdout.strip().splitlines():
+                    parts = line.split("\t")
+                    region_labels = []
+                    for part in parts[2:]:
+                        part = part.strip()
+                        if not part:
+                            continue
+                        name = re.sub(r"\s+[\d.]+$", "", part).strip()
+                        if name and name != "NA":
+                            region_labels.append(name)
+                            if len(region_labels) >= top_n:
+                                break
+                    results.append(region_labels)
+                while len(results) < len(idxs):
+                    results.append([])
+                return results[:len(idxs)]
+            except Exception:
+                return [[] for _ in idxs]
+
+        all_idxs = list(range(len(cluster_ids)))
+
+        # Pass 1: AAL3v1 (fast — ~1.3s for 84 masks)
+        aal_results = _mask_batch("AAL3v1", all_idxs)
+
+        # Pass 2: HO Cortical fallback for clusters with no AAL3v1 labels
+        na_idxs = [i for i, lbls in enumerate(aal_results) if not lbls]
+        if na_idxs:
+            ho_results = _mask_batch("Harvard-Oxford Cortical Structural Atlas", na_idxs)
+            for pos, i in enumerate(na_idxs):
+                if ho_results[pos]:
+                    aal_results[i] = ho_results[pos]
+
+        return [" / ".join(lbls) if lbls else "Unknown" for lbls in aal_results]
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def parse_cluster_table(txt_path: Path) -> pd.DataFrame:

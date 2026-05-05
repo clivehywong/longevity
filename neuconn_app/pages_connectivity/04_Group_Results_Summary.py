@@ -517,20 +517,24 @@ def _extract_single_cluster_means(
 def _labels_cache_path(row: pd.Series, tail: str) -> Path:
     """Return disk-cache path for labeled cluster CSV."""
     out_dir = Path(row["out_dir"]) / "cluster_analysis" / f"contrast{int(row['contrast_idx'])}"
-    prefix = "lmm" if row["source"] == "lmm" else f"grf_{tail}" if tail != "pos" or row["source"] != "lmm" else "lmm"
     if row["source"] == "lmm":
         return out_dir / "lmm_cluster_labeled.csv"
     else:
         return out_dir / f"{tail}_cluster_labeled.csv"
 
 
-def _add_atlasq_labels(df: pd.DataFrame, cache_path: Optional[Path] = None) -> pd.DataFrame:
-    """Add 'Label' column using AAL3v1 (fast batch) with Harvard-Oxford fallback for NAs.
+def _add_atlasq_labels(
+    df: pd.DataFrame,
+    cache_path: Optional[Path] = None,
+    cluster_index_path: Optional[Path] = None,
+) -> pd.DataFrame:
+    """Add 'Label' column using mask-based atlasq (AAL3v1 + HO fallback, top 3 regions).
 
-    If cache_path is provided, loads from CSV if it exists; otherwise queries atlasq
-    and saves the result to cache_path for subsequent renders.
+    Prefers mask-based querying (more accurate than peak coordinate) when
+    cluster_index_path is provided. Falls back to coordinate-based batch query.
+    Loads from / saves to cache_path (CSV) to avoid re-running atlasq.
     """
-    from utils.group_cluster_analysis import query_atlasq_labels_batch
+    from utils.group_cluster_analysis import query_atlasq_labels_by_mask, query_atlasq_labels_batch
     if df.empty:
         return df
     if "Label" in df.columns:
@@ -546,11 +550,17 @@ def _add_atlasq_labels(df: pd.DataFrame, cache_path: Optional[Path] = None) -> p
         except Exception:
             pass
 
-    coords = [
-        (int(round(r.get("X(mm)", 0))), int(round(r.get("Y(mm)", 0))), int(round(r.get("Z(mm)", 0))))
-        for _, r in df.iterrows()
-    ]
-    labels = query_atlasq_labels_batch(tuple(coords))
+    # Prefer mask-based query when cluster index is available
+    if cluster_index_path and cluster_index_path.exists() and "Cluster" in df.columns:
+        cluster_ids = [int(c) for c in df["Cluster"]]
+        labels = query_atlasq_labels_by_mask(cluster_index_path, cluster_ids, top_n=3)
+    else:
+        coords = tuple(
+            (int(round(r.get("X(mm)", 0))), int(round(r.get("Y(mm)", 0))), int(round(r.get("Z(mm)", 0))))
+            for _, r in df.iterrows()
+        )
+        labels = query_atlasq_labels_batch(coords)
+
     df = df.copy()
     df["Label"] = labels
 
@@ -790,17 +800,23 @@ def _render_cluster_details(
 
         st.markdown(f"**{tail_name.capitalize()} clusters** — {len(tdf)} clusters")
 
+        ci_path = result.cluster_img.get(tail_name)
+        ci_path = Path(str(ci_path)) if ci_path else None
         cache_path = _labels_cache_path(row, tail_name)
+
         if "Label" not in tdf.columns:
             if not cache_path.exists():
-                # Labels not cached yet — don't block page render; let user trigger explicitly
+                # Labels not cached yet — let user trigger explicitly (avoids blocking rerun)
                 if st.button(
                     "🔍 Load atlas labels",
                     key=f"{PAGE_KEY}_labels_{row_id}_{tail_name}",
-                    help="Query AAL3v1 + Harvard-Oxford for peak coordinates (~5–10s). Cached to disk afterwards.",
+                    help="Query AAL3v1 (mask-based, top 3 regions) with HO Cortical fallback. "
+                         "Result cached to disk — instant on next open.",
                 ):
-                    with st.spinner("Querying atlas labels (AAL3v1 + Harvard-Oxford)…"):
-                        tdf_labeled = _add_atlasq_labels(tdf, cache_path=cache_path)
+                    with st.spinner("Querying atlas labels (AAL3v1 mask-based + Harvard-Oxford)…"):
+                        tdf_labeled = _add_atlasq_labels(
+                            tdf, cache_path=cache_path, cluster_index_path=ci_path
+                        )
                     state_key = f"{PAGE_KEY}_cluster_{row_id}"
                     if state_key in st.session_state:
                         st.session_state[state_key].tables[tail_name] = tdf_labeled
@@ -810,7 +826,9 @@ def _render_cluster_details(
                     tdf_labeled["Label"] = "—"
             else:
                 # Cache on disk — load instantly, no subprocess
-                tdf_labeled = _add_atlasq_labels(tdf, cache_path=cache_path)
+                tdf_labeled = _add_atlasq_labels(
+                    tdf, cache_path=cache_path, cluster_index_path=ci_path
+                )
                 state_key = f"{PAGE_KEY}_cluster_{row_id}"
                 if state_key in st.session_state:
                     st.session_state[state_key].tables[tail_name] = tdf_labeled
@@ -1150,7 +1168,10 @@ def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path,
 
             try:
                 cache_path = _labels_cache_path(row, tail_name)
-                tdf_labeled = _add_atlasq_labels(tdf, cache_path=cache_path)
+                ci_path = Path(cluster_index_path) if cluster_index_path else None
+                tdf_labeled = _add_atlasq_labels(
+                    tdf, cache_path=cache_path, cluster_index_path=ci_path
+                )
             except Exception:
                 tdf_labeled = tdf.copy()
                 tdf_labeled["Label"] = "Unknown"
