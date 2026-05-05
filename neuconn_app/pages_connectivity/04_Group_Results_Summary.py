@@ -998,8 +998,14 @@ def _render_cluster_mean_plot_png(df: pd.DataFrame, title: str) -> Optional[byte
         return None
 
 
-def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path) -> str:
-    """Generate a self-contained HTML report for selected rows with significant clusters."""
+def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path,
+                           max_cluster_detail: int = 10) -> str:
+    """Generate a self-contained HTML report for selected rows with significant clusters.
+
+    Args:
+        max_cluster_detail: Maximum number of clusters per tail to render brain
+            overlay + group×time plot for (full cluster table is always shown).
+    """
     pipeline = selected_rows["pipeline"].iloc[0] if "pipeline" in selected_rows.columns and not selected_rows.empty else "unknown"
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -1096,7 +1102,19 @@ def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path) -> str:
             if ci_exists:
                 ci_mtime = Path(cluster_index_path).stat().st_mtime
                 ts_mtime = Path(row["tstat_path"]).stat().st_mtime
-                for _, crow in tdf_labeled.iterrows():
+                # Only render visualizations for top N clusters (by voxels)
+                detail_df = tdf_labeled.copy()
+                if "Voxels" in detail_df.columns:
+                    detail_df = detail_df.sort_values("Voxels", ascending=False)
+                detail_rows = list(detail_df.iterrows())[:max_cluster_detail]
+                if len(tdf_labeled) > max_cluster_detail:
+                    per_cluster_html += (
+                        f'<p style="color:#666;font-style:italic">'
+                        f'Showing brain overlays and group×time plots for the top '
+                        f'{max_cluster_detail} clusters by size '
+                        f'(of {len(tdf_labeled)} total).</p>'
+                    )
+                for _, crow in detail_rows:
                     cluster_label = int(crow.get("Cluster", 1))
                     nvox = int(crow.get("Voxels", 0))
                     peak_z = float(crow.get("Peak Z", 0))
@@ -1350,17 +1368,29 @@ def render() -> None:
         for _, row in selected_rows.iterrows()
     )
     if results_available:
-        if st.button("📥 Generate HTML Report", key=f"{PAGE_KEY}_gen_html",
-                     help="Generates a report for selected analyses with significant clusters only."):
-            with st.spinner("Generating report…"):
-                html = _generate_html_report(selected_rows, bids_root)
-            st.download_button(
-                "⬇️ Download Report",
-                data=html.encode("utf-8"),
-                file_name=f"group_results_report_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
-                mime="text/html",
-                key=f"{PAGE_KEY}_dl_html",
+        rpt_col1, rpt_col2 = st.columns([1, 1])
+        with rpt_col1:
+            max_cluster_detail = st.number_input(
+                "Max clusters with brain overlay / plot per analysis",
+                min_value=1, max_value=50, value=10, step=1,
+                key=f"{PAGE_KEY}_max_cluster_detail",
+                help="Full cluster table is always shown. This limits the heavier per-cluster rendering.",
             )
+        with rpt_col2:
+            st.write("")  # spacing
+            if st.button("📥 Generate HTML Report", key=f"{PAGE_KEY}_gen_html",
+                         help="Generates a report for selected analyses with significant clusters only."):
+                with st.spinner("Generating report… (rendering up to "
+                                f"{max_cluster_detail} cluster overlays per analysis)"):
+                    html = _generate_html_report(selected_rows, bids_root,
+                                                 max_cluster_detail=int(max_cluster_detail))
+                st.download_button(
+                    "⬇️ Download Report",
+                    data=html.encode("utf-8"),
+                    file_name=f"group_results_report_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+                    mime="text/html",
+                    key=f"{PAGE_KEY}_dl_html",
+                )
 
     # ── Bulk delete ──────────────────────────────────────────────────────────
     bulk_confirm_key = f"{PAGE_KEY}_bulk_del_confirm"
