@@ -122,6 +122,26 @@ def _load_zmap(bids_root: Path, pipeline: str, subject: str, session: str,
         return None
 
 
+def _find_alff_reho_maps(bids_root: Path, pipeline: str, canonical_df: pd.DataFrame, stat: str):
+    """Find ALFF/ReHo maps for all subjects/sessions in canonical_df.
+    
+    Returns a list of (subject, session, group, path_or_None) tuples.
+    """
+    results = []
+    for _, row in canonical_df.iterrows():
+        subject = row.get("subject", row.get("participant_id", ""))
+        session = row.get("session", "ses-01")
+        group = row.get("group", "")
+        func_dir = (
+            bids_root / "derivatives" / "preprocessing" / "xcpd"
+            / pipeline / subject / session / "func"
+        )
+        pattern = f"*_space-MNI152NLin6Asym_res-2_stat-{stat}_boldmap.nii.gz"
+        files = list(func_dir.glob(pattern)) if func_dir.exists() else []
+        results.append((subject, session, group, str(files[0]) if files else None))
+    return results
+
+
 def _load_mask(mask_path: Path, ref_img: nib.Nifti1Image) -> np.ndarray:
     """Load mask and return boolean flat array aligned to ref_img shape."""
     mask_img = nib.load(str(mask_path))
@@ -588,6 +608,205 @@ class ParametricGroupStats:
         )
 
 
+class ParametricAlffRehoStats:
+    """Fast parametric group statistics for ALFF/ReHo voxelwise maps."""
+
+    CONTRAST_NAMES = {
+        1: "Group×Time interaction",
+        2: "Time effect (ses-01 > ses-02)",
+        3: "Group effect (control > walking)",
+    }
+
+    def __init__(
+        self,
+        bids_root: str,
+        stat: str,
+        pipeline: str = "fc",
+        canonical_csv: Optional[str] = None,
+        mask_path: Optional[str] = None,
+        output_dir: Optional[str] = None,
+        cluster_z: float = 2.3,
+        cluster_p: float = 0.05,
+    ):
+        self.bids_root = Path(bids_root)
+        self.stat = stat
+        self.pipeline = pipeline
+        self.cluster_z = cluster_z
+        self.cluster_p = cluster_p
+
+        if canonical_csv:
+            self.canonical_csv = Path(canonical_csv)
+        else:
+            participants_tsv = self.bids_root / "bids" / "participants.tsv"
+            legacy_group_csv = self.bids_root / "group.csv"
+            self.canonical_csv = (
+                participants_tsv if participants_tsv.exists() else legacy_group_csv
+            )
+
+        self.mask_path = Path(mask_path) if mask_path else (
+            self.bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
+        )
+
+        if output_dir:
+            self.output_dir = Path(output_dir) / "lmm_outputs"
+        else:
+            self.output_dir = (
+                self.bids_root / "derivatives" / "connectivity"
+                / pipeline / "group" / stat / "lmm_outputs"
+            )
+
+    def run(self) -> bool:
+        """Execute full pipeline. Returns True on success."""
+        try:
+            logger.info("=" * 70)
+            logger.info(f"Fast Parametric Group Statistics ({self.stat.upper()})")
+            logger.info(f"  Pipeline: {self.pipeline}")
+            logger.info(f"  Output: {self.output_dir}")
+            logger.info("=" * 70)
+
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            canonical = _read_canonical_order(self.canonical_csv)
+            logger.info(f"Loaded {len(canonical)} rows from {self.canonical_csv}")
+
+            map_entries = _find_alff_reho_maps(self.bids_root, self.pipeline, canonical, self.stat)
+
+            pre_ctrl_list: List[np.ndarray] = []
+            post_ctrl_list: List[np.ndarray] = []
+            pre_walk_list: List[np.ndarray] = []
+            post_walk_list: List[np.ndarray] = []
+            subjects_used: List[Tuple[str, str]] = []
+            ref_img = None
+            mask_flat = None
+
+            # Group by subject, then pair sessions
+            from collections import defaultdict
+            by_subject: dict = defaultdict(dict)
+            for subject, session, group, path in map_entries:
+                by_subject[subject][session] = (group, path)
+
+            n_skipped = 0
+            for subject, sessions in by_subject.items():
+                pre_entry = sessions.get("ses-01")
+                post_entry = sessions.get("ses-02")
+                if not pre_entry or not post_entry:
+                    logger.debug(f"{subject}: missing ses-01 or ses-02, skipping")
+                    n_skipped += 1
+                    continue
+                group = pre_entry[0]
+                pre_path, post_path = pre_entry[1], post_entry[1]
+                if not pre_path or not post_path:
+                    logger.debug(f"{subject}: map missing, skipping")
+                    n_skipped += 1
+                    continue
+                try:
+                    pre_img = nib.load(pre_path)
+                    post_img = nib.load(post_path)
+                    if ref_img is None:
+                        ref_img = pre_img
+                        if self.mask_path and self.mask_path.exists():
+                            mask_flat = _load_mask(self.mask_path, ref_img)
+                            logger.info(f"Mask: {int(mask_flat.sum())} voxels")
+                        else:
+                            mask_flat = np.ones(ref_img.get_fdata().size, dtype=bool)
+                            logger.warning("No mask — using all voxels")
+                    pre_data = pre_img.get_fdata(dtype=np.float32).ravel()
+                    post_data = post_img.get_fdata(dtype=np.float32).ravel()
+                except Exception as e:
+                    logger.warning(f"{subject}: load failed — {e}")
+                    n_skipped += 1
+                    continue
+
+                if group == "control":
+                    pre_ctrl_list.append(pre_data[mask_flat])
+                    post_ctrl_list.append(post_data[mask_flat])
+                elif group == "walking":
+                    pre_walk_list.append(pre_data[mask_flat])
+                    post_walk_list.append(post_data[mask_flat])
+                else:
+                    logger.warning(f"{subject}: unknown group '{group}', skipping")
+                    n_skipped += 1
+                    continue
+                subjects_used.append((subject, group))
+
+            if n_skipped > 0:
+                logger.info(f"Skipped {n_skipped} subjects")
+
+            if not pre_ctrl_list or not pre_walk_list:
+                logger.error("Not enough data: need at least 1 subject per group")
+                return False
+
+            pre_ctrl = np.vstack(pre_ctrl_list)
+            post_ctrl = np.vstack(post_ctrl_list)
+            pre_walk = np.vstack(pre_walk_list)
+            post_walk = np.vstack(post_walk_list)
+
+            delta_ctrl = pre_ctrl - post_ctrl
+            delta_walk = pre_walk - post_walk
+            delta_all = np.vstack([delta_ctrl, delta_walk])
+            mean_ctrl = (pre_ctrl + post_ctrl) / 2
+            mean_walk = (pre_walk + post_walk) / 2
+
+            logger.info("Computing voxelwise t-tests...")
+            t1, df1 = _welch_t(delta_ctrl, delta_walk)
+            t2, df2 = _one_sample_t(delta_all)
+            t3, df3 = _welch_t(mean_ctrl, mean_walk)
+
+            z1 = _t_to_z(t1, df1)
+            z2 = _t_to_z(t2, df2)
+            z3 = _t_to_z(t3, df3)
+
+            shape3d = ref_img.shape[:3]
+            affine = ref_img.affine
+            header = ref_img.header
+
+            for idx, (t_data, name) in enumerate(
+                [(t1, "tstat1"), (t2, "tstat2"), (t3, "tstat3")], start=1
+            ):
+                vol = np.zeros(shape3d, dtype=np.float32)
+                vol.ravel()[mask_flat] = t_data
+                path = self.output_dir / f"lmm_{name}.nii.gz"
+                nib.save(nib.Nifti1Image(vol, affine, header), str(path))
+                logger.info(f"Saved {path.name}")
+
+            fsl_ok = _fsl_available()
+            for i, (z_data, prefix) in enumerate(
+                [(z1, "c1"), (z2, "c2"), (z3, "c3")], start=1
+            ):
+                if fsl_ok:
+                    corrp_flat = _grf_cluster_correct(
+                        z_data, mask_flat, ref_img,
+                        self.output_dir, prefix,
+                        self.cluster_z, self.cluster_p,
+                    )
+                    if corrp_flat is not None:
+                        vol = np.zeros(shape3d, dtype=np.float32)
+                        vol.ravel()[mask_flat] = corrp_flat
+                        path = self.output_dir / f"lmm_cluster_corrp_tstat{i}.nii.gz"
+                        nib.save(nib.Nifti1Image(vol, affine, header), str(path))
+                        logger.info(f"Saved {path.name}")
+
+            summary = {
+                "stat": self.stat,
+                "pipeline": self.pipeline,
+                "n_control": sum(1 for _, g in subjects_used if g == "control"),
+                "n_walking": sum(1 for _, g in subjects_used if g == "walking"),
+                "n_voxels_in_mask": int(mask_flat.sum()),
+                "fsl_available": fsl_ok,
+                "subjects_control": [r[0] for r in subjects_used if r[1] == "control"],
+                "subjects_walking": [r[0] for r in subjects_used if r[1] == "walking"],
+                "contrasts": {str(k): v for k, v in self.CONTRAST_NAMES.items()},
+            }
+            summary_path = self.output_dir / "lmm_summary.json"
+            summary_path.write_text(json.dumps(summary, indent=2))
+            logger.info(f"Saved summary: {summary_path}")
+            logger.info(f"✓ {self.stat.upper()} parametric analysis complete")
+            return True
+
+        except Exception as e:
+            logger.exception(f"Pipeline failed: {e}")
+            return False
+
+
 # ── CLI entry point ──────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -601,7 +820,9 @@ def main() -> int:
         description="Fast parametric group statistics (change-score approach)"
     )
     parser.add_argument("--bids-root", required=True, help="Project root directory")
-    parser.add_argument("--seed", required=True, help="Seed token (e.g. atlas-4S256Parcels:LH_Cont_PFCl_3)")
+    seed_group = parser.add_mutually_exclusive_group(required=True)
+    seed_group.add_argument("--seed", help="Seed token (e.g. atlas-4S256Parcels:LH_Cont_PFCl_3)")
+    seed_group.add_argument("--stat-map", help="ALFF/ReHo stat map type: 'alff' or 'reho'")
     parser.add_argument("--pipeline", default="fc", choices=["fc", "fc_gsr", "ec"])
     parser.add_argument("--measure", default="pearson")
     parser.add_argument("--canonical-csv", help="Filtered canonical order CSV/TSV")
@@ -619,7 +840,10 @@ def main() -> int:
     if args.dry_run:
         print("Dry run — configuration:")
         print(f"  bids_root: {args.bids_root}")
-        print(f"  seed:      {args.seed}")
+        if args.seed:
+            print(f"  seed:      {args.seed}")
+        else:
+            print(f"  stat-map:  {args.stat_map}")
         print(f"  pipeline:  {args.pipeline}")
         print(f"  measure:   {args.measure}")
         print(f"  canonical: {args.canonical_csv}")
@@ -628,17 +852,29 @@ def main() -> int:
         print(f"  cluster_p: {args.cluster_p}")
         return 0
 
-    runner = ParametricGroupStats(
-        bids_root=args.bids_root,
-        seed=args.seed,
-        pipeline=args.pipeline,
-        measure=args.measure,
-        canonical_csv=args.canonical_csv,
-        mask_path=args.mask_path,
-        output_dir=args.output_dir,
-        cluster_z=args.cluster_z,
-        cluster_p=args.cluster_p,
-    )
+    if args.seed:
+        runner = ParametricGroupStats(
+            bids_root=args.bids_root,
+            seed=args.seed,
+            pipeline=args.pipeline,
+            measure=args.measure,
+            canonical_csv=args.canonical_csv,
+            mask_path=args.mask_path,
+            output_dir=args.output_dir,
+            cluster_z=args.cluster_z,
+            cluster_p=args.cluster_p,
+        )
+    else:
+        runner = ParametricAlffRehoStats(
+            bids_root=args.bids_root,
+            stat=args.stat_map,
+            pipeline=args.pipeline,
+            canonical_csv=args.canonical_csv,
+            mask_path=args.mask_path,
+            output_dir=args.output_dir,
+            cluster_z=args.cluster_z,
+            cluster_p=args.cluster_p,
+        )
 
     success = runner.run()
     return 0 if success else 1

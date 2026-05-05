@@ -553,6 +553,52 @@ class SubjectDataValidator:
 
         return df
 
+    def validate_alff_reho(self, stat: str) -> pd.DataFrame:
+        """Validate ALFF/ReHo voxelwise maps from XCP-D outputs.
+
+        Maps are at:
+          derivatives/preprocessing/xcpd/{pipeline}/sub-{id}/ses-{session}/func/
+            sub-{id}_{session}_task-rest_space-MNI152NLin6Asym_res-2_stat-{stat}_boldmap.nii.gz
+
+        Parameters
+        ----------
+        stat : str
+            Either "alff" or "reho"
+
+        Returns
+        -------
+        pd.DataFrame
+            Validation results with same columns as validate_all_subjects()
+        """
+        rows = []
+        for _, row in self.canonical_order.iterrows():
+            subject = row["subject"]
+            session = row["session"]
+            group = row["group"]
+
+            func_dir = (
+                self.bids_root / "derivatives" / "preprocessing" / "xcpd"
+                / self.pipeline / subject / session / "func"
+            )
+            pattern = f"*_space-MNI152NLin6Asym_res-2_stat-{stat}_boldmap.nii.gz"
+            maps = list(func_dir.glob(pattern)) if func_dir.exists() else []
+            exists = len(maps) > 0
+            map_path = str(maps[0]) if maps else None
+            mean_fd = self._get_mean_fd(subject, session)
+
+            rows.append({
+                "row_index": int(row["row_index"]),
+                "subject": subject,
+                "session": session,
+                "group": group,
+                "exists": exists,
+                "map_path": map_path,
+                "error": None if exists else f"No {stat} map in {func_dir}",
+                "mean_fd": mean_fd,
+                "failure_stage": None if exists else self.STAGE_NO_XCPD,
+            })
+        return pd.DataFrame(rows)
+
     def get_canonical_zmaps_list(
         self,
         validation_df: Optional[pd.DataFrame] = None,

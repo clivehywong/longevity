@@ -3,7 +3,7 @@
 Supports three top-level kinds:
   Voxel  — alff / reho / seed-<id> maps via GRF / TFCE / FDR
   Matrix — network or seed correlation matrices via paired_t_fdr / nbs / tfnbs
-  Mixed-Design TFCE — Paired pre/post × 2-group mixed ANOVA (longitudinal intervention)
+  Mixed-Design — Paired pre/post × 2-group mixed ANOVA: seed FC, ALFF, or ReHo
 
 Uses ConnectivityWorkflowManager.build_group_level_command() for Voxel/Matrix.
 For Mixed-Design, uses MixedDesignBuilder + SubjectDataValidator + group_mixed_design_stats.py.
@@ -314,13 +314,13 @@ def _build_group_cmd(
 def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     """Render mixed-design TFCE workflow section."""
     
-    st.subheader("🧬 Mixed-Design TFCE Analysis")
+    st.subheader("🧬 Mixed-Design Group Analysis")
     
     st.markdown("""
     **Paired pre/post × 2-group mixed ANOVA** for longitudinal intervention studies.
     
-    - **Input**: 72 zmaps (36 subjects × 2 sessions, ~20 control, ~16 walking)
-    - **Output**: FSL randomise results with TFCE / Cluster / FDR correction
+    - **Input**: seed FC zmaps, ALFF, or ReHo maps (36 subjects × 2 sessions)
+    - **Output**: FSL randomise results with TFCE / Cluster / FDR / Parametric correction
     - **Design**: Time effect, group effect, subject intercepts
     """)
     
@@ -339,95 +339,127 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
             key=f"{STATE_PREFIX}mixed_pipeline_widget",
         )
         st.session_state[f"{STATE_PREFIX}mixed_pipeline"] = pipeline
-    
+
+    # ── Map type selector ─────────────────────────────────────────────────
+    _map_type_opts = ["Seed FC", "ALFF", "ReHo"]
+    map_type = st.radio(
+        "Map type",
+        _map_type_opts,
+        horizontal=True,
+        index=_map_type_opts.index(
+            st.session_state.get(f"{STATE_PREFIX}mixed_map_type", "Seed FC")
+        ),
+        key=f"{STATE_PREFIX}mixed_map_type_widget",
+        help=(
+            "**Seed FC** — seed-to-whole-brain Fisher-z connectivity maps  \n"
+            "**ALFF** — amplitude of low-frequency fluctuations (from XCP-D)  \n"
+            "**ReHo** — regional homogeneity (from XCP-D)"
+        ),
+    )
+    st.session_state[f"{STATE_PREFIX}mixed_map_type"] = map_type
+
     with col2:
-        measure = st.selectbox(
-            "Measure",
-            [
-                "pearson", "spearman", "partial_correlation",
-                "plv", "wpli", "coherence",
-                "amplitude_envelope_correlation", "mutual_information"
-            ],
-            index=0 if not st.session_state.get(f"{STATE_PREFIX}mixed_measure") else 0,
-            key=f"{STATE_PREFIX}mixed_measure_widget",
-        )
-        st.session_state[f"{STATE_PREFIX}mixed_measure"] = measure
+        if map_type == "Seed FC":
+            measure = st.selectbox(
+                "Measure",
+                [
+                    "pearson", "spearman", "partial_correlation",
+                    "plv", "wpli", "coherence",
+                    "amplitude_envelope_correlation", "mutual_information"
+                ],
+                index=0 if not st.session_state.get(f"{STATE_PREFIX}mixed_measure") else 0,
+                key=f"{STATE_PREFIX}mixed_measure_widget",
+            )
+            st.session_state[f"{STATE_PREFIX}mixed_measure"] = measure
+        else:
+            measure = map_type.lower()  # "alff" or "reho"
+            st.session_state[f"{STATE_PREFIX}mixed_measure"] = measure
+            st.info(f"ℹ️ Measure: **{map_type}** (from XCP-D, no FC measure needed)")
     
     with col3:
         st.write("")  # Spacer
 
-    # ── Seed selection from catalog ────────────────────────────────────────
-    st.markdown("**Seed selection**")
-    catalog = _load_seed_catalog(str(bids_root), pipeline)
+    # ── Seed selection or ALFF/ReHo info ──────────────────────────────────
+    if map_type == "Seed FC":
+        st.markdown("**Seed selection**")
+        catalog = _load_seed_catalog(str(bids_root), pipeline)
 
-    seed_source = st.radio(
-        "Seed source",
-        ["Catalog (from computed subject-level outputs)", "Manual entry"],
-        horizontal=True,
-        key=f"{STATE_PREFIX}mixed_seed_source",
-    )
-
-    # Backward-compat migration: mixed_seed (str) → mixed_seeds (list)
-    _old_seed = st.session_state.pop(f"{STATE_PREFIX}mixed_seed", None)
-    _default_seeds: list[str] = st.session_state.get(
-        f"{STATE_PREFIX}mixed_seeds",
-        [_old_seed] if _old_seed else [],
-    )
-
-    if seed_source == "Catalog (from computed subject-level outputs)":
-        if catalog is None or not catalog.get_seeds():
-            st.warning("⚠️ No seeds in catalog — run subject-level seed connectivity first, or use Manual entry.")
-            seed_inputs: list[str] = []
-        else:
-            computed_seeds = _list_computed_seeds(str(bids_root), pipeline)
-            if computed_seeds:
-                valid_defaults = [s for s in _default_seeds if s in computed_seeds]
-                seed_inputs = st.multiselect(
-                    "Select seeds",
-                    computed_seeds,
-                    default=valid_defaults,
-                    key=f"{STATE_PREFIX}mixed_seeds_catalog_sel",
-                    format_func=_seed_token_display,
-                )
-            else:
-                st.info("No subject-level seed outputs found. Showing full catalog.")
-                all_seeds = catalog.get_seeds(source="xcpd_atlas_parcel")[:100]
-                opts_keys = [
-                    f"atlas-{s.atlas}:{s.parcel_label}" if s.source == "xcpd_atlas_parcel" else s.id
-                    for s in all_seeds
-                ]
-                valid_defaults_full = [s for s in _default_seeds if s in opts_keys]
-                seed_inputs = st.multiselect(
-                    "Select seeds", opts_keys,
-                    default=valid_defaults_full,
-                    key=f"{STATE_PREFIX}mixed_seeds_catalog_full",
-                    format_func=_seed_token_display,
-                )
-    else:
-        _manual_default = "\n".join(_default_seeds)
-        manual_str = st.text_area(
-            "Seed tokens (one per line, CLI format: atlas-4S256Parcels:LABEL or sphere:x,y,z,r=6,name=...)",
-            value=_manual_default,
-            key=f"{STATE_PREFIX}mixed_seeds_manual",
-            help="E.g., 'atlas-4S256Parcels:RH_Cont_Par_1'",
-            height=100,
+        seed_source = st.radio(
+            "Seed source",
+            ["Catalog (from computed subject-level outputs)", "Manual entry"],
+            horizontal=True,
+            key=f"{STATE_PREFIX}mixed_seed_source",
         )
-        seed_inputs = [s.strip() for s in manual_str.splitlines() if s.strip()]
 
-    st.session_state[f"{STATE_PREFIX}mixed_seeds"] = seed_inputs
+        # Backward-compat migration: mixed_seed (str) → mixed_seeds (list)
+        _old_seed = st.session_state.pop(f"{STATE_PREFIX}mixed_seed", None)
+        _default_seeds: list[str] = st.session_state.get(
+            f"{STATE_PREFIX}mixed_seeds",
+            [_old_seed] if _old_seed else [],
+        )
 
-    # Seed visualizer preview
-    if seed_inputs:
-        extra = f" (+{len(seed_inputs)-1} more)" if len(seed_inputs) > 1 else ""
-        with st.expander(f"🔍 Preview first seed on MNI template{extra}", expanded=False):
-            with st.spinner("Rendering seed preview..."):
-                png = _cached_seed_preview(seed_inputs[0], str(bids_root))
-            if png:
-                st.image(png, use_container_width=True)
-                if len(seed_inputs) > 1:
-                    st.caption(f"Showing: `{seed_inputs[0]}`")
+        if seed_source == "Catalog (from computed subject-level outputs)":
+            if catalog is None or not catalog.get_seeds():
+                st.warning("⚠️ No seeds in catalog — run subject-level seed connectivity first, or use Manual entry.")
+                seed_inputs: list[str] = []
             else:
-                st.warning(f"Could not render preview for: `{seed_inputs[0]}`")
+                computed_seeds = _list_computed_seeds(str(bids_root), pipeline)
+                if computed_seeds:
+                    valid_defaults = [s for s in _default_seeds if s in computed_seeds]
+                    seed_inputs = st.multiselect(
+                        "Select seeds",
+                        computed_seeds,
+                        default=valid_defaults,
+                        key=f"{STATE_PREFIX}mixed_seeds_catalog_sel",
+                        format_func=_seed_token_display,
+                    )
+                else:
+                    st.info("No subject-level seed outputs found. Showing full catalog.")
+                    all_seeds = catalog.get_seeds(source="xcpd_atlas_parcel")[:100]
+                    opts_keys = [
+                        f"atlas-{s.atlas}:{s.parcel_label}" if s.source == "xcpd_atlas_parcel" else s.id
+                        for s in all_seeds
+                    ]
+                    valid_defaults_full = [s for s in _default_seeds if s in opts_keys]
+                    seed_inputs = st.multiselect(
+                        "Select seeds", opts_keys,
+                        default=valid_defaults_full,
+                        key=f"{STATE_PREFIX}mixed_seeds_catalog_full",
+                        format_func=_seed_token_display,
+                    )
+        else:
+            _manual_default = "\n".join(_default_seeds)
+            manual_str = st.text_area(
+                "Seed tokens (one per line, CLI format: atlas-4S256Parcels:LABEL or sphere:x,y,z,r=6,name=...)",
+                value=_manual_default,
+                key=f"{STATE_PREFIX}mixed_seeds_manual",
+                help="E.g., 'atlas-4S256Parcels:RH_Cont_Par_1'",
+                height=100,
+            )
+            seed_inputs = [s.strip() for s in manual_str.splitlines() if s.strip()]
+
+        st.session_state[f"{STATE_PREFIX}mixed_seeds"] = seed_inputs
+
+        # Seed visualizer preview
+        if seed_inputs:
+            extra = f" (+{len(seed_inputs)-1} more)" if len(seed_inputs) > 1 else ""
+            with st.expander(f"🔍 Preview first seed on MNI template{extra}", expanded=False):
+                with st.spinner("Rendering seed preview..."):
+                    png = _cached_seed_preview(seed_inputs[0], str(bids_root))
+                if png:
+                    st.image(png, use_container_width=True)
+                    if len(seed_inputs) > 1:
+                        st.caption(f"Showing: `{seed_inputs[0]}`")
+                else:
+                    st.warning(f"Could not render preview for: `{seed_inputs[0]}`")
+    else:
+        # ALFF or ReHo — no seed selection needed
+        seed_inputs = []
+        stat_label = map_type.lower()
+        st.info(
+            f"📍 {map_type} maps will be loaded from XCP-D outputs:  \n"
+            f"`derivatives/preprocessing/xcpd/{{pipeline}}/sub-*/ses-*/func/*_stat-{stat_label}_boldmap.nii.gz`"
+        )
     
     # ===== Section 2: FSL TFCE Parameters =====
     st.markdown("#### ⚙️ Section 2: FSL TFCE Parameters")
@@ -527,59 +559,92 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
 
     with col_val:
         if st.button("🔍 Validate Zmaps", key=f"{STATE_PREFIX}mixed_validate"):
-            if not seed_inputs:
-                st.warning("Select at least one seed first.")
-            else:
-                with st.spinner("Validating zmaps…"):
-                    canonical_csv = st.session_state.get(
-                        f"{STATE_PREFIX}mixed_canonical_csv",
-                        _default_participants_path(str(bids_root)),
-                    )
-                    fd_cutoff_cur = st.session_state.get(f"{STATE_PREFIX}mixed_fd_cutoff", 0.5)
-                    relaxed_mode = execution == "HPC" or correction == "Parametric"
+            canonical_csv = st.session_state.get(
+                f"{STATE_PREFIX}mixed_canonical_csv",
+                _default_participants_path(str(bids_root)),
+            )
+            fd_cutoff_cur = st.session_state.get(f"{STATE_PREFIX}mixed_fd_cutoff", 0.5)
+            relaxed_mode = execution == "HPC" or correction == "Parametric"
 
-                    per_seed_results: dict = {}
-                    per_seed_dfs: dict = {}
-                    ref_validation_df = None
-                    ref_summary = None
+            if map_type == "Seed FC":
+                if not seed_inputs:
+                    st.warning("Select at least one seed first.")
+                else:
+                    with st.spinner("Validating zmaps…"):
+                        per_seed_results: dict = {}
+                        per_seed_dfs: dict = {}
 
-                    for seed_tok in seed_inputs:
-                        try:
-                            seed_dir_name = cli_token_to_seed_dir_name(seed_tok)
-                            validator = SubjectDataValidator(
-                                bids_root=str(bids_root),
-                                canonical_order_csv=canonical_csv,
-                                pipeline=pipeline,
-                                measure=measure,
+                        for seed_tok in seed_inputs:
+                            try:
+                                seed_dir_name = cli_token_to_seed_dir_name(seed_tok)
+                                validator = SubjectDataValidator(
+                                    bids_root=str(bids_root),
+                                    canonical_order_csv=canonical_csv,
+                                    pipeline=pipeline,
+                                    measure=measure,
+                                )
+                                vdf = validator.validate_all_subjects(seed=seed_dir_name)
+                                smry = validator.summarize_validation(vdf)
+                                per_seed_results[seed_tok] = smry
+                                per_seed_dfs[seed_tok] = vdf
+                            except Exception as e:
+                                per_seed_results[seed_tok] = {"error": str(e)}
+
+                        # Use first seed as reference
+                        first_tok = seed_inputs[0]
+                        if first_tok in per_seed_dfs:
+                            ref_validation_df = per_seed_dfs[first_tok]
+                            ref_summary = per_seed_results[first_tok]
+                            sel_df = _build_subject_selection_df(ref_validation_df, fd_cutoff=fd_cutoff_cur)
+                            ctx_hash = f"{','.join(seed_inputs)}|{pipeline}|{measure}|{fd_cutoff_cur}"
+                            st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = ref_summary
+                            st.session_state[f"{STATE_PREFIX}mixed_validation_df"] = ref_validation_df
+                            st.session_state[f"{STATE_PREFIX}mixed_selection_df"] = sel_df
+                            st.session_state[f"{STATE_PREFIX}mixed_selection_ctx"] = ctx_hash
+
+                            valid_count = ref_summary.get("valid_count", 0)
+                            st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = (
+                                valid_count > 0 if relaxed_mode else ref_summary.get("error_count", 0) == 0
                             )
-                            vdf = validator.validate_all_subjects(seed=seed_dir_name)
-                            smry = validator.summarize_validation(vdf)
-                            per_seed_results[seed_tok] = smry
-                            per_seed_dfs[seed_tok] = vdf
-                        except Exception as e:
-                            per_seed_results[seed_tok] = {"error": str(e)}
+                        else:
+                            st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = False
 
-                    # Use first seed as reference
-                    first_tok = seed_inputs[0]
-                    if first_tok in per_seed_dfs:
-                        ref_validation_df = per_seed_dfs[first_tok]
-                        ref_summary = per_seed_results[first_tok]
-                        sel_df = _build_subject_selection_df(ref_validation_df, fd_cutoff=fd_cutoff_cur)
-                        ctx_hash = f"{','.join(seed_inputs)}|{pipeline}|{measure}|{fd_cutoff_cur}"
-                        st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = ref_summary
-                        st.session_state[f"{STATE_PREFIX}mixed_validation_df"] = ref_validation_df
+                        st.session_state[f"{STATE_PREFIX}mixed_per_seed_val_results"] = per_seed_results
+                        st.session_state[f"{STATE_PREFIX}mixed_per_seed_val_dfs"] = per_seed_dfs
+            else:
+                # ALFF / ReHo branch
+                stat_label = map_type.lower()
+                with st.spinner(f"Validating {map_type} maps…"):
+                    try:
+                        validator = SubjectDataValidator(
+                            bids_root=str(bids_root),
+                            canonical_order_csv=canonical_csv,
+                            pipeline=pipeline,
+                            measure=stat_label,
+                        )
+                        val_df = validator.validate_alff_reho(stat=stat_label)
+                        summary = validator.summarize_validation(val_df)
+                        st.session_state[f"{STATE_PREFIX}mixed_per_seed_val_results"] = {stat_label: summary}
+                        st.session_state[f"{STATE_PREFIX}mixed_per_seed_val_dfs"] = {stat_label: val_df}
+                        st.session_state[f"{STATE_PREFIX}mixed_validation_df"] = val_df
+                        st.session_state[f"{STATE_PREFIX}mixed_validation_result"] = summary
+                        sel_df = _build_subject_selection_df(val_df, fd_cutoff=fd_cutoff_cur)
+                        ctx_hash = f"{stat_label}|{pipeline}|{stat_label}|{fd_cutoff_cur}"
                         st.session_state[f"{STATE_PREFIX}mixed_selection_df"] = sel_df
                         st.session_state[f"{STATE_PREFIX}mixed_selection_ctx"] = ctx_hash
-
-                        valid_count = ref_summary.get("valid_count", 0)
+                        valid_count = summary.get("valid_count", 0)
+                        error_count = summary.get("error_count", 0)
                         st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = (
-                            valid_count > 0 if relaxed_mode else ref_summary.get("error_count", 0) == 0
+                            valid_count > 0 if relaxed_mode else error_count == 0
                         )
-                    else:
+                        if valid_count > 0:
+                            msg = f"✓ {valid_count}/{summary.get('total_count', 0)} {map_type} maps found"
+                            st.success(msg) if error_count == 0 else st.warning(msg + f" ({error_count} missing)")
+                        else:
+                            st.error(f"✗ No valid {map_type} maps found. Run XCP-D first.")
+                    except Exception as e:
+                        st.error(f"Validation failed: {e}")
                         st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = False
-
-                    st.session_state[f"{STATE_PREFIX}mixed_per_seed_val_results"] = per_seed_results
-                    st.session_state[f"{STATE_PREFIX}mixed_per_seed_val_dfs"] = per_seed_dfs
 
     with col_prev:
         if st.button("📊 Preview Design", key=f"{STATE_PREFIX}mixed_preview"):
@@ -648,10 +713,16 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         st.session_state[f"{STATE_PREFIX}mixed_selection_df"] = _new_sel
         st.session_state[f"{STATE_PREFIX}mixed_selection_ctx"] = (
             f"{','.join(seed_inputs)}|{pipeline}|{measure}|{fd_cutoff}"
+            if map_type == "Seed FC"
+            else f"{map_type.lower()}|{pipeline}|{map_type.lower()}|{fd_cutoff}"
         )
 
     # ── Subject selection editor ───────────────────────────────────────────
-    ctx_hash_cur = f"{','.join(seed_inputs)}|{pipeline}|{measure}|{fd_cutoff}"
+    ctx_hash_cur = (
+        f"{','.join(seed_inputs)}|{pipeline}|{measure}|{fd_cutoff}"
+        if map_type == "Seed FC"
+        else f"{map_type.lower()}|{pipeline}|{map_type.lower()}|{fd_cutoff}"
+    )
     if st.session_state.get(f"{STATE_PREFIX}mixed_selection_ctx") != ctx_hash_cur:
         # Params changed — clear stale selection
         st.session_state.pop(f"{STATE_PREFIX}mixed_selection_df", None)
@@ -747,11 +818,17 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
 
     seed_input_ref = seed_inputs[0] if seed_inputs else ""
     seed_dir_name = cli_token_to_seed_dir_name(seed_input_ref) if seed_input_ref else ""
-    expected_output = (
-        Path(bids_root) / "derivatives" / "connectivity"
-        / pipeline / "group" / "seed" / seed_dir_name / f"measure-{measure}"
-        if seed_dir_name else None
-    )
+    if map_type == "Seed FC":
+        expected_output = (
+            Path(bids_root) / "derivatives" / "connectivity"
+            / pipeline / "group" / "seed" / seed_dir_name / f"measure-{measure}"
+            if seed_dir_name else None
+        )
+    else:
+        expected_output = (
+            Path(bids_root) / "derivatives" / "connectivity"
+            / pipeline / "group" / map_type.lower()
+        )
 
     # ── Script preview ─────────────────────────────────────────────────────
     canonical_csv_preview = st.session_state.get(
@@ -766,7 +843,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         except Exception:
             pass
     effective_preview_n_perm = 100 if (use_test_perms and execution == "Local") else n_perm
-    if seed_input_ref:
+    if map_type == "Seed FC" and seed_input_ref:
         preview_cmd = _build_group_cmd(
             bids_root=bids_root,
             seed=seed_input_ref,
@@ -786,6 +863,24 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                 f"Output directory: `{expected_output}`  \n"
                 + (f"HPC remote base: `{_hpc_remote_base}`" if _hpc_remote_base else "Local execution")
             )
+    elif map_type in ("ALFF", "ReHo"):
+        preview_cmd = _build_alff_reho_cmd(
+            bids_root=bids_root,
+            stat=map_type.lower(),
+            pipeline=pipeline,
+            canonical_csv=canonical_csv_preview,
+            n_perm=effective_preview_n_perm,
+            correction=correction,
+            mask=mask_input or None,
+            execution=execution,
+            hpc_remote_base=_hpc_remote_base,
+        )
+        with st.expander(f"📋 Script preview ({map_type})", expanded=False):
+            st.code(preview_cmd, language="bash")
+            st.caption(
+                f"Output directory: `{expected_output}`  \n"
+                + (f"HPC remote base: `{_hpc_remote_base}`" if _hpc_remote_base else "Local execution")
+            )
 
     col_info, col_submit = st.columns([2, 1])
 
@@ -795,16 +890,19 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         perm_display = "N/A (parametric)" if correction == "Parametric" else str(
             100 if use_test_perms and execution == "Local" else n_perm
         )
-        if seed_inputs:
-            seeds_short = ", ".join(cli_token_to_seed_dir_name(s) for s in seed_inputs[:3])
-            if len(seed_inputs) > 3:
-                seeds_short += f" … +{len(seed_inputs)-3} more"
-            seed_display_line = f"**Seeds ({len(seed_inputs)}):** `{seeds_short}`"
+        if map_type == "Seed FC":
+            if seed_inputs:
+                seeds_short = ", ".join(cli_token_to_seed_dir_name(s) for s in seed_inputs[:3])
+                if len(seed_inputs) > 3:
+                    seeds_short += f" … +{len(seed_inputs)-3} more"
+                map_display_line = f"**Seeds ({len(seed_inputs)}):** `{seeds_short}`"
+            else:
+                map_display_line = "**Seed:** _(none selected)_"
         else:
-            seed_display_line = "**Seed:** _(none selected)_"
+            map_display_line = f"**Map type:** {map_type}"
         st.info(
             f"**Execution:** {execution} · **Correction:** {correction}  \n"
-            f"{seed_display_line} · **Subjects:** {n_selected} selected  \n"
+            f"{map_display_line} · **Subjects:** {n_selected} selected  \n"
             f"**Output:** `{expected_output or '(select a seed)'}`  \n"
             f"**N Permutations:** {perm_display}"
         )
@@ -818,7 +916,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
     )
     is_valid = (
         st.session_state.get(f"{STATE_PREFIX}mixed_zmaps_valid", False)
-        and len(seed_inputs) > 0
+        and (len(seed_inputs) > 0 if map_type == "Seed FC" else True)
         and has_valid_selection
     )
 
@@ -830,59 +928,96 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
             disabled=not is_valid,
         ):
             if not is_valid:
-                st.error("Validate zmaps, select seeds, and ensure both groups have subjects")
+                st.error("Validate zmaps, select seeds (or map type), and ensure both groups have subjects")
             else:
                 effective_n_perm = 100 if (use_test_perms and execution == "Local") else n_perm
                 val_df_submit: pd.DataFrame = st.session_state[f"{STATE_PREFIX}mixed_validation_df"]
-                with st.spinner(f"Submitting {len(seed_inputs)} seed(s)…"):
-                    # Write ONE filtered canonical TSV (same subjects for all seeds)
-                    effective_csv = _write_filtered_canonical_tsv(
-                        val_df_submit,
-                        sel_df_submit,
-                        "batch",
-                        bids_root,
-                    )
+                if map_type == "Seed FC":
+                    with st.spinner(f"Submitting {len(seed_inputs)} seed(s)…"):
+                        # Write ONE filtered canonical TSV (same subjects for all seeds)
+                        effective_csv = _write_filtered_canonical_tsv(
+                            val_df_submit,
+                            sel_df_submit,
+                            "batch",
+                            bids_root,
+                        )
 
-                    results = []
-                    for i, seed_token in enumerate(seed_inputs):
-                        seed_label = _seed_token_display(seed_token)
-                        with st.expander(f"[{i+1}/{len(seed_inputs)}] {seed_label}", expanded=True):
+                        results = []
+                        for i, seed_token in enumerate(seed_inputs):
+                            seed_label = _seed_token_display(seed_token)
+                            with st.expander(f"[{i+1}/{len(seed_inputs)}] {seed_label}", expanded=True):
+                                try:
+                                    if execution == "Local":
+                                        _submit_mixed_design_local(
+                                            bids_root,
+                                            seed_token,
+                                            pipeline,
+                                            measure,
+                                            effective_csv,
+                                            effective_n_perm,
+                                            correction,
+                                            mask_input or None,
+                                        )
+                                        results.append((seed_token, "✅"))
+                                    else:
+                                        _submit_mixed_design_hpc(
+                                            config,
+                                            bids_root,
+                                            seed_token,
+                                            pipeline,
+                                            measure,
+                                            effective_csv,
+                                            n_perm,
+                                            correction,
+                                            mask_input or None,
+                                            _tsv_already_synced=(i > 0),
+                                        )
+                                        results.append((seed_token, "✅"))
+                                except Exception as e:
+                                    st.error(f"Failed: {e}")
+                                    results.append((seed_token, f"❌ {e}"))
+
+                        succeeded = sum(1 for _, s in results if s == "✅")
+                        if succeeded == len(seed_inputs):
+                            st.success(f"✅ All {len(seed_inputs)} seeds submitted successfully!")
+                        else:
+                            st.warning(f"⚠️ {succeeded}/{len(seed_inputs)} seeds submitted. See errors above.")
+                else:
+                    # ALFF / ReHo submit
+                    stat_label = map_type.lower()
+                    with st.spinner(f"Submitting {map_type} analysis…"):
+                        effective_csv = _write_filtered_canonical_tsv(
+                            val_df_submit,
+                            sel_df_submit,
+                            stat_label,
+                            bids_root,
+                        )
+                        with st.expander(f"[1/1] {map_type}", expanded=True):
                             try:
                                 if execution == "Local":
-                                    _submit_mixed_design_local(
+                                    _submit_alff_reho_local(
                                         bids_root,
-                                        seed_token,
+                                        stat_label,
                                         pipeline,
-                                        measure,
                                         effective_csv,
                                         effective_n_perm,
                                         correction,
                                         mask_input or None,
                                     )
-                                    results.append((seed_token, "✅"))
                                 else:
-                                    _submit_mixed_design_hpc(
+                                    _submit_alff_reho_hpc(
                                         config,
                                         bids_root,
-                                        seed_token,
+                                        stat_label,
                                         pipeline,
-                                        measure,
                                         effective_csv,
                                         n_perm,
                                         correction,
                                         mask_input or None,
-                                        _tsv_already_synced=(i > 0),
                                     )
-                                    results.append((seed_token, "✅"))
+                                st.success(f"✅ {map_type} analysis submitted!")
                             except Exception as e:
                                 st.error(f"Failed: {e}")
-                                results.append((seed_token, f"❌ {e}"))
-
-                    succeeded = sum(1 for _, s in results if s == "✅")
-                    if succeeded == len(seed_inputs):
-                        st.success(f"✅ All {len(seed_inputs)} seeds submitted successfully!")
-                    else:
-                        st.warning(f"⚠️ {succeeded}/{len(seed_inputs)} seeds submitted. See errors above.")
 
 
 def _submit_mixed_design_local(
@@ -1036,6 +1171,174 @@ def _submit_mixed_design_hpc(
                     f"Monitor progress in the 📡 Monitor tab. "
                     f"Download results when the job completes."
                 )
+        except Exception as exc:
+            st.error(f"HPC submission failed: {exc}")
+
+
+def _build_alff_reho_cmd(
+    bids_root: Any,
+    stat: str,
+    pipeline: str,
+    canonical_csv: str,
+    n_perm: int,
+    correction: str,
+    mask: str | None,
+    execution: str,
+    hpc_remote_base: str | None = None,
+) -> str:
+    """Build the analysis command string for ALFF/ReHo preview."""
+    effective_bids = hpc_remote_base if execution == "HPC" and hpc_remote_base else str(bids_root)
+    effective_csv = (
+        canonical_csv.replace(str(bids_root), hpc_remote_base, 1)
+        if execution == "HPC" and hpc_remote_base and canonical_csv.startswith(str(bids_root))
+        else canonical_csv
+    )
+    effective_mask = (
+        mask.replace(str(bids_root), hpc_remote_base, 1)
+        if execution == "HPC" and hpc_remote_base and mask and mask.startswith(str(bids_root))
+        else mask
+    )
+
+    if correction.upper() == "PARAMETRIC":
+        parts = [
+            "python ../script/group_lmm_stats.py",
+            f"  --bids-root {effective_bids}",
+            f"  --stat-map {stat}",
+            f"  --pipeline {pipeline}",
+            f"  --canonical-csv {effective_csv}",
+        ]
+        if effective_mask:
+            parts.append(f"  --mask-path {effective_mask}")
+        return " \\\n".join(parts)
+
+    parts = [
+        "python neuconn_app/scripts/group_mixed_design_stats.py",
+        f"  --bids-root {effective_bids}",
+        f"  --stat-map {stat}",
+        f"  --pipeline {pipeline}",
+        f"  --n-perms {n_perm}",
+        f"  --correction {correction}",
+        f"  --canonical-csv {effective_csv}",
+    ]
+    if effective_mask:
+        parts.append(f"  --mask-path {effective_mask}")
+    return " \\\n".join(parts)
+
+
+def _submit_alff_reho_local(
+    bids_root: str,
+    stat: str,
+    pipeline: str,
+    canonical_csv: str,
+    n_perm: int,
+    correction: str,
+    mask: str | None = None,
+) -> None:
+    """Submit ALFF/ReHo mixed-design analysis locally."""
+    _this_dir = Path(__file__).resolve().parent
+    _app_dir = _this_dir.parent
+    _project_root = _app_dir.parent
+
+    if correction.upper() == "PARAMETRIC":
+        script = str(_project_root / "script" / "group_lmm_stats.py")
+        cmd = [
+            "python", script,
+            "--bids-root", str(bids_root),
+            "--stat-map", stat,
+            "--pipeline", pipeline,
+            "--canonical-csv", canonical_csv,
+        ]
+        if mask:
+            cmd.extend(["--mask-path", mask])
+        timeout_s = 300
+        spinner_msg = f"Running parametric {stat.upper()} analysis…"
+    else:
+        script = str(_app_dir / "scripts" / "group_mixed_design_stats.py")
+        cmd = [
+            "python", script,
+            "--bids-root", str(bids_root),
+            "--stat-map", stat,
+            "--pipeline", pipeline,
+            "--n-perms", str(n_perm),
+            "--correction", correction,
+            "--canonical-csv", canonical_csv,
+        ]
+        if mask:
+            cmd.extend(["--mask", mask])
+        timeout_s = 3600
+        spinner_msg = f"Running {stat.upper()} analysis… (may take 10+ minutes)"
+
+    st.code(" ".join(cmd), language="bash")
+    with st.spinner(spinner_msg):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+            if result.returncode == 0:
+                st.success(f"✅ {stat.upper()} analysis completed!")
+            else:
+                st.error(f"Analysis failed (exit {result.returncode}):\n```\n{result.stderr[-2000:]}\n```")
+        except subprocess.TimeoutExpired:
+            st.error(f"Timed out (>{timeout_s}s)")
+        except Exception as e:
+            st.error(f"Execution error: {e}")
+
+
+def _submit_alff_reho_hpc(
+    config: dict,
+    bids_root: str,
+    stat: str,
+    pipeline: str,
+    canonical_csv: str,
+    n_perm: int,
+    correction: str,
+    mask: str | None = None,
+) -> None:
+    """Submit ALFF/ReHo mixed-design analysis to HPC."""
+    from utils.hpc import HPCConfig as _HPCCfg
+    hpc_cfg = _HPCCfg.from_config(config)
+    remote_bids_root = hpc_cfg.remote_base or str(bids_root)
+
+    def _remap(p):
+        if not p:
+            return None
+        return str(p).replace(str(bids_root), remote_bids_root, 1) if str(p).startswith(str(bids_root)) else str(p)
+
+    remote_mask = _remap(mask)
+    remote_csv = _remap(canonical_csv)
+
+    # Rsync TSV to HPC
+    if canonical_csv and Path(canonical_csv).exists():
+        remote_tsv_dir = f"{remote_bids_root}/tmp/group_stats_subsets"
+        subprocess.run(
+            ["rsync", "-a", "--mkpath", canonical_csv,
+             "-e", f"ssh -p {hpc_cfg.port or 22}",
+             f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_tsv_dir}/"],
+            capture_output=True, timeout=30,
+        )
+
+    manager = ConnectivityWorkflowManager(config)
+    opts = {
+        "bids_root": remote_bids_root,
+        "stat_map": stat,
+        "pipeline": pipeline,
+        "n_perm": str(n_perm),
+        "correction": correction,
+        "canonical_order_csv": remote_csv or f"{remote_bids_root}/bids/participants.tsv",
+        "kind": "mixed_design_voxelmap",
+        "log_dir": f"{remote_bids_root}/logs",
+        "partition": hpc_cfg.partition or "shared_cpu",
+        "conda_env": hpc_cfg.conda_env,
+    }
+    if remote_mask:
+        opts["mask_path"] = remote_mask
+
+    with st.spinner(f"Submitting {stat.upper()} analysis to HPC…"):
+        try:
+            sub_obj = manager.submit("group_stats", opts, [], dry_run=False, execution_mode="hpc")
+            job_id = sub_obj.job_id if sub_obj else "unknown"
+            if sub_obj and sub_obj.status == "failed":
+                st.error(f"❌ HPC submission failed: {sub_obj.notes or 'unknown error'}")
+            else:
+                st.success(f"✅ {stat.upper()} submitted! Job ID: **{job_id}**")
         except Exception as exc:
             st.error(f"HPC submission failed: {exc}")
 
@@ -1250,6 +1553,7 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_zmaps_valid", False)
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_validation_result", None)
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_canonical_csv", default_participants_path)
+    st.session_state.setdefault(f"{STATE_PREFIX}mixed_map_type", "Seed FC")
 
     # --- Template Selector ---
     st.markdown("### 📋 Analysis Template")
@@ -1258,7 +1562,7 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
         [
             "Voxel-level Group Stats (existing)",
             "Matrix-level Group Stats (existing)",
-            "Mixed-Design TFCE (pre/post × 2 groups)",
+            "Mixed-Design Group Analysis (pre/post × 2 groups)",
         ],
         index=0 if st.session_state.get(f"{STATE_PREFIX}template") == "Voxel" else (
             1 if st.session_state.get(f"{STATE_PREFIX}template") == "Matrix" else 2

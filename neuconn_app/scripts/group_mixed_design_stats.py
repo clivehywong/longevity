@@ -109,6 +109,26 @@ def _to_canonical_order(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["row_index", "subject", "session", "group"])
 
 
+def _find_alff_reho_maps(bids_root: Path, pipeline: str, canonical_df: pd.DataFrame, stat: str):
+    """Find ALFF/ReHo maps for all subjects/sessions in canonical_df.
+    
+    Returns list of (subject, session, group, path_or_None) tuples.
+    """
+    results = []
+    for _, row in canonical_df.iterrows():
+        subject = row.get("subject", row.get("participant_id", ""))
+        session = row.get("session", "ses-01")
+        group = row.get("group", "")
+        func_dir = (
+            bids_root / "derivatives" / "preprocessing" / "xcpd"
+            / pipeline / subject / session / "func"
+        )
+        pattern = f"*_space-MNI152NLin6Asym_res-2_stat-{stat}_boldmap.nii.gz"
+        files = list(func_dir.glob(pattern)) if func_dir.exists() else []
+        results.append((subject, session, group, str(files[0]) if files else None))
+    return results
+
+
 class GroupStatsRunner:
     """Orchestrator for mixed-design group-level statistics workflow."""
     
@@ -829,6 +849,240 @@ class GroupStatsRunner:
             return None
 
 
+class GroupStatsAlffRehoRunner:
+    """Runner for ALFF/ReHo mixed-design randomise workflow."""
+
+    def __init__(
+        self,
+        bids_root: str,
+        stat: str,
+        pipeline: str = "fc",
+        output_dir: Optional[str] = None,
+        n_perm: int = 5000,
+        mask_path: Optional[str] = None,
+        canonical_order_csv: Optional[str] = None,
+        correction: str = "TFCE",
+    ):
+        self.bids_root = Path(bids_root)
+        self.stat = stat
+        self.pipeline = pipeline
+        self.n_perm = n_perm
+        self.mask_path = Path(mask_path) if mask_path else None
+        _corr = correction.upper()
+        self.correction = "GRF" if _corr == "CLUSTER" else _corr
+
+        if canonical_order_csv:
+            self.canonical_order_csv = Path(canonical_order_csv)
+        else:
+            participants_tsv = self.bids_root / "bids" / "participants.tsv"
+            legacy_group_csv = self.bids_root / "group.csv"
+            self.canonical_order_csv = (
+                participants_tsv if participants_tsv.exists() or not legacy_group_csv.exists()
+                else legacy_group_csv
+            )
+
+        if output_dir:
+            self.output_dir = Path(output_dir)
+        else:
+            self.output_dir = (
+                self.bids_root / "derivatives" / "connectivity"
+                / pipeline / "group" / stat
+            )
+
+        self.canonical_order: Optional[pd.DataFrame] = None
+        self.zmaps_list: Optional[List[str]] = None
+        self.merged_nifti_path: Optional[Path] = None
+        self.design_files: Optional[Dict[str, Path]] = None
+
+    def run(self) -> bool:
+        """Execute full pipeline."""
+        try:
+            logger.info("=" * 70)
+            logger.info(f"Mixed-Design Group Statistics ({self.stat.upper()})")
+            logger.info(f"  Pipeline: {self.pipeline}")
+            logger.info(f"  N permutations: {self.n_perm}")
+            logger.info("=" * 70)
+
+            if not self._step_load_canonical():
+                return False
+            if not self._step_collect_maps():
+                return False
+            if not self._step_merge_4d_nifti():
+                return False
+            if not self._step_generate_design_files():
+                return False
+            if not self._step_run_randomise():
+                return False
+
+            logger.info("=" * 70)
+            logger.info(f"Pipeline completed! Results: {self.output_dir}")
+            logger.info("=" * 70)
+            return True
+
+        except Exception as e:
+            logger.exception(f"Pipeline failed: {e}")
+            return False
+
+    def _step_load_canonical(self) -> bool:
+        logger.info("[Step 1] Loading canonical subject order...")
+        try:
+            self.canonical_order = _to_canonical_order(
+                _read_subject_table(self.canonical_order_csv)
+            )
+            if len(self.canonical_order) == 0:
+                logger.error("No subjects found in canonical order")
+                return False
+            logger.info(f"✓ {len(self.canonical_order)} rows loaded")
+            return True
+        except Exception as e:
+            logger.error(f"Failed: {e}")
+            return False
+
+    def _step_collect_maps(self) -> bool:
+        logger.info(f"[Step 2] Collecting {self.stat.upper()} maps...")
+        map_entries = _find_alff_reho_maps(
+            self.bids_root, self.pipeline, self.canonical_order, self.stat
+        )
+        # Order maps according to canonical order (row_index order)
+        subject_session_path: Dict[Tuple[str, str], Optional[str]] = {
+            (s, sess): p for s, sess, _g, p in map_entries
+        }
+        self.zmaps_list = []
+        missing = []
+        for _, row in self.canonical_order.iterrows():
+            key = (row["subject"], row["session"])
+            path = subject_session_path.get(key)
+            if path is None:
+                missing.append(f"{row['subject']} {row['session']}")
+            else:
+                self.zmaps_list.append(path)
+
+        if missing:
+            logger.warning(f"{len(missing)} maps missing: {missing[:5]}")
+            # Keep only rows with maps available
+            available_keys = {(s, sess) for s, sess, _g, p in map_entries if p is not None}
+            self.canonical_order = self.canonical_order[
+                self.canonical_order.apply(
+                    lambda r: (r["subject"], r["session"]) in available_keys, axis=1
+                )
+            ].reset_index(drop=True)
+            self.canonical_order["row_index"] = range(len(self.canonical_order))
+            self.zmaps_list = [
+                subject_session_path[(r["subject"], r["session"])]
+                for _, r in self.canonical_order.iterrows()
+            ]
+
+        if not self.zmaps_list:
+            logger.error(f"No {self.stat.upper()} maps found. Run XCP-D first.")
+            return False
+
+        logger.info(f"✓ {len(self.zmaps_list)} maps found")
+        return True
+
+    def _step_merge_4d_nifti(self) -> bool:
+        logger.info("[Step 3] Merging maps into 4D NIfTI...")
+        try:
+            result = subprocess.run(["which", "fslmerge"], capture_output=True, timeout=5)
+            if result.returncode != 0:
+                logger.error("fslmerge not found. Install FSL.")
+                return False
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            randomise_dir = self.output_dir / "randomise_outputs"
+            randomise_dir.mkdir(parents=True, exist_ok=True)
+            self.merged_nifti_path = self.output_dir / "4d_merged.nii.gz"
+            cmd = ["fslmerge", "-t", str(self.merged_nifti_path)] + self.zmaps_list
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                logger.error(f"fslmerge failed: {result.stderr}")
+                return False
+            logger.info(f"✓ Merged: {self.merged_nifti_path.name}")
+            return True
+        except Exception as e:
+            logger.error(f"Merge failed: {e}")
+            return False
+
+    def _step_generate_design_files(self) -> bool:
+        logger.info("[Step 4] Generating FSL design files...")
+        try:
+            control_rows = self.canonical_order[self.canonical_order["group"] == "control"]
+            walking_rows = self.canonical_order[self.canonical_order["group"] == "walking"]
+            control_subjects = sorted(control_rows["subject"].unique().tolist())
+            walking_subjects = sorted(walking_rows["subject"].unique().tolist())
+            builder = MixedDesignBuilder.from_paired_two_group(
+                control_subjects=control_subjects,
+                walking_subjects=walking_subjects,
+                sessions=["ses-01", "ses-02"],
+            )
+            builder.build()
+            is_valid, errors = builder.validate()
+            if not is_valid:
+                for err in errors:
+                    logger.error(f"  {err}")
+                return False
+            self.design_files = builder.save_fsl_files(self.output_dir)
+            logger.info(f"✓ Design files generated")
+            return True
+        except Exception as e:
+            logger.error(f"Failed: {e}")
+            return False
+
+    def _step_run_randomise(self) -> bool:
+        logger.info("[Step 5] Running FSL randomise...")
+        try:
+            result = subprocess.run(["which", "randomise"], capture_output=True, timeout=5)
+            if result.returncode != 0:
+                logger.error("randomise not found. Install FSL.")
+                return False
+            randomise_dir = self.output_dir / "randomise_outputs"
+            randomise_dir.mkdir(parents=True, exist_ok=True)
+            if self.mask_path and self.mask_path.exists():
+                mask = str(self.mask_path)
+            else:
+                # Use standard MNI mask if available
+                standard_masks = [
+                    self.bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz",
+                    self.bids_root / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz",
+                ]
+                mask = next((str(m) for m in standard_masks if m.exists()), None)
+                if not mask:
+                    logger.error("Could not find brain mask")
+                    return False
+            cmd = [
+                "randomise",
+                "-i", str(self.merged_nifti_path),
+                "-o", str(randomise_dir / "randomise"),
+                "-d", str(self.design_files["design.mat"]),
+                "-t", str(self.design_files["design.con"]),
+                "-f", str(self.design_files["design.fts"]),
+                "-e", str(self.design_files["design.grp"]),
+                "-m", mask,
+                "-n", str(self.n_perm),
+                "-D",
+            ]
+            if self.correction == "TFCE":
+                cmd.append("-T")
+            elif self.correction == "GRF":
+                cmd.extend(["-c", "2.3"])
+            logs_dir = self.output_dir / "randomise_logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            with open(logs_dir / "stdout.log", "w") as so, open(logs_dir / "stderr.log", "w") as se:
+                result = subprocess.run(cmd, stdout=so, stderr=se)
+            if result.returncode != 0:
+                logger.error(f"randomise failed (exit {result.returncode})")
+                return False
+            if self.correction == "FDR":
+                # reuse FDR logic from GroupStatsRunner
+                _runner = GroupStatsRunner.__new__(GroupStatsRunner)
+                _runner.bids_root = self.bids_root
+                _runner.output_dir = self.output_dir
+                _runner._apply_fdr_correction(randomise_dir, mask)
+            logger.info(f"✓ randomise completed ({self.n_perm} permutations)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed: {e}")
+            return False
+
+
 def setup_logging(debug: bool = False) -> None:
     """Configure logging."""
     level = logging.DEBUG if debug else logging.INFO
@@ -847,7 +1101,15 @@ def main():
     )
 
     parser.add_argument("--bids-root", required=True, help="Project root directory")
-    parser.add_argument("--seed", required=True, help="Seed CLI token (e.g., atlas-4S256Parcels:RH_Cont_Par_1 or sphere:x,y,z,r=6)")
+    seed_group = parser.add_mutually_exclusive_group(required=True)
+    seed_group.add_argument(
+        "--seed",
+        help="Seed token in CLI format"
+    )
+    seed_group.add_argument(
+        "--stat-map",
+        help="ALFF/ReHo stat map type: 'alff' or 'reho'"
+    )
     parser.add_argument("--pipeline", default="fc", choices=["fc", "fc_gsr", "ec"], help="Pipeline (default: fc)")
     parser.add_argument("--measure", default="pearson", help="Connectivity measure (default: pearson)")
     parser.add_argument("--output-dir", help="Output directory (default: derivatives/connectivity/<pipeline>/group/seed/.../)")
@@ -865,17 +1127,29 @@ def main():
     setup_logging(debug=args.debug)
     logger.debug(f"Arguments: {args}")
 
-    runner = GroupStatsRunner(
-        bids_root=args.bids_root,
-        seed=args.seed,
-        pipeline=args.pipeline,
-        measure=args.measure,
-        output_dir=args.output_dir,
-        n_perm=args.n_perm,
-        mask_path=args.mask_path,
-        canonical_order_csv=args.canonical_order_csv,
-        correction=args.correction,
-    )
+    if args.seed:
+        runner = GroupStatsRunner(
+            bids_root=args.bids_root,
+            seed=args.seed,
+            pipeline=args.pipeline,
+            measure=args.measure,
+            output_dir=args.output_dir,
+            n_perm=args.n_perm,
+            mask_path=args.mask_path,
+            canonical_order_csv=args.canonical_order_csv,
+            correction=args.correction,
+        )
+    else:
+        runner = GroupStatsAlffRehoRunner(
+            bids_root=args.bids_root,
+            stat=args.stat_map,
+            pipeline=args.pipeline,
+            output_dir=args.output_dir,
+            n_perm=args.n_perm,
+            mask_path=args.mask_path,
+            canonical_order_csv=args.canonical_order_csv,
+            correction=args.correction,
+        )
 
     success = runner.run()
     sys.exit(0 if success else 1)
