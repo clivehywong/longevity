@@ -10,6 +10,8 @@ import io
 import json
 import sys
 import re
+import base64
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -23,9 +25,15 @@ import streamlit.components.v1 as components
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.connectivity_viewer import pipeline_picker
-from utils.group_cluster_analysis import ClusterResult, parse_cluster_table
+from utils.group_cluster_analysis import (
+    ClusterResult, parse_cluster_table,
+    run_lmm_cluster, run_grf_cluster, run_tfce_cluster, fsl_available,
+)
 
 PAGE_KEY = "group_results_summary"
+
+_DEFAULT_GRF_PARAMS = {"z_thr": 2.3, "p_thr": 0.05, "k": 1, "smoothness": "z", "tail": "both"}
+_DEFAULT_TFCE_PARAMS = {"corrp_thr": 0.95, "cluster_z_thr": 0.0, "k": 50}
 
 _CONTRAST_LABELS = {
     1: "Group × Time interaction",
@@ -525,112 +533,203 @@ def _add_atlasq_labels(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _run_cluster_for_row(
+    row: pd.Series,
+    bids_root: Path,
+    grf_params: dict | None = None,
+    tfce_params: dict | None = None,
+) -> ClusterResult:
+    """Run appropriate cluster analysis for a result row.
+
+    For LMM: uses run_lmm_cluster on cN_zthresh.nii.gz (already GRF-corrected).
+    For randomise TFCE: uses run_tfce_cluster.
+    For randomise GRF: uses run_grf_cluster.
+    """
+    if not fsl_available():
+        return ClusterResult(error="FSL not available")
+
+    source = row["source"]
+    corrp_label = row.get("corrp_label", "")
+    contrast_idx = int(row["contrast_idx"])
+    out_dir = Path(row["out_dir"]) / "cluster_analysis" / f"contrast{contrast_idx}"
+
+    if source == "lmm":
+        zthresh_path = Path(row["out_dir"]) / f"c{contrast_idx}_zthresh.nii.gz"
+        if not zthresh_path.exists():
+            return ClusterResult(error=f"zthresh not found: {zthresh_path}")
+        k = (grf_params or _DEFAULT_GRF_PARAMS).get("k", 1)
+        return run_lmm_cluster(zthresh_path, out_dir, min_voxels=int(k))
+
+    elif corrp_label == "TFCE" and row.get("corrp_path"):
+        p = tfce_params or _DEFAULT_TFCE_PARAMS
+        return run_tfce_cluster(
+            corrp_path=Path(row["corrp_path"]),
+            tstat_path=Path(row["tstat_path"]),
+            out_dir=out_dir,
+            corrp_thr=float(p.get("corrp_thr", 0.95)),
+            cluster_z_thr=float(p.get("cluster_z_thr", 0.0)) or None,
+            k=int(p.get("k", 50)),
+        )
+
+    else:
+        p = grf_params or _DEFAULT_GRF_PARAMS
+        mask_path = bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
+        if not mask_path.exists():
+            return ClusterResult(error=f"Brain mask not found: {mask_path}")
+        return run_grf_cluster(
+            tstat_path=Path(row["tstat_path"]),
+            mask_path=mask_path,
+            out_dir=out_dir,
+            z_thr=float(p.get("z_thr", 2.3)),
+            p_thr=float(p.get("p_thr", 0.05)),
+            k=int(p.get("k", 1)),
+            smoothness=str(p.get("smoothness", "z")),
+            tail=str(p.get("tail", "both")),
+        )
+
+
+def _load_cluster_from_disk(row: pd.Series) -> Optional[ClusterResult]:
+    """Load existing cluster analysis results from the cluster_analysis directory on disk."""
+    contrast_idx = int(row["contrast_idx"])
+    source = row["source"]
+    out_dir = Path(row["out_dir"]) / "cluster_analysis" / f"contrast{contrast_idx}"
+
+    if source == "lmm":
+        txt = out_dir / "lmm_cluster.txt"
+        idx = out_dir / "lmm_cluster_index.nii.gz"
+        if txt.exists() and idx.exists():
+            table = parse_cluster_table(txt)
+            if "MAX" in table.columns and "Peak Z" not in table.columns:
+                table = table.rename(columns={
+                    "MAX": "Peak Z", "MAX X (mm)": "X(mm)",
+                    "MAX Y (mm)": "Y(mm)", "MAX Z (mm)": "Z(mm)",
+                })
+            return ClusterResult(
+                tables={"pos": table},
+                cluster_img={"pos": idx},
+                params={"source": "lmm_zthresh"},
+            )
+    else:
+        # GRF pos/neg
+        tables, imgs = {}, {}
+        for t in ("pos", "neg"):
+            txt = out_dir / f"grf_{t}_cluster.txt"
+            idx = out_dir / f"grf_{t}_cluster_index.nii.gz"
+            if txt.exists():
+                df = parse_cluster_table(txt)
+                if not df.empty:
+                    tables[t] = df
+                    imgs[t] = idx if idx.exists() else None
+        if tables:
+            return ClusterResult(tables=tables, cluster_img=imgs, params={"source": "grf_disk"})
+        # TFCE
+        txt = out_dir / "tstat_cluster.txt"
+        idx = out_dir / "cluster_index.nii.gz"
+        if txt.exists():
+            table = parse_cluster_table(txt)
+            if not table.empty:
+                return ClusterResult(
+                    tables={"pos": table},
+                    cluster_img={"pos": idx if idx.exists() else None},
+                    params={"source": "tfce_disk"},
+                )
+    return None
+
+
 def _render_grf_controls_and_run(
     row_id: str,
     row: pd.Series,
     bids_root: Path,
 ) -> Optional[ClusterResult]:
-    """Show cluster analysis parameter controls and run button.
-
-    Returns ClusterResult if one is stored in session state, else None.
-    """
-    from utils.group_cluster_analysis import run_grf_cluster, run_tfce_cluster, fsl_available
-
+    """Show cluster analysis controls and run button. Returns current ClusterResult if available."""
+    source = row["source"]
     corrp_label = row.get("corrp_label", "")
     is_tfce = corrp_label == "TFCE"
+    is_lmm = source == "lmm"
+    state_key = f"{PAGE_KEY}_cluster_{row_id}"
+    params_key = f"{PAGE_KEY}_cluster_params_{row_id}"
+
+    # Load last-used params (default if not yet run)
+    last_params: dict = st.session_state.get(params_key, {})
 
     with st.expander("🔧 Cluster Analysis Settings", expanded=False):
-        if is_tfce:
-            col1, col2, col3 = st.columns(3)
-            corrp_thr = col1.slider(
-                "Corrp threshold", 0.90, 0.99, 0.95, 0.01,
-                key=f"{PAGE_KEY}_corrp_thr_{row_id}",
-                help="TFCE corrected p-value threshold (1-p). 0.95 = p<0.05",
-            )
-            cluster_z_thr = col2.number_input(
-                "Min cluster z", value=0.0, min_value=0.0, max_value=5.0, step=0.1,
-                key=f"{PAGE_KEY}_cluster_z_{row_id}",
-                help="Minimum z within cluster (0 = auto from tstat range)",
-            )
-            k_min = col3.number_input(
-                "Min cluster size (voxels)", value=50, min_value=1, max_value=5000, step=10,
+        if is_lmm:
+            k_min = st.number_input(
+                "Min cluster size (voxels)", value=int(last_params.get("k", 1)),
+                min_value=1, max_value=5000, step=10,
                 key=f"{PAGE_KEY}_k_{row_id}",
             )
-            params_key = f"tfce_{corrp_thr:.2f}_{cluster_z_thr:.1f}_{int(k_min)}"
+            run_params = {"k": k_min}
+        elif is_tfce:
+            col1, col2, col3 = st.columns(3)
+            corrp_thr = col1.slider(
+                "Corrp threshold", 0.90, 0.99,
+                float(last_params.get("corrp_thr", 0.95)), 0.01,
+                key=f"{PAGE_KEY}_corrp_thr_{row_id}",
+            )
+            cluster_z_thr = col2.number_input(
+                "Min cluster z", value=float(last_params.get("cluster_z_thr", 0.0)),
+                min_value=0.0, max_value=5.0, step=0.1,
+                key=f"{PAGE_KEY}_cluster_z_{row_id}",
+            )
+            k_min = col3.number_input(
+                "Min cluster size (voxels)", value=int(last_params.get("k", 50)),
+                min_value=1, max_value=5000, step=10,
+                key=f"{PAGE_KEY}_k_{row_id}",
+            )
+            run_params = {"corrp_thr": corrp_thr, "cluster_z_thr": cluster_z_thr, "k": k_min}
         else:
             col1, col2, col3, col4, col5 = st.columns(5)
             z_thr = col1.number_input(
-                "Z threshold", value=2.3, min_value=0.5, max_value=6.0, step=0.1,
-                key=f"{PAGE_KEY}_z_thr_{row_id}",
+                "Z threshold", value=float(last_params.get("z_thr", 2.3)),
+                min_value=0.5, max_value=6.0, step=0.1, key=f"{PAGE_KEY}_z_thr_{row_id}",
             )
             p_thr = col2.number_input(
-                "p threshold (FWE)", value=0.05, min_value=0.001, max_value=0.1, step=0.005,
-                format="%.3f", key=f"{PAGE_KEY}_p_thr_{row_id}",
+                "p threshold", value=float(last_params.get("p_thr", 0.05)),
+                min_value=0.001, max_value=0.1, step=0.005, format="%.3f",
+                key=f"{PAGE_KEY}_p_thr_{row_id}",
             )
             k_min = col3.number_input(
-                "Min cluster size (voxels)", value=1, min_value=1, max_value=5000, step=10,
-                key=f"{PAGE_KEY}_k_{row_id}",
+                "Min voxels", value=int(last_params.get("k", 1)),
+                min_value=1, max_value=5000, step=10, key=f"{PAGE_KEY}_k_{row_id}",
             )
             smoothness = col4.radio(
-                "Smoothness est.", ["z", "r"], index=0,
+                "Smoothness", ["z", "r"],
+                index=["z", "r"].index(last_params.get("smoothness", "z")),
                 key=f"{PAGE_KEY}_smooth_{row_id}",
-                help="'z': from z/t-stat map | 'r': from residuals (if available)",
             )
             tail = col5.radio(
-                "Tail", ["both", "pos", "neg"], index=0,
+                "Tail", ["both", "pos", "neg"],
+                index=["both", "pos", "neg"].index(last_params.get("tail", "both")),
                 key=f"{PAGE_KEY}_tail_{row_id}",
             )
-            params_key = f"grf_{z_thr:.2f}_{p_thr:.3f}_{int(k_min)}_{smoothness}_{tail}"
+            run_params = {"z_thr": z_thr, "p_thr": p_thr, "k": k_min,
+                          "smoothness": smoothness, "tail": tail}
 
-        state_key = f"{PAGE_KEY}_cluster_{row_id}_{params_key}"
-
-        mask_path = bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
-        if not mask_path.exists():
-            st.warning(f"Brain mask not found: {mask_path}")
-
-        if st.button("▶ Run Cluster Analysis", key=f"{PAGE_KEY}_run_{row_id}"):
-            if not fsl_available():
-                st.error("FSL not available on this machine.")
-                st.session_state[state_key] = ClusterResult(error="FSL not available")
-            elif not mask_path.exists():
-                st.error(f"Brain mask not found: {mask_path}")
-                st.session_state[state_key] = ClusterResult(error=f"Mask not found: {mask_path}")
+        if st.button("▶ Re-run Cluster Analysis", key=f"{PAGE_KEY}_run_{row_id}"):
+            with st.spinner("Running…"):
+                result = _run_cluster_for_row(
+                    row, bids_root,
+                    grf_params=run_params if not is_tfce else None,
+                    tfce_params=run_params if is_tfce else None,
+                )
+            st.session_state[state_key] = result
+            st.session_state[params_key] = run_params
+            if result.error:
+                st.error(f"Error: {result.error}")
             else:
-                tstat_path = Path(row["tstat_path"])
-                out_dir = Path(row["out_dir"]) / "cluster_analysis" / f"contrast{int(row['contrast_idx'])}"
-                with st.spinner("Running cluster analysis…"):
-                    if is_tfce and row.get("corrp_path"):
-                        result = run_tfce_cluster(
-                            corrp_path=Path(row["corrp_path"]),
-                            tstat_path=tstat_path,
-                            out_dir=out_dir,
-                            corrp_thr=corrp_thr,
-                            cluster_z_thr=cluster_z_thr if cluster_z_thr > 0 else None,
-                            k=int(k_min),
-                        )
-                    else:
-                        result = run_grf_cluster(
-                            tstat_path=tstat_path,
-                            mask_path=mask_path,
-                            out_dir=out_dir,
-                            z_thr=float(z_thr),
-                            p_thr=float(p_thr),
-                            k=int(k_min),
-                            smoothness=smoothness,
-                            tail=tail,
-                        )
-                if result.error:
-                    st.error(f"Cluster analysis error: {result.error}")
-                else:
-                    n_clusters = sum(len(t) for t in result.tables.values() if t is not None)
-                    if n_clusters == 0:
-                        st.info("No significant clusters found with these parameters.")
-                    else:
-                        st.success(f"Found {n_clusters} cluster(s).")
-                st.session_state[state_key] = result
-                st.rerun()
+                n = sum(len(t) for t in result.tables.values() if t is not None and not t.empty)
+                st.success(f"Found {n} cluster(s).")
+            st.rerun()
 
-    return st.session_state.get(state_key)
+    # Load from session state OR from disk
+    result = st.session_state.get(state_key)
+    if result is None:
+        result = _load_cluster_from_disk(row)
+        if result is not None:
+            st.session_state[state_key] = result
+
+    return result
 
 
 def _render_cluster_details(
@@ -761,27 +860,292 @@ def _render_result_card(row_id: str, row: pd.Series, bids_root: Path) -> None:
     result = _render_grf_controls_and_run(row_id, row, bids_root)
     if result is not None and not result.error:
         _render_cluster_details(result, row_id, row, bids_root)
-    elif result is None:
-        # Load existing cluster analysis from disk if already run
-        out_dir = Path(row["out_dir"])
-        ci_dir = out_dir / "cluster_analysis" / f"contrast{int(row['contrast_idx'])}"
-        has_existing = (
-            any(ci_dir.glob("grf_*_cluster_index.nii.gz")) if ci_dir.exists() else False
-        )
-        if has_existing:
-            tables: dict = {}
-            imgs: dict = {}
-            for t in ("pos", "neg"):
-                txt = ci_dir / f"grf_{t}_cluster.txt"
-                idx_nii = ci_dir / f"grf_{t}_cluster_index.nii.gz"
-                if txt.exists():
-                    tables[t] = parse_cluster_table(txt)
-                    imgs[t] = idx_nii if idx_nii.exists() else None
-            if tables:
-                cached_result = ClusterResult(tables=tables, cluster_img=imgs)
-                _render_cluster_details(cached_result, row_id, row, bids_root)
 
     st.divider()
+
+
+# ============================================================================
+# Auto-run and HTML report
+# ============================================================================
+
+def _render_autorun_section(df: pd.DataFrame, bids_root: Path) -> None:
+    """Auto-run button and HTML download."""
+    needs_run = df.get("needs_cluster_run", df["significant"])
+    eligible = df[df["significant"] | needs_run]
+    n_eligible = len(eligible)
+
+    col_run, col_dl = st.columns([2, 1])
+    with col_run:
+        if st.button(
+            f"🚀 Auto-run cluster analysis ({n_eligible} results, default settings)",
+            key=f"{PAGE_KEY}_autorun_all",
+            help="Runs cluster analysis for all significant results using default parameters. "
+                 "You can fine-tune per-result afterwards.",
+        ):
+            prog = st.progress(0, text="Running cluster analyses…")
+            errors = []
+            for i, (_, row) in enumerate(eligible.iterrows()):
+                row_id = row["_row_id"]
+                state_key = f"{PAGE_KEY}_cluster_{row_id}"
+                label_short = str(row.get("label", ""))[:35]
+                prog.progress(i / max(n_eligible, 1), text=f"[{i+1}/{n_eligible}] {label_short}…")
+                result = _run_cluster_for_row(row, bids_root)
+                st.session_state[state_key] = result
+                if result.error:
+                    errors.append(f"{label_short}: {result.error}")
+            prog.progress(1.0, text=f"Done — {n_eligible} analyses completed.")
+            if errors:
+                st.warning(f"{len(errors)} error(s):\n" + "\n".join(errors[:5]))
+            else:
+                st.success("All cluster analyses complete. Fine-tune per-result below.")
+            st.rerun()
+
+    with col_dl:
+        results_available = any(
+            f"{PAGE_KEY}_cluster_{row['_row_id']}" in st.session_state
+            for _, row in eligible.iterrows()
+        )
+        if results_available:
+            if st.button("📥 Generate HTML Report", key=f"{PAGE_KEY}_gen_html"):
+                with st.spinner("Generating report…"):
+                    html = _generate_html_report(df, bids_root)
+                st.download_button(
+                    "⬇️ Download Report",
+                    data=html.encode("utf-8"),
+                    file_name=f"group_results_report_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+                    mime="text/html",
+                    key=f"{PAGE_KEY}_dl_html",
+                )
+
+
+def _img_to_b64(png_bytes: Optional[bytes]) -> str:
+    """Convert PNG bytes to base64 data URI."""
+    if not png_bytes:
+        return ""
+    return "data:image/png;base64," + base64.b64encode(png_bytes).decode()
+
+
+@st.cache_data(show_spinner=False)
+def _render_cluster_mean_plot_png(df: pd.DataFrame, title: str) -> Optional[bytes]:
+    """Render group×time mean plot as PNG bytes (for HTML export)."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        session_labels = {"ses-01": "Pre", "ses-02": "Post"}
+        groups = [("control", "#4C72B0", "#85A4D4"), ("walking", "#C44E52", "#E89A9C")]
+        fig, ax = plt.subplots(figsize=(6, 4))
+
+        x_pos = 0
+        xticks, xlabels = [], []
+        for gname, col_pre, col_post in groups:
+            for ses, color, label in [("ses-01", col_pre, "Pre"), ("ses-02", col_post, "Post")]:
+                subset = df[(df["group"] == gname) & (df["session"] == ses)]["mean_val"]
+                if subset.empty:
+                    x_pos += 1
+                    continue
+                ax.boxplot(subset, positions=[x_pos], patch_artist=True,
+                           boxprops=dict(facecolor=color, alpha=0.7),
+                           medianprops=dict(color="black", linewidth=2),
+                           whiskerprops=dict(color="gray"),
+                           capprops=dict(color="gray"),
+                           flierprops=dict(marker="o", markersize=4, alpha=0.5))
+                ax.scatter([x_pos] * len(subset), subset, color=color, alpha=0.6, s=20, zorder=5)
+                xticks.append(x_pos)
+                xlabels.append(f"{gname.capitalize()}\n{label}")
+                x_pos += 1
+            x_pos += 0.5
+
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xlabels, fontsize=9)
+        ax.set_ylabel("Mean value in cluster", fontsize=10)
+        ax.set_title(title, fontsize=11)
+        ax.grid(axis="y", alpha=0.3)
+        ax.spines[["top", "right"]].set_visible(False)
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return None
+
+
+def _generate_html_report(df: pd.DataFrame, bids_root: Path) -> str:
+    """Generate a self-contained HTML report with all images embedded as base64."""
+    pipeline = df["pipeline"].iloc[0] if "pipeline" in df.columns and not df.empty else "unknown"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    needs_run = df.get("needs_cluster_run", df["significant"])
+    rows_with_results = []
+    for _, row in df[df["significant"] | needs_run].iterrows():
+        state_key = f"{PAGE_KEY}_cluster_{row['_row_id']}"
+        result = st.session_state.get(state_key)
+        if result is None:
+            result = _load_cluster_from_disk(row)
+        if result is not None and not result.error:
+            rows_with_results.append((row, result))
+
+    css = """
+    body{font-family:Arial,sans-serif;max-width:1400px;margin:auto;padding:20px;background:#fff;color:#333}
+    h1{color:#1a1a2e}h2{color:#16213e;border-bottom:2px solid #e94560;padding-bottom:6px}
+    h3{color:#0f3460}h4{color:#533483}
+    .card{border:1px solid #ddd;border-radius:8px;margin:24px 0;padding:20px;box-shadow:0 2px 4px rgba(0,0,0,.08)}
+    .sig{color:#2e7d32;font-weight:bold}.label{color:#1565c0}
+    .meta{color:#666;font-size:13px;margin-bottom:12px}
+    table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+    th{background:#f0f4ff;border:1px solid #ccc;padding:7px 10px;text-align:left}
+    td{border:1px solid #ddd;padding:6px 10px}tr:nth-child(even){background:#f9f9f9}
+    .cluster-block{display:flex;gap:16px;margin:12px 0;align-items:flex-start;flex-wrap:wrap}
+    .cluster-brain{flex:1;min-width:300px}.cluster-plot{flex:1;min-width:300px}
+    img{max-width:100%;border-radius:4px;border:1px solid #eee}
+    .toc{background:#f8f8f8;padding:15px;border-radius:6px;margin-bottom:24px}
+    .toc a{color:#0f3460;text-decoration:none}.toc a:hover{text-decoration:underline}
+    .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+    .badge-lmm{background:#e8f5e9;color:#2e7d32}
+    .badge-rand{background:#e3f2fd;color:#1565c0}
+    """
+
+    toc_items = []
+    cards_html = []
+    for i, (row, result) in enumerate(rows_with_results):
+        anchor = f"result-{i}"
+        type_ = row["type"]
+        label = row["label"]
+        cidx = int(row["contrast_idx"])
+        clabel = row["contrast_label"]
+        source = row["source"]
+        badge_cls = "badge-lmm" if source == "lmm" else "badge-rand"
+        toc_items.append(
+            f'<li><a href="#{anchor}">{type_} · {label} · #{cidx} {clabel} '
+            f'<span class="badge {badge_cls}">{source}</span></a></li>'
+        )
+
+        seed_roi_html = ""
+        if type_ == "Seed FC" and row.get("seed_dir"):
+            roi_png = _render_seed_roi_png(str(row["seed_dir"]), str(bids_root))
+            if roi_png:
+                seed_roi_html = f'<h3>Seed ROI</h3><img src="{_img_to_b64(roi_png)}" alt="Seed ROI">'
+
+        tstat_html = ""
+        try:
+            mtime = Path(row["tstat_path"]).stat().st_mtime
+            t_png = _render_tstat_thumb(row["tstat_path"], mtime)
+            if t_png:
+                tstat_html = f'<h3>T-statistic Map</h3><img src="{_img_to_b64(t_png)}" alt="T-stat">'
+        except Exception:
+            pass
+
+        cluster_sections_html = ""
+        for tail_name, tdf in result.tables.items():
+            if tdf is None or tdf.empty:
+                continue
+            cluster_index_path = str(result.cluster_img.get(tail_name, "")) or None
+            ci_exists = cluster_index_path and Path(cluster_index_path).exists()
+
+            try:
+                tdf_labeled = _add_atlasq_labels(tdf)
+            except Exception:
+                tdf_labeled = tdf.copy()
+                tdf_labeled["Label"] = "Unknown"
+
+            display_cols = [c for c in ["Cluster", "Voxels", "Peak Z", "X(mm)", "Y(mm)", "Z(mm)", "Label"]
+                            if c in tdf_labeled.columns]
+            table_rows = ""
+            for _, crow in tdf_labeled[display_cols].iterrows():
+                table_rows += "<tr>" + "".join(f"<td>{v}</td>" for v in crow) + "</tr>"
+            table_html = (
+                "<table><thead><tr>"
+                + "".join(f"<th>{c}</th>" for c in display_cols)
+                + f"</tr></thead><tbody>{table_rows}</tbody></table>"
+            )
+
+            per_cluster_html = ""
+            if ci_exists:
+                ci_mtime = Path(cluster_index_path).stat().st_mtime
+                ts_mtime = Path(row["tstat_path"]).stat().st_mtime
+                for _, crow in tdf_labeled.iterrows():
+                    cluster_label = int(crow.get("Cluster", 1))
+                    nvox = int(crow.get("Voxels", 0))
+                    peak_z = float(crow.get("Peak Z", 0))
+                    px, py, pz = crow.get("X(mm)", 0), crow.get("Y(mm)", 0), crow.get("Z(mm)", 0)
+                    lname = crow.get("Label", "Unknown")
+
+                    brain_img_html = ""
+                    overlay_png = _render_single_cluster_png(
+                        cluster_index_path, cluster_label,
+                        row["tstat_path"], ci_mtime, ts_mtime,
+                    )
+                    if overlay_png:
+                        brain_img_html = f'<img src="{_img_to_b64(overlay_png)}" alt="Cluster {cluster_label}">'
+
+                    plot_img_html = ""
+                    df_means = _extract_single_cluster_means(
+                        cluster_index_path=cluster_index_path,
+                        cluster_label=cluster_label,
+                        ci_mtime=ci_mtime,
+                        bids_root_str=str(bids_root),
+                        pipeline=str(row.get("pipeline", "")),
+                        map_type=type_,
+                        seed_dir=str(row.get("seed_dir", "")) or None,
+                        measure=str(row.get("measure", "")) or None,
+                        summary_json_path=str(row.get("summary_json", "")),
+                    )
+                    if df_means is not None and not df_means.empty:
+                        plot_png = _render_cluster_mean_plot_png(
+                            df_means,
+                            title=f"Cluster {cluster_label}: {lname}",
+                        )
+                        if plot_png:
+                            plot_img_html = f'<img src="{_img_to_b64(plot_png)}" alt="Group×Time plot">'
+
+                    per_cluster_html += f"""
+                    <div style="margin:16px 0;border-left:3px solid #533483;padding-left:12px">
+                      <h4>Cluster {cluster_label} — {nvox} voxels | Peak Z={peak_z:.2f} @ ({px:.0f},{py:.0f},{pz:.0f}) | {lname}</h4>
+                      <div class="cluster-block">
+                        <div class="cluster-brain">{brain_img_html}</div>
+                        <div class="cluster-plot">{plot_img_html}</div>
+                      </div>
+                    </div>"""
+
+            cluster_sections_html += f"""
+            <h3>{tail_name.capitalize()} Clusters ({len(tdf)} clusters)</h3>
+            {table_html}
+            {per_cluster_html}
+            """
+
+        cards_html.append(f"""
+        <div class="card" id="{anchor}">
+          <h2><span class="sig">{"✅" if row["significant"] else "🔄"}</span>
+            <span class="label"> {type_} · {label}</span></h2>
+          <p class="meta">Contrast #{cidx}: {clabel} | Source: <span class="badge {badge_cls}">{source}</span></p>
+          {seed_roi_html}
+          {tstat_html}
+          {cluster_sections_html}
+        </div>""")
+
+    toc_html = (
+        '<div class="toc"><h3>Table of Contents</h3><ol>'
+        + "".join(toc_items)
+        + "</ol></div>"
+    ) if toc_items else ""
+
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Group Results Report — {pipeline}</title>
+<style>{css}</style>
+</head>
+<body>
+<h1>Group Connectivity Analysis Report</h1>
+<p><b>Pipeline:</b> {pipeline} | <b>Generated:</b> {now} | <b>Analyses with results:</b> {len(rows_with_results)}</p>
+{toc_html}
+{"".join(cards_html)}
+</body></html>"""
 
 
 # ============================================================================
@@ -833,6 +1197,14 @@ def render() -> None:
     # Add pipeline column (for _extract_cluster_means)
     df["pipeline"] = pipeline
 
+    # Compute _row_id on full df so auto-run and disk-loading work before filtering
+    df["_row_id"] = (
+        df["type"] + "|" +
+        df["label"].fillna("") + "|" +
+        df["contrast_idx"].astype(str) + "|" +
+        df["source"]
+    )
+
     # ── Summary metrics ────────────────────────────────────────────────────
     sig_count = int(df["significant"].sum())
     needs_run_count = int(df["needs_cluster_run"].sum()) if "needs_cluster_run" in df.columns else 0
@@ -844,6 +1216,10 @@ def render() -> None:
     m4.metric("Seed FC", int((df["type"] == "Seed FC").sum()))
     m5.metric("ALFF / ReHo", int(((df["type"] == "ALFF") | (df["type"] == "ReHo")).sum()))
 
+    st.divider()
+
+    # ── Auto-run section (before filters) ──────────────────────────────────
+    _render_autorun_section(df, bids_root)
     st.divider()
 
     # ── Filters ─────────────────────────────────────────────────────────────
@@ -885,12 +1261,6 @@ def render() -> None:
     st.caption("Default selection: all significant results. Uncheck to exclude.")
 
     filtered = filtered.copy()
-    filtered["_row_id"] = (
-        filtered["type"] + "|" +
-        filtered["label"].fillna("") + "|" +
-        filtered["contrast_idx"].astype(str) + "|" +
-        filtered["source"]
-    )
 
     inclusion_state: dict = st.session_state.get(f"{PAGE_KEY}_inclusion", {})
     filtered["Include"] = filtered.apply(

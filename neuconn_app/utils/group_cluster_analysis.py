@@ -26,6 +26,11 @@ _COL_RENAMES: dict[str, str] = {
     "Z-MAX X (mm)": "X(mm)",
     "Z-MAX Y (mm)": "Y(mm)",
     "Z-MAX Z (mm)": "Z(mm)",
+    # zthresh output uses MAX (not Z-MAX) — rename to Peak Z for consistency
+    "MAX": "Peak Z",
+    "MAX X (mm)": "X(mm)",
+    "MAX Y (mm)": "Y(mm)",
+    "MAX Z (mm)": "Z(mm)",
 }
 
 
@@ -265,6 +270,72 @@ def run_grf_cluster(
             "RESELS": RESELS,
             "VOLUME": VOLUME,
         },
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# LMM cluster labeling (cN_zthresh.nii.gz — already GRF-corrected)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def run_lmm_cluster(
+    zthresh_path: Path,
+    out_dir: Path,
+    min_voxels: int = 1,
+) -> ClusterResult:
+    """Label clusters in an already GRF-corrected z-stat map (LMM cN_zthresh.nii.gz).
+
+    Uses fsl-cluster just for connected-component labeling and peak extraction.
+    No GRF p-value is applied — the input is already corrected.
+    """
+    import nibabel as nib  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    if not fsl_available():
+        return ClusterResult(error="FSL not available")
+    if not zthresh_path.exists():
+        return ClusterResult(error=f"zthresh file not found: {zthresh_path}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cluster_index = out_dir / "lmm_cluster_index"
+    lmax_file = out_dir / "lmm_lmax.txt"
+    cluster_txt = out_dir / "lmm_cluster.txt"
+
+    # Find min nonzero z as threshold (just below the smallest significant value)
+    try:
+        data = np.asanyarray(nib.load(str(zthresh_path)).dataobj)
+        nonzero = data[data > 0]
+        z_thr = float(nonzero.min()) - 0.01 if len(nonzero) > 0 else 0.01
+    except Exception:
+        z_thr = 0.01
+
+    cmd = (
+        f"fsl-cluster -i {zthresh_path} -t {z_thr:.4f}"
+        f" -o {cluster_index} --olmax={lmax_file}"
+        f" --minextent={min_voxels} --mm"
+    )
+    rc, stdout, stderr = _run_cmd(cmd, timeout=60)
+    cluster_txt.write_text(stdout)
+
+    if rc != 0:
+        return ClusterResult(error=f"fsl-cluster failed: {stderr[:400]}")
+
+    cluster_index_nii = Path(str(cluster_index) + ".nii.gz")
+
+    table = parse_cluster_table(cluster_txt)
+    # Rename 'MAX' → 'Peak Z' if not already renamed (zthresh output has MAX column)
+    if "MAX" in table.columns and "Peak Z" not in table.columns:
+        table = table.rename(columns={
+            "MAX": "Peak Z",
+            "MAX X (mm)": "X(mm)",
+            "MAX Y (mm)": "Y(mm)",
+            "MAX Z (mm)": "Z(mm)",
+        })
+
+    return ClusterResult(
+        tables={"pos": table},
+        cluster_img={"pos": cluster_index_nii if cluster_index_nii.exists() else None},
+        params={"z_thr": z_thr, "min_voxels": min_voxels, "source": "lmm_zthresh"},
     )
 
 
