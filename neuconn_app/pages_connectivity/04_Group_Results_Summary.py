@@ -1287,7 +1287,17 @@ def render() -> None:
 
     # ── Selection table ──────────────────────────────────────────────────────
     st.markdown("### Select analyses to view")
-    st.caption("Default selection: all significant results. Uncheck to exclude.")
+    sel_col1, sel_col2, sel_col3 = st.columns([2, 1, 1])
+    with sel_col1:
+        st.caption("Default selection: all significant results. Uncheck to exclude.")
+    with sel_col2:
+        if st.button("✅ Select all", key=f"{PAGE_KEY}_sel_all"):
+            st.session_state[f"{PAGE_KEY}_inclusion"] = {r["_row_id"]: True for _, r in filtered.iterrows()}
+            st.rerun()
+    with sel_col3:
+        if st.button("⬜ Deselect all", key=f"{PAGE_KEY}_desel_all"):
+            st.session_state[f"{PAGE_KEY}_inclusion"] = {r["_row_id"]: False for _, r in filtered.iterrows()}
+            st.rerun()
 
     filtered = filtered.copy()
 
