@@ -814,6 +814,20 @@ def _render_cluster_details(
 # Per-result card renderer
 # ============================================================================
 
+def _delete_group_analysis(row: pd.Series) -> None:
+    """Delete the analysis output directory and clear session_state cluster cache."""
+    import shutil
+    out_dir = Path(row["out_dir"])
+    if out_dir.exists():
+        shutil.rmtree(out_dir, ignore_errors=True)
+    # Clear cluster cache for this row
+    row_id = row.get("_row_id")
+    if row_id:
+        for key in [f"{PAGE_KEY}_cluster_{row_id}", f"{PAGE_KEY}_cluster_params_{row_id}"]:
+            st.session_state.pop(key, None)
+    # Invalidate filesystem scan cache
+    _scan_all_results.clear()
+
 def _render_result_card(row_id: str, row: pd.Series, bids_root: Path) -> None:
     """Render one result row as an expanded card."""
     label = (
@@ -861,7 +875,31 @@ def _render_result_card(row_id: str, row: pd.Series, bids_root: Path) -> None:
     if result is not None and not result.error:
         _render_cluster_details(result, row_id, row, bids_root)
 
+    # ── Per-card delete ──────────────────────────────────────────────────────
     st.divider()
+    confirm_key = f"{PAGE_KEY}_del_confirm_{row_id}"
+    if st.session_state.get(confirm_key):
+        st.warning(
+            f"⚠️ This will permanently delete **{row['source']}** outputs for **{row['label']}** "
+            f"(contrast #{row['contrast_idx']}). This cannot be undone."
+        )
+        col_yes, col_no, _ = st.columns([1, 1, 4])
+        if col_yes.button("✅ Confirm delete", key=f"{PAGE_KEY}_del_yes_{row_id}"):
+            _delete_group_analysis(row)
+            st.session_state.pop(confirm_key, None)
+            st.success("Deleted. Refreshing…")
+            st.rerun()
+        if col_no.button("❌ Cancel", key=f"{PAGE_KEY}_del_no_{row_id}"):
+            st.session_state.pop(confirm_key, None)
+            st.rerun()
+    else:
+        if st.button(
+            "🗑️ Delete this analysis", key=f"{PAGE_KEY}_del_{row_id}",
+            help="Remove the analysis output directory from disk. The analysis can be re-run afterwards.",
+            type="secondary",
+        ):
+            st.session_state[confirm_key] = True
+            st.rerun()
 
 
 # ============================================================================
@@ -1313,6 +1351,34 @@ def render() -> None:
                 mime="text/html",
                 key=f"{PAGE_KEY}_dl_html",
             )
+
+    # ── Bulk delete ──────────────────────────────────────────────────────────
+    bulk_confirm_key = f"{PAGE_KEY}_bulk_del_confirm"
+    n_sel = len(selected_rows)
+    if st.session_state.get(bulk_confirm_key):
+        st.warning(
+            f"⚠️ This will permanently delete **{n_sel} analysis output director{'y' if n_sel==1 else 'ies'}** "
+            "from disk. This cannot be undone."
+        )
+        bc1, bc2, _ = st.columns([1, 1, 5])
+        if bc1.button("✅ Confirm delete all selected", key=f"{PAGE_KEY}_bulk_del_yes"):
+            for _, row in selected_rows.iterrows():
+                _delete_group_analysis(row)
+            st.session_state.pop(bulk_confirm_key, None)
+            st.success(f"Deleted {n_sel} analyses. Refreshing…")
+            st.rerun()
+        if bc2.button("❌ Cancel", key=f"{PAGE_KEY}_bulk_del_no"):
+            st.session_state.pop(bulk_confirm_key, None)
+            st.rerun()
+    else:
+        if st.button(
+            f"🗑️ Delete {n_sel} selected analysis result{'s' if n_sel!=1 else ''}",
+            key=f"{PAGE_KEY}_bulk_del",
+            help="Remove the output directories for all selected analyses. Can be re-run afterwards.",
+            type="secondary",
+        ):
+            st.session_state[bulk_confirm_key] = True
+            st.rerun()
 
     st.markdown(f"### Results ({len(selected_rows)} selected)")
 
