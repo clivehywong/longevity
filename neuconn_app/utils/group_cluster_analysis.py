@@ -7,6 +7,8 @@ Matches the logic of:
 
 from __future__ import annotations
 
+import functools
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -73,6 +75,37 @@ def _parse_smoothest(stdout: str) -> dict | None:
         except ValueError:
             pass
     return data if ("DLH" in data and "VOLUME" in data) else None
+
+
+@functools.lru_cache(maxsize=512)
+def query_atlasq_label(x: int, y: int, z: int) -> str:
+    """Query Harvard-Oxford atlases for anatomical label at MNI coordinate.
+
+    Coordinates are rounded integers for cache efficiency.
+    Returns: top region label or "Unknown"
+    """
+    coord_str = f"{x},{y},{z}"
+    labels = []
+    for atlas in [
+        "Harvard-Oxford Cortical Structural Atlas",
+        "Harvard-Oxford Subcortical Structural Atlas",
+    ]:
+        try:
+            rc, out, _ = _run_cmd(
+                ["atlasquery", "-a", atlas, "-c", coord_str], timeout=10
+            )
+            if rc == 0 and out.strip():
+                # Parse: "<b>Atlas Name</b><br>42% Region Name, 13% Another Region"
+                text = re.sub(r"<[^>]+>", "", out).strip()
+                for part in text.split(","):
+                    part = part.strip()
+                    # Skip zero-percentage entries
+                    if part and not re.match(r"^0%", part):
+                        labels.append(part.strip())
+                        break
+        except Exception:
+            pass
+    return " / ".join(labels) if labels else "Unknown"
 
 
 def parse_cluster_table(txt_path: Path) -> pd.DataFrame:
