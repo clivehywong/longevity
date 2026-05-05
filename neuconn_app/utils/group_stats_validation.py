@@ -718,9 +718,9 @@ class SubjectDataValidator:
             if err and err not in stage_labels:
                 other_errors[err] = other_errors.get(err, 0) + 1
 
-        # Mean statistics (only from valid files)
+        # Mean statistics (only from valid files; skipped for ALFF/ReHo which lack mean/std cols)
         mean_stats = {}
-        if len(valid) > 0:
+        if len(valid) > 0 and "mean" in valid.columns and "std" in valid.columns:
             mean_stats = {
                 "mean_of_means": float(valid["mean"].mean()),
                 "std_of_means": float(valid["mean"].std()),
