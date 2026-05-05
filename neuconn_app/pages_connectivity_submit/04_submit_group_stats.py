@@ -556,15 +556,16 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                         valid_count = summary.get("valid_count", 0)
                         total_count = summary.get("total_count", 0)
                         error_count = summary.get("error_count", 0)
-                        hpc_mode = execution == "HPC"
+                        # Parametric skips missing subjects gracefully → same relaxed rule as HPC
+                        relaxed_mode = execution == "HPC" or correction == "Parametric"
                         st.session_state[f"{STATE_PREFIX}mixed_zmaps_valid"] = (
-                            valid_count > 0 if hpc_mode else error_count == 0
+                            valid_count > 0 if relaxed_mode else error_count == 0
                         )
 
                         if valid_count > 0:
                             msg = f"✓ {valid_count}/{total_count} zmaps found for seed: `{seed_dir_name}`"
-                            if hpc_mode and error_count > 0:
-                                msg += f" ({error_count} missing locally — HPC uses remote files)"
+                            if relaxed_mode and error_count > 0:
+                                msg += f" ({error_count} missing locally — will be skipped)"
                                 st.warning(msg)
                             else:
                                 st.success(msg)
