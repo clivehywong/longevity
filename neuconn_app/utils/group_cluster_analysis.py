@@ -84,33 +84,66 @@ def _parse_smoothest(stdout: str) -> dict | None:
 
 @functools.lru_cache(maxsize=512)
 def query_atlasq_label(x: int, y: int, z: int) -> str:
-    """Query Harvard-Oxford atlases for anatomical label at MNI coordinate.
+    """Query atlas label for a single MNI coordinate. Uses batch internally; lru_cached."""
+    results = query_atlasq_labels_batch(((x, y, z),))
+    return results[0] if results else "Unknown"
 
-    Coordinates are rounded integers for cache efficiency.
-    Returns: top region label or "Unknown"
+
+def query_atlasq_labels_batch(
+    coords: tuple[tuple[int, int, int], ...] | list[tuple[int, int, int]],
+) -> list[str]:
+    """Query anatomical labels for multiple MNI coordinates in two batch calls.
+
+    Strategy:
+      1. Run AAL3v1 for all coords in one call (~0.8s for any N).
+      2. For any coord that returned 'NA', run Harvard-Oxford Cortical for just those.
+
+    Returns a list of label strings, one per input coordinate.
     """
-    coord_str = f"{x},{y},{z}"
-    labels = []
-    for atlas in [
-        "Harvard-Oxford Cortical Structural Atlas",
-        "Harvard-Oxford Subcortical Structural Atlas",
-    ]:
+    coords = list(coords)
+    if not coords:
+        return []
+
+    labels = ["NA"] * len(coords)
+
+    def _batch_query(atlas: str, idxs: list[int]) -> list[str]:
+        args = ["atlasq", "query", atlas, "-s"]
+        for i in idxs:
+            x, y, z = coords[i]
+            args += ["-c", str(x), str(y), str(z)]
         try:
-            rc, out, _ = _run_cmd(
-                ["atlasquery", "-a", atlas, "-c", coord_str], timeout=10
-            )
-            if rc == 0 and out.strip():
-                # Parse: "<b>Atlas Name</b><br>42% Region Name, 13% Another Region"
-                text = re.sub(r"<[^>]+>", "", out).strip()
-                for part in text.split(","):
-                    part = part.strip()
-                    # Skip zero-percentage entries
-                    if part and not re.match(r"^0%", part):
-                        labels.append(part.strip())
-                        break
+            r = subprocess.run(args, capture_output=True, text=True, timeout=300)
+            out_labels = []
+            for line in r.stdout.strip().splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 3:
+                    # "RegionName probability" — strip trailing number
+                    region = re.sub(r"\s+[\d.]+$", "", parts[2]).strip()
+                    out_labels.append(region if region else "NA")
+                else:
+                    out_labels.append("NA")
+            # Pad/trim to match requested count
+            while len(out_labels) < len(idxs):
+                out_labels.append("NA")
+            return out_labels[:len(idxs)]
         except Exception:
-            pass
-    return " / ".join(labels) if labels else "Unknown"
+            return ["Unknown"] * len(idxs)
+
+    all_idxs = list(range(len(coords)))
+
+    # Pass 1: AAL3v1 (very fast ~0.8s for any N)
+    aal_labels = _batch_query("AAL3v1", all_idxs)
+    for i, lbl in enumerate(aal_labels):
+        labels[i] = lbl
+
+    # Pass 2: Harvard-Oxford Cortical for coords that returned NA
+    na_idxs = [i for i, lbl in enumerate(labels) if lbl == "NA"]
+    if na_idxs:
+        ho_labels = _batch_query("Harvard-Oxford Cortical Structural Atlas", na_idxs)
+        for i, lbl in zip(na_idxs, ho_labels):
+            labels[i] = lbl if lbl != "NA" else "Unknown"
+
+    return labels
 
 
 def parse_cluster_table(txt_path: Path) -> pd.DataFrame:

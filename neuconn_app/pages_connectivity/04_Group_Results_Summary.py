@@ -514,22 +514,52 @@ def _extract_single_cluster_means(
         return None
 
 
-def _add_atlasq_labels(df: pd.DataFrame) -> pd.DataFrame:
-    """Add 'Label' column to cluster table using Harvard-Oxford atlasquery."""
-    from utils.group_cluster_analysis import query_atlasq_label
+def _labels_cache_path(row: pd.Series, tail: str) -> Path:
+    """Return disk-cache path for labeled cluster CSV."""
+    out_dir = Path(row["out_dir"]) / "cluster_analysis" / f"contrast{int(row['contrast_idx'])}"
+    prefix = "lmm" if row["source"] == "lmm" else f"grf_{tail}" if tail != "pos" or row["source"] != "lmm" else "lmm"
+    if row["source"] == "lmm":
+        return out_dir / "lmm_cluster_labeled.csv"
+    else:
+        return out_dir / f"{tail}_cluster_labeled.csv"
+
+
+def _add_atlasq_labels(df: pd.DataFrame, cache_path: Optional[Path] = None) -> pd.DataFrame:
+    """Add 'Label' column using AAL3v1 (fast batch) with Harvard-Oxford fallback for NAs.
+
+    If cache_path is provided, loads from CSV if it exists; otherwise queries atlasq
+    and saves the result to cache_path for subsequent renders.
+    """
+    from utils.group_cluster_analysis import query_atlasq_labels_batch
     if df.empty:
         return df
-    df = df.copy()
-    labels = []
-    for _, row in df.iterrows():
+    if "Label" in df.columns:
+        return df
+
+    if cache_path and cache_path.exists():
         try:
-            x = int(round(row.get("X(mm)", 0)))
-            y = int(round(row.get("Y(mm)", 0)))
-            z = int(round(row.get("Z(mm)", 0)))
-            labels.append(query_atlasq_label(x, y, z))
+            cached = pd.read_csv(cache_path)
+            if "Label" in cached.columns and len(cached) == len(df):
+                df = df.copy()
+                df["Label"] = cached["Label"].values
+                return df
         except Exception:
-            labels.append("Unknown")
+            pass
+
+    coords = [
+        (int(round(r.get("X(mm)", 0))), int(round(r.get("Y(mm)", 0))), int(round(r.get("Z(mm)", 0))))
+        for _, r in df.iterrows()
+    ]
+    labels = query_atlasq_labels_batch(tuple(coords))
+    df = df.copy()
     df["Label"] = labels
+
+    if cache_path:
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(cache_path, index=False)
+        except Exception:
+            pass
     return df
 
 
@@ -589,21 +619,38 @@ def _run_cluster_for_row(
 
 
 def _load_cluster_from_disk(row: pd.Series) -> Optional[ClusterResult]:
-    """Load existing cluster analysis results from the cluster_analysis directory on disk."""
+    """Load existing cluster analysis results from the cluster_analysis directory on disk.
+
+    Prefers labeled CSV (with 'Label' column) over raw cluster text, so atlas labels
+    are never re-queried on subsequent renders.
+    """
     contrast_idx = int(row["contrast_idx"])
     source = row["source"]
     out_dir = Path(row["out_dir"]) / "cluster_analysis" / f"contrast{contrast_idx}"
 
-    if source == "lmm":
-        txt = out_dir / "lmm_cluster.txt"
-        idx = out_dir / "lmm_cluster_index.nii.gz"
-        if txt.exists() and idx.exists():
-            table = parse_cluster_table(txt)
-            if "MAX" in table.columns and "Peak Z" not in table.columns:
-                table = table.rename(columns={
+    def _try_labeled_csv(csv_path: Path, txt_path: Path) -> Optional[pd.DataFrame]:
+        """Return labeled DataFrame from CSV if valid, else parse raw txt."""
+        if csv_path.exists():
+            try:
+                df = pd.read_csv(csv_path)
+                if not df.empty:
+                    return df
+            except Exception:
+                pass
+        if txt_path.exists():
+            df = parse_cluster_table(txt_path)
+            if "MAX" in df.columns and "Peak Z" not in df.columns:
+                df = df.rename(columns={
                     "MAX": "Peak Z", "MAX X (mm)": "X(mm)",
                     "MAX Y (mm)": "Y(mm)", "MAX Z (mm)": "Z(mm)",
                 })
+            return df if not df.empty else None
+        return None
+
+    if source == "lmm":
+        idx = out_dir / "lmm_cluster_index.nii.gz"
+        table = _try_labeled_csv(out_dir / "lmm_cluster_labeled.csv", out_dir / "lmm_cluster.txt")
+        if table is not None and idx.exists():
             return ClusterResult(
                 tables={"pos": table},
                 cluster_img={"pos": idx},
@@ -613,26 +660,22 @@ def _load_cluster_from_disk(row: pd.Series) -> Optional[ClusterResult]:
         # GRF pos/neg
         tables, imgs = {}, {}
         for t in ("pos", "neg"):
-            txt = out_dir / f"grf_{t}_cluster.txt"
             idx = out_dir / f"grf_{t}_cluster_index.nii.gz"
-            if txt.exists():
-                df = parse_cluster_table(txt)
-                if not df.empty:
-                    tables[t] = df
-                    imgs[t] = idx if idx.exists() else None
+            table = _try_labeled_csv(out_dir / f"{t}_cluster_labeled.csv", out_dir / f"grf_{t}_cluster.txt")
+            if table is not None:
+                tables[t] = table
+                imgs[t] = idx if idx.exists() else None
         if tables:
             return ClusterResult(tables=tables, cluster_img=imgs, params={"source": "grf_disk"})
         # TFCE
-        txt = out_dir / "tstat_cluster.txt"
         idx = out_dir / "cluster_index.nii.gz"
-        if txt.exists():
-            table = parse_cluster_table(txt)
-            if not table.empty:
-                return ClusterResult(
-                    tables={"pos": table},
-                    cluster_img={"pos": idx if idx.exists() else None},
-                    params={"source": "tfce_disk"},
-                )
+        table = _try_labeled_csv(out_dir / "pos_cluster_labeled.csv", out_dir / "tstat_cluster.txt")
+        if table is not None:
+            return ClusterResult(
+                tables={"pos": table},
+                cluster_img={"pos": idx if idx.exists() else None},
+                params={"source": "tfce_disk"},
+            )
     return None
 
 
@@ -747,8 +790,32 @@ def _render_cluster_details(
 
         st.markdown(f"**{tail_name.capitalize()} clusters** — {len(tdf)} clusters")
 
-        with st.spinner("Querying atlas labels…"):
-            tdf_labeled = _add_atlasq_labels(tdf)
+        cache_path = _labels_cache_path(row, tail_name)
+        if "Label" not in tdf.columns:
+            if not cache_path.exists():
+                # Labels not cached yet — don't block page render; let user trigger explicitly
+                if st.button(
+                    "🔍 Load atlas labels",
+                    key=f"{PAGE_KEY}_labels_{row_id}_{tail_name}",
+                    help="Query AAL3v1 + Harvard-Oxford for peak coordinates (~5–10s). Cached to disk afterwards.",
+                ):
+                    with st.spinner("Querying atlas labels (AAL3v1 + Harvard-Oxford)…"):
+                        tdf_labeled = _add_atlasq_labels(tdf, cache_path=cache_path)
+                    state_key = f"{PAGE_KEY}_cluster_{row_id}"
+                    if state_key in st.session_state:
+                        st.session_state[state_key].tables[tail_name] = tdf_labeled
+                    st.rerun()
+                else:
+                    tdf_labeled = tdf.copy()
+                    tdf_labeled["Label"] = "—"
+            else:
+                # Cache on disk — load instantly, no subprocess
+                tdf_labeled = _add_atlasq_labels(tdf, cache_path=cache_path)
+                state_key = f"{PAGE_KEY}_cluster_{row_id}"
+                if state_key in st.session_state:
+                    st.session_state[state_key].tables[tail_name] = tdf_labeled
+        else:
+            tdf_labeled = tdf
 
         display_cols = [
             c for c in ["Cluster", "Voxels", "p(FWE)", "Peak Z", "X(mm)", "Y(mm)", "Z(mm)", "Label"]
@@ -1082,7 +1149,8 @@ def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path,
             ci_exists = cluster_index_path and Path(cluster_index_path).exists()
 
             try:
-                tdf_labeled = _add_atlasq_labels(tdf)
+                cache_path = _labels_cache_path(row, tail_name)
+                tdf_labeled = _add_atlasq_labels(tdf, cache_path=cache_path)
             except Exception:
                 tdf_labeled = tdf.copy()
                 tdf_labeled["Label"] = "Unknown"
