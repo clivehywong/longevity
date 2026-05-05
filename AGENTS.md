@@ -227,8 +227,8 @@ derivatives/connectivity/<pipeline>/<atlas>/network/group/
 
 **All whole-brain voxelwise analyses MUST apply a dilated MNI brain mask** to reduce the number of voxels computed:
 
-- Mask: `atlases/MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz`
-- This mask is slightly larger than the standard brain mask to include cortical surface voxels
+- Mask: `atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz`
+- This is FSL's MNI152NLin6Asym 2mm dilated brain mask (slightly larger than the standard mask to include cortical surface voxels)
 - Apply before computing connectivity maps and before group statistics
 
 ### Statistical conventions
