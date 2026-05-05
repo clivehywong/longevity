@@ -285,7 +285,7 @@ def _build_group_cmd(
 
     if correction.upper() == "PARAMETRIC":
         parts = [
-            "python script/group_lmm_stats.py",
+            "python ../script/group_lmm_stats.py",
             f"  --bids-root {effective_bids}",
             f"  --seed {seed}",
             f"  --pipeline {pipeline}",
@@ -850,6 +850,11 @@ def _submit_mixed_design_local(
     mask: str | None = None,
 ) -> None:
     """Submit mixed-design analysis locally (output path resolved by backend)."""
+    # Resolve script paths absolutely from this file's location
+    _this_dir = Path(__file__).resolve().parent          # pages_connectivity_submit/
+    _app_dir = _this_dir.parent                          # neuconn_app/
+    _project_root = _app_dir.parent                      # project root
+
     seed_dir = cli_token_to_seed_dir_name(seed)
     out_base = (
         Path(bids_root) / "derivatives" / "connectivity"
@@ -857,8 +862,9 @@ def _submit_mixed_design_local(
     )
 
     if correction.upper() == "PARAMETRIC":
+        script = str(_project_root / "script" / "group_lmm_stats.py")
         cmd = [
-            "python", "script/group_lmm_stats.py",
+            "python", script,
             "--bids-root", str(bids_root),
             "--seed", seed,
             "--pipeline", pipeline,
@@ -871,8 +877,9 @@ def _submit_mixed_design_local(
         timeout_s = 300
         out_subdir = out_base / "lmm_outputs"
     else:
+        script = str(_app_dir / "scripts" / "group_mixed_design_stats.py")
         cmd = [
-            "python", "neuconn_app/scripts/group_mixed_design_stats.py",
+            "python", script,
             "--bids-root", str(bids_root),
             "--seed", seed,
             "--pipeline", pipeline,
@@ -902,7 +909,6 @@ def _submit_mixed_design_local(
             st.error(f"Analysis timed out (>{timeout_s}s)")
         except Exception as e:
             st.error(f"Execution error: {e}")
-        except Exception as e:
             st.error(f"Execution error: {e}")
 
 
