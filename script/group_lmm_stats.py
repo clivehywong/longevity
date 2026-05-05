@@ -352,7 +352,7 @@ class ParametricGroupStats:
             self.mask_path = Path(mask_path)
         else:
             self.mask_path = (
-                self.bids_root / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"
+                self.bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"
             )
 
         if output_dir:

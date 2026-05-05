@@ -471,10 +471,10 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         "Brain mask",
         value=st.session_state.get(
             f"{STATE_PREFIX}mixed_mask",
-            str(Path(bids_root) / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"),
+            str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"),
         ),
         key=f"{STATE_PREFIX}mixed_mask_widget",
-        help="Dilated MNI brain mask (AGENTS.md §6). Defaults to project atlases/MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz",
+        help="Dilated MNI brain mask (AGENTS.md §6). Defaults to project atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz",
     )
     st.session_state[f"{STATE_PREFIX}mixed_mask"] = mask_input
     if not mask_input:
@@ -1164,7 +1164,7 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}group_csv", default_participants_path)
     st.session_state.setdefault(f"{STATE_PREFIX}out_root", _DEFAULT_OUT_ROOT)
     # Voxel defaults — pre-fill dilated mask (AGENTS.md §6)
-    _dilated_mask_path = str(Path(bids_root) / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz")
+    _dilated_mask_path = str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz")
     st.session_state.setdefault(f"{STATE_PREFIX}measure", "alff")
     st.session_state.setdefault(f"{STATE_PREFIX}contrast", "ses-02_minus_ses-01")
     st.session_state.setdefault(f"{STATE_PREFIX}method", "GRF")
@@ -1189,7 +1189,7 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_correction", "TFCE")
     st.session_state.setdefault(
         f"{STATE_PREFIX}mixed_mask",
-        str(Path(bids_root) / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"),
+        str(Path(bids_root) / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz"),
     )
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_execution", "Local")
     st.session_state.setdefault(f"{STATE_PREFIX}mixed_test_mode", False)
@@ -1320,7 +1320,7 @@ def _render_submit_tab(config: dict, bids_root: Any) -> None:
             "Brain mask path",
             value=st.session_state.get(f"{STATE_PREFIX}mask", _dilated_mask_path),
             key=f"{STATE_PREFIX}mask_widget",
-            help="Dilated MNI brain mask (required per AGENTS.md §6). Defaults to project atlases/MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz",
+            help="Dilated MNI brain mask (required per AGENTS.md §6). Defaults to project atlases/MNI152_T1_2mm_brain_mask_dil.nii.gz",
         )
         st.session_state[f"{STATE_PREFIX}mask"] = mask
         if not mask:
