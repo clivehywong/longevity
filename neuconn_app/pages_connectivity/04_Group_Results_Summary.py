@@ -670,7 +670,7 @@ def _run_cluster_for_row(
         k = (grf_params or _DEFAULT_GRF_PARAMS).get("k", 1)
         return run_lmm_cluster(zthresh_path, out_dir, min_voxels=int(k))
 
-    elif corrp_label == "TFCE" and row.get("corrp_path"):
+    elif "TFCE" in corrp_label and row.get("corrp_path"):
         p = tfce_params or _DEFAULT_TFCE_PARAMS
         return run_tfce_cluster(
             corrp_path=Path(row["corrp_path"]),
@@ -767,7 +767,7 @@ def _render_grf_controls_and_run(
     """Show cluster analysis controls and run button. Returns current ClusterResult if available."""
     source = row["source"]
     corrp_label = row.get("corrp_label", "")
-    is_tfce = corrp_label == "TFCE"
+    is_tfce = "TFCE" in corrp_label
     is_lmm = source == "lmm"
     state_key = f"{PAGE_KEY}_cluster_{row_id}"
     params_key = f"{PAGE_KEY}_cluster_params_{row_id}"
@@ -1443,8 +1443,9 @@ def render() -> None:
             key=f"{PAGE_KEY}_contrast_filter",
         )
     with col_f3:
+        _all_sources = sorted(df["source"].unique().tolist())
         source_filter = st.multiselect(
-            "Source", ["randomise", "lmm"], default=["randomise", "lmm"],
+            "Source", _all_sources, default=_all_sources,
             key=f"{PAGE_KEY}_source_filter",
         )
 
