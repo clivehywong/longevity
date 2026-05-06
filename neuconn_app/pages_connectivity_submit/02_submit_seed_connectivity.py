@@ -918,6 +918,56 @@ def _download_seed_scan_results(
     progress("Done", 1.0)
 
 
+def _download_all_hpc_seeds(config: dict, pipeline: str, bids_root: Path, progress: Any) -> None:
+    """Single rsync to download all subject-level connectivity results for a pipeline."""
+    from utils.hpc import HPCConfig  # noqa: PLC0415
+
+    hpc_cfg = HPCConfig.from_config(config)
+    local_dest = bids_root / "derivatives" / "connectivity" / pipeline
+    local_dest.mkdir(parents=True, exist_ok=True)
+
+    remote_src = f"{hpc_cfg.user}@{hpc_cfg.host}:{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}/"
+    ssh_opts = f"ssh -p {hpc_cfg.port} -o StrictHostKeyChecking=no -o BatchMode=yes"
+    cmd = [
+        "rsync", "-az", "--progress",
+        "-e", ssh_opts,
+        remote_src,
+        str(local_dest) + "/",
+    ]
+    progress("Downloading all seeds…", 0.1)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    if result.returncode != 0:
+        raise RuntimeError(f"rsync failed: {result.stderr[:500]}")
+    progress("Done", 1.0)
+
+
+def _cleanup_all_hpc_seeds(
+    config: dict, pipeline: str, seeds_to_clean: list[str]
+) -> int:
+    """SSH and remove multiple fully-downloaded seed dirs from HPC. Returns count cleaned."""
+    from utils.hpc import HPCConfig, HPCConnection  # noqa: PLC0415
+
+    if not seeds_to_clean:
+        return 0
+    hpc_cfg = HPCConfig.from_config(config)
+    conn = HPCConnection(hpc_cfg)
+    conn.connect()
+    try:
+        remote_base = f"{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}"
+        # Build a find command that removes each seed_dir by name
+        names = " -o ".join(f"-name '{s}'" for s in seeds_to_clean)
+        cmd = (
+            f"find {remote_base} -mindepth 3 -maxdepth 3 -type d \\( {names} \\) "
+            f"| xargs -r rm -rf"
+        )
+        _stdout, stderr, exit_code = conn.execute(cmd, timeout=300)
+        if exit_code != 0:
+            raise RuntimeError(f"bulk cleanup failed: {stderr[:300]}")
+    finally:
+        conn.disconnect()
+    return len(seeds_to_clean)
+
+
 def _cleanup_hpc_seed(config: dict, pipeline: str, seed_dir: str) -> None:
     """SSH and remove seed_dir from HPC (all subjects) after confirming results are local."""
     from utils.hpc import HPCConfig, HPCConnection  # noqa: PLC0415
@@ -1047,11 +1097,57 @@ def _render_download_tab(config: dict, bids_root: Any) -> None:
         if scan:
             total_remote = sum(len(v["remote_subjects"]) for v in scan.values())
             total_missing = sum(len(v["local_missing"]) for v in scan.values())
+            seeds_fully_downloaded = [
+                s for s, v in scan.items() if len(v["local_missing"]) == 0
+            ]
+            seeds_need_download = [
+                s for s, v in scan.items() if len(v["local_missing"]) > 0
+            ]
+
             st.success(
                 f"Found **{len(scan)} seed(s)**, "
                 f"**{total_remote} subject-session result(s)** on HPC, "
                 f"**{total_missing}** not yet downloaded locally."
             )
+
+            # ── Bulk action row ───────────────────────────────────────────────
+            bulk_col_dl, bulk_col_clean, bulk_col_spacer = st.columns([2, 2, 4])
+            with bulk_col_dl:
+                dl_label = f"⬇️ Download All ({len(seeds_need_download)} seeds)"
+                if seeds_need_download and st.button(
+                    dl_label, key="submit_seed_scan_dl_all", type="primary"
+                ):
+                    prog = st.progress(0.0, text="Starting bulk download…")
+                    try:
+                        _download_all_hpc_seeds(
+                            config, scan_pipeline, Path(bids_root),
+                            lambda msg, frac: prog.progress(frac, text=msg),
+                        )
+                        st.success("✅ All seeds downloaded")
+                        st.session_state.pop("submit_seed_hpc_scan", None)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Bulk download failed: {exc}")
+            with bulk_col_clean:
+                clean_label = f"🗑️ Clean All ({len(seeds_fully_downloaded)} seeds)"
+                if seeds_fully_downloaded:
+                    confirm_clean_all = st.checkbox(
+                        "Confirm remove from HPC",
+                        key="submit_seed_scan_confirm_clean_all",
+                    )
+                    if confirm_clean_all and st.button(
+                        clean_label, key="submit_seed_scan_clean_all"
+                    ):
+                        try:
+                            n = _cleanup_all_hpc_seeds(
+                                config, scan_pipeline, seeds_fully_downloaded
+                            )
+                            st.success(f"✅ Cleaned {n} seed(s) from HPC")
+                            st.session_state.pop("submit_seed_hpc_scan", None)
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Bulk cleanup failed: {exc}")
+            # ─────────────────────────────────────────────────────────────────
 
             for seed_dir, info in sorted(scan.items()):
                 n_remote = len(info["remote_subjects"])
