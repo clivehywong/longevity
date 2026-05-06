@@ -1495,7 +1495,7 @@ class TestFullWorkflowSmokeTest:
 
     def test_group_viewer_renders(self, app_page: Page) -> None:
         """Group Seed Connectivity Viewer page renders without Python errors."""
-        navigate_sidebar(app_page, stage="Group-Level", analysis="🗺️ Group Seed Viewer")
+        navigate_sidebar(app_page, stage="Group-Level", analysis="🗺️ Group Results Viewer")
         _save_screenshot(app_page, "15a_group_viewer_dashboard")
 
         page_text = app_page.locator(MAIN).text_content() or ""
