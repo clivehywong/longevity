@@ -723,7 +723,12 @@ class TestSeedFullPipeline:
         )
         expect(dash_tab).to_be_visible(timeout=10_000)
         dash_tab.click()
-        app_page.wait_for_timeout(2_000)
+        # Wait for dashboard spinner to finish (may be slow after heavy prior tests)
+        app_page.wait_for_function(
+            "() => !document.querySelector('[data-testid=\"stMain\"]')?.innerText.includes('_build_dashboard_df')",
+            timeout=30_000,
+        )
+        app_page.wait_for_timeout(1_000)
         _save_screenshot(app_page, "09b_dashboard_active")
 
         # Should show the completion table with sub-033
