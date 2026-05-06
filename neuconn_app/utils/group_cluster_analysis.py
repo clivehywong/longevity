@@ -506,6 +506,22 @@ def run_tfce_cluster(
     if rc != 0:
         return ClusterResult(error=f"fslmaths corrp threshold failed: {err[:400]}")
 
+    # Early-exit if corrp mask has 0 significant voxels
+    corrp_mask_nii = Path(str(corrp_mask) + ".nii.gz")
+    if corrp_mask_nii.exists():
+        try:
+            import nibabel as nib  # noqa: PLC0415
+            import numpy as np  # noqa: PLC0415
+            mask_data = np.asanyarray(nib.load(str(corrp_mask_nii)).dataobj)
+            if mask_data.sum() == 0:
+                return ClusterResult(
+                    tables={"pos": pd.DataFrame()},
+                    cluster_img={"pos": None},
+                    params={},
+                )
+        except Exception:
+            pass
+
     # Mask tstat with surviving corrp voxels
     rc, _, err = _run_cmd(
         f"fslmaths {corrp_mask} -mul {tstat_path} {tstat_thresh}"
@@ -544,20 +560,16 @@ def run_tfce_cluster(
     if rc != 0:
         return ClusterResult(error=f"fsl-cluster failed: {stderr[:400]}")
 
-    # Save masked cluster image
+    # Save masked cluster image (kept for reference but not returned as cluster_img)
     cluster_index_nii = Path(str(cluster_index) + ".nii.gz")
-    cluster_img_out: Path | None = None
     if cluster_index_nii.exists():
         _run_cmd(f"fslmaths {tstat_thresh} -mas {cluster_index} {cluster_img_path}")
-        candidate = Path(str(cluster_img_path) + ".nii.gz")
-        if candidate.exists():
-            cluster_img_out = candidate
 
     table = parse_cluster_table(cluster_txt)
 
     return ClusterResult(
         tables={"pos": table},
-        cluster_img={"pos": cluster_img_out},
+        cluster_img={"pos": cluster_index_nii if cluster_index_nii.exists() else None},
         params={
             "corrp_thr": corrp_thr,
             "cluster_z_thr": cluster_z_thr,

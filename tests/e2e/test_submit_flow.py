@@ -1510,3 +1510,124 @@ class TestFullWorkflowSmokeTest:
 
             page_text = app_page.locator(MAIN).text_content() or ""
             assert "Traceback" not in page_text, f"Traceback in Viewer tab: {page_text[:600]}"
+
+
+# ---------------------------------------------------------------------------
+# Test 16: HTML Report Download
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+HTML_REPORT_DIR = REPO_ROOT / "html_report"
+
+
+class TestHTMLReportDownload:
+    """Download an HTML report from the Group Results Summary page."""
+
+    def test_download_html_report(self, app_page: Page) -> None:
+        """Navigate to Group Results Summary, run cluster analyses and download HTML report.
+
+        Filters to ALFF type only (3 analyses) to keep HTML generation time manageable.
+        """
+        HTML_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Navigate to the page
+        navigate_sidebar(app_page, stage="Group-Level", analysis="📊 Results Summary")
+        app_page.wait_for_timeout(2_000)
+        _save_screenshot(app_page, "16a_results_summary_loaded")
+
+        # Rescan results
+        rescan_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Rescan results")
+        if rescan_btn.count() > 0:
+            rescan_btn.first.click()
+            app_page.wait_for_timeout(3_000)
+        _save_screenshot(app_page, "16b_after_rescan")
+
+        page_text = app_page.locator(MAIN).text_content() or ""
+        if "No group results found" in page_text:
+            pytest.skip("No group results available — skipping HTML report test.")
+
+        # Turn OFF "Show significant only" toggle
+        sig_toggle = app_page.locator(MAIN).locator('[data-testid="stToggle"]').filter(has_text="significant")
+        if sig_toggle.count() > 0:
+            checked = sig_toggle.locator("input").is_checked()
+            if checked:
+                sig_toggle.locator("label").click()
+                app_page.wait_for_timeout(1_000)
+
+        # Filter to ALFF only to keep rendering time manageable (3 rows instead of 90+)
+        _set_single_multiselect(app_page, "Map type", "ALFF")
+        app_page.wait_for_timeout(1_000)
+
+        # Deselect all, then select all (now selecting only the ALFF subset)
+        desel_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Deselect all")
+        if desel_btn.count() > 0:
+            desel_btn.first.click()
+            app_page.wait_for_timeout(1_000)
+        sel_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Select all")
+        if sel_btn.count() > 0:
+            sel_btn.first.click()
+            app_page.wait_for_timeout(1_000)
+        _save_screenshot(app_page, "16c_all_selected")
+
+        # Click the auto-run button for selected rows
+        run_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Run cluster analysis for")
+        if run_btn.count() > 0:
+            run_btn.first.click()
+            # Wait up to 5 minutes for completion
+            try:
+                app_page.wait_for_selector(
+                    '[data-testid="stAlertContainer"]',
+                    timeout=300_000,
+                )
+            except Exception:
+                pass
+            app_page.wait_for_timeout(3_000)
+        _save_screenshot(app_page, "16d_after_autorun")
+
+        # Find "Generate HTML Report" button (may appear after analyses complete)
+        gen_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Generate HTML Report")
+        if gen_btn.count() == 0:
+            pytest.skip("Generate HTML Report button not found — no results available.")
+
+        # Set max_cluster_detail to 1 to limit brain overlay rendering time
+        _fill_number_input(app_page, "Max clusters with brain overlay", 1)
+
+        # Click "Generate HTML Report" and wait for download button to appear
+        gen_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Generate HTML Report")
+        gen_btn.first.click()
+        # HTML generation renders nilearn overlays — give up to 5 minutes
+        try:
+            app_page.wait_for_selector(
+                '[data-testid="stDownloadButton"]',
+                timeout=300_000,
+            )
+        except Exception:
+            pass
+        app_page.wait_for_timeout(2_000)
+        _save_screenshot(app_page, "16e_after_generate")
+
+        # Now capture the download
+        dl_btn = app_page.locator(MAIN).locator('[data-testid="stDownloadButton"]')
+        if dl_btn.count() == 0:
+            pytest.skip("Download Report button not found after generation.")
+
+        timestamp = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = HTML_REPORT_DIR / f"group_results_report_{timestamp}.html"
+
+        with app_page.expect_download(timeout=60_000) as download_info:
+            dl_btn.first.click()
+
+        download = download_info.value
+        download.save_as(str(report_path))
+
+        _save_screenshot(app_page, "16f_after_download")
+
+        # Assertions
+        assert report_path.exists(), f"HTML report not found at {report_path}"
+        file_size = report_path.stat().st_size
+        assert file_size > 10_000, f"HTML report too small ({file_size} bytes)"
+
+        html_content = report_path.read_text(encoding="utf-8")
+        assert "No subject data available" not in html_content, (
+            "HTML report contains 'No subject data available' — two-way plots may be broken."
+        )

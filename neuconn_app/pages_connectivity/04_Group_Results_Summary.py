@@ -663,6 +663,9 @@ def _run_cluster_for_row(
     contrast_idx = int(row["contrast_idx"])
     out_dir = Path(row["out_dir"]) / "cluster_analysis" / f"contrast{contrast_idx}"
 
+    if "FDR" in corrp_label:
+        return ClusterResult(error="FDR correction: use FDR threshold directly, no spatial clustering available.")
+
     if source == "lmm":
         zthresh_path = Path(row["out_dir"]) / f"c{contrast_idx}_zthresh.nii.gz"
         if not zthresh_path.exists():
@@ -737,25 +740,37 @@ def _load_cluster_from_disk(row: pd.Series) -> Optional[ClusterResult]:
                 params={"source": "lmm_zthresh"},
             )
     else:
-        # GRF pos/neg
-        tables, imgs = {}, {}
-        for t in ("pos", "neg"):
-            idx = out_dir / f"grf_{t}_cluster_index.nii.gz"
-            table = _try_labeled_csv(out_dir / f"{t}_cluster_labeled.csv", out_dir / f"grf_{t}_cluster.txt")
+        corrp_label = row.get("corrp_label", "")
+        if "TFCE" in corrp_label:
+            # TFCE path — use cluster_index.nii.gz produced by run_tfce_cluster
+            idx = out_dir / "cluster_index.nii.gz"
+            table = _try_labeled_csv(out_dir / "pos_cluster_labeled.csv", out_dir / "tstat_cluster.txt")
             if table is not None:
-                tables[t] = table
-                imgs[t] = idx if idx.exists() else None
-        if tables:
-            return ClusterResult(tables=tables, cluster_img=imgs, params={"source": "grf_disk"})
-        # TFCE
-        idx = out_dir / "cluster_index.nii.gz"
-        table = _try_labeled_csv(out_dir / "pos_cluster_labeled.csv", out_dir / "tstat_cluster.txt")
-        if table is not None:
-            return ClusterResult(
-                tables={"pos": table},
-                cluster_img={"pos": idx if idx.exists() else None},
-                params={"source": "tfce_disk"},
-            )
+                return ClusterResult(
+                    tables={"pos": table},
+                    cluster_img={"pos": idx if idx.exists() else None},
+                    params={"source": "tfce_disk"},
+                )
+        else:
+            # GRF pos/neg
+            tables, imgs = {}, {}
+            for t in ("pos", "neg"):
+                idx = out_dir / f"grf_{t}_cluster_index.nii.gz"
+                table = _try_labeled_csv(out_dir / f"{t}_cluster_labeled.csv", out_dir / f"grf_{t}_cluster.txt")
+                if table is not None:
+                    tables[t] = table
+                    imgs[t] = idx if idx.exists() else None
+            if tables:
+                return ClusterResult(tables=tables, cluster_img=imgs, params={"source": "grf_disk"})
+            # TFCE fallback (corrp_label empty but TFCE artifacts present)
+            idx = out_dir / "cluster_index.nii.gz"
+            table = _try_labeled_csv(out_dir / "pos_cluster_labeled.csv", out_dir / "tstat_cluster.txt")
+            if table is not None:
+                return ClusterResult(
+                    tables={"pos": table},
+                    cluster_img={"pos": idx if idx.exists() else None},
+                    params={"source": "tfce_disk"},
+                )
     return None
 
 
@@ -767,6 +782,9 @@ def _render_grf_controls_and_run(
     """Show cluster analysis controls and run button. Returns current ClusterResult if available."""
     source = row["source"]
     corrp_label = row.get("corrp_label", "")
+    if "FDR" in corrp_label:
+        st.info("ℹ️ FDR correction: use FDR threshold directly — no spatial clustering available.")
+        return None
     is_tfce = "TFCE" in corrp_label
     is_lmm = source == "lmm"
     state_key = f"{PAGE_KEY}_cluster_{row_id}"
@@ -953,6 +971,7 @@ def _render_cluster_details(
                             seed_dir=row.get("seed_dir"),
                             measure=row.get("measure"),
                             summary_json_path=str(row.get("summary_json", "")),
+                            source=row.get("source", "randomise"),
                         )
                         if df_means is not None:
                             _render_cluster_mean_plot(
@@ -1061,40 +1080,53 @@ def _render_result_card(row_id: str, row: pd.Series, bids_root: Path) -> None:
 # Auto-run and HTML report
 # ============================================================================
 
-def _render_autorun_section(df: pd.DataFrame, bids_root: Path) -> None:
-    """Auto-run button and HTML download."""
-    needs_run = df.get("needs_cluster_run", df["significant"])
-    eligible = df[df["significant"] | needs_run]
-    n_eligible = len(eligible)
+def _render_autorun_section(selected_rows: pd.DataFrame, bids_root: Path) -> None:
+    """Auto-run cluster analysis for all selected rows, skipping already-completed ones."""
+    n_selected = len(selected_rows)
 
     col_run, col_dl = st.columns([2, 1])
     with col_run:
         if st.button(
-            f"🚀 Auto-run cluster analysis ({n_eligible} results, default settings)",
+            f"🚀 Run cluster analysis for {n_selected} selected rows",
             key=f"{PAGE_KEY}_autorun_all",
-            help="Runs cluster analysis for all significant results using default parameters. "
-                 "You can fine-tune per-result afterwards.",
+            help="Runs cluster analysis for all selected rows using default parameters. "
+                 "Rows that already have results (in session or on disk) are skipped.",
         ):
-            prog = st.progress(0, text="Running cluster analyses…")
-            errors = []
-            for i, (_, row) in enumerate(eligible.iterrows()):
+            # Identify rows that still need to be run
+            to_run = []
+            for _, row in selected_rows.iterrows():
                 row_id = row["_row_id"]
                 state_key = f"{PAGE_KEY}_cluster_{row_id}"
-                label_short = str(row.get("label", ""))[:35]
-                prog.progress(i / max(n_eligible, 1), text=f"[{i+1}/{n_eligible}] {label_short}…")
-                result = _run_cluster_for_row(row, bids_root)
-                st.session_state[state_key] = result
-                if result.error:
-                    errors.append(f"{label_short}: {result.error}")
-            prog.progress(1.0, text=f"Done — {n_eligible} analyses completed.")
-            if errors:
-                st.warning(f"{len(errors)} error(s):\n" + "\n".join(errors[:5]))
+                if state_key in st.session_state:
+                    continue
+                if _load_cluster_from_disk(row) is not None:
+                    continue
+                to_run.append(row)
+
+            n_to_run = len(to_run)
+            if n_to_run == 0:
+                st.success("All selected analyses already have results.")
             else:
-                st.success("All cluster analyses complete. Fine-tune per-result below.")
+                prog = st.progress(0, text="Running cluster analyses…")
+                errors = []
+                for i, row in enumerate(to_run):
+                    row_id = row["_row_id"]
+                    state_key = f"{PAGE_KEY}_cluster_{row_id}"
+                    label_short = str(row.get("label", ""))[:35]
+                    prog.progress(i / max(n_to_run, 1), text=f"[{i+1}/{n_to_run}] {label_short}…")
+                    result = _run_cluster_for_row(row, bids_root)
+                    st.session_state[state_key] = result
+                    if result.error:
+                        errors.append(f"{label_short}: {result.error}")
+                prog.progress(1.0, text=f"Done — {n_to_run} analyses completed.")
+                if errors:
+                    st.warning(f"{len(errors)} error(s):\n" + "\n".join(errors[:5]))
+                else:
+                    st.success("All cluster analyses complete. Fine-tune per-result below.")
             st.rerun()
 
     with col_dl:
-        st.caption("HTML report available below after selecting analyses.")
+        st.caption("HTML report available below after running analyses.")
 
 
 def _img_to_b64(png_bytes: Optional[bytes]) -> str:
@@ -1170,14 +1202,9 @@ def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path,
         result = st.session_state.get(state_key)
         if result is None:
             result = _load_cluster_from_disk(row)
-        # Only include rows with non-empty cluster tables (actual significant clusters)
+        # Include all rows that have a result (even empty tables — shown collapsed)
         if result is not None and not result.error:
-            has_clusters = any(
-                t is not None and not t.empty
-                for t in result.tables.values()
-            )
-            if has_clusters:
-                rows_with_results.append((row, result))
+            rows_with_results.append((row, result))
 
     css = """
     body{font-family:Arial,sans-serif;max-width:1400px;margin:auto;padding:20px;background:#fff;color:#333}
@@ -1197,6 +1224,11 @@ def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path,
     .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
     .badge-lmm{background:#e8f5e9;color:#2e7d32}
     .badge-rand{background:#e3f2fd;color:#1565c0}
+    .badge-delta{background:#fff3e0;color:#e65100}
+    details{border:1px solid #ddd;border-radius:6px;margin:12px 0;padding:8px 16px}
+    details summary{cursor:pointer;font-weight:bold;color:#533483}
+    details summary:hover{color:#e94560}
+    .not-sig{color:#666;font-style:italic}
     """
 
     toc_items = []
@@ -1208,7 +1240,7 @@ def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path,
         cidx = int(row["contrast_idx"])
         clabel = row["contrast_label"]
         source = row["source"]
-        badge_cls = "badge-lmm" if source == "lmm" else "badge-rand"
+        badge_cls = "badge-lmm" if source == "lmm" else "badge-delta" if source == "delta" else "badge-rand"
         toc_items.append(
             f'<li><a href="#{anchor}">{type_} · {label} · #{cidx} {clabel} '
             f'<span class="badge {badge_cls}">{source}</span></a></li>'
@@ -1299,6 +1331,7 @@ def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path,
                         seed_dir=str(row.get("seed_dir", "")) or None,
                         measure=str(row.get("measure", "")) or None,
                         summary_json_path=str(row.get("summary_json", "")),
+                        source=str(row.get("source", "randomise")),
                     )
                     if df_means is not None and not df_means.empty:
                         plot_png = _render_cluster_mean_plot_png(
@@ -1323,15 +1356,31 @@ def _generate_html_report(selected_rows: pd.DataFrame, bids_root: Path,
             {per_cluster_html}
             """
 
-        cards_html.append(f"""
-        <div class="card" id="{anchor}">
-          <h2><span class="sig">{"✅" if row["significant"] else "🔄"}</span>
+        has_clusters = any(
+            t is not None and not t.empty
+            for t in result.tables.values()
+        )
+        card_inner = f"""
+          <h2><span class="sig">{"✅" if has_clusters else "⚪"}</span>
             <span class="label"> {type_} · {label}</span></h2>
           <p class="meta">Contrast #{cidx}: {clabel} | Source: <span class="badge {badge_cls}">{source}</span></p>
           {seed_roi_html}
           {tstat_html}
           {cluster_sections_html}
+        """
+        if has_clusters:
+            cards_html.append(f"""
+        <div class="card" id="{anchor}">
+        {card_inner}
         </div>""")
+        else:
+            cards_html.append(f"""
+        <details id="{anchor}">
+          <summary class="not-sig">{type_} · {label} · #{cidx} {clabel} <span class="badge {badge_cls}">{source}</span> — no significant clusters</summary>
+          <div class="card" style="border:none;box-shadow:none">
+          {card_inner}
+          </div>
+        </details>""")
 
     toc_html = (
         '<div class="toc"><h3>Table of Contents</h3><ol>'
@@ -1422,10 +1471,6 @@ def render() -> None:
     m4.metric("Seed FC", int((df["type"] == "Seed FC").sum()))
     m5.metric("ALFF / ReHo", int(((df["type"] == "ALFF") | (df["type"] == "ReHo")).sum()))
 
-    st.divider()
-
-    # ── Auto-run section (before filters) ──────────────────────────────────
-    _render_autorun_section(df, bids_root)
     st.divider()
 
     # ── Filters ─────────────────────────────────────────────────────────────
@@ -1520,6 +1565,10 @@ def render() -> None:
     if selected_rows.empty:
         st.info("No analyses selected. Check 'Include' boxes above to view results.")
         return
+
+    # ── Auto-run section (below selection table) ────────────────────────────
+    _render_autorun_section(selected_rows, bids_root)
+    st.divider()
 
     # ── HTML report button (uses selected_rows, filters to non-empty clusters) ─
     results_available = any(

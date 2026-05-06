@@ -63,3 +63,6 @@ package-lock.json
 /qc_status.json
 /derivatives/qc/qc_status.json
 /nohup.out
+
+# HTML report output directory
+/html_report/
