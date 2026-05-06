@@ -357,15 +357,15 @@ def run_grf_cluster(
         if rc != 0:
             return ClusterResult(error=f"fslmaths threshold failed ({t}): {err[:400]}")
 
-        # Build fsl-cluster command (matching cluster.sh)
+        # Build fsl-cluster command — all long opts use = (FSL parser requires this)
         cluster_cmd = (
-            f"fsl-cluster -i {thresh_file} -t {z_thr}"
-            f" --othresh={thresh_file} -o {cluster_index}"
-            f" --olmax={lmax_file} -p {p_thr}"
-            f" -d {DLH}"
+            f"fsl-cluster --in={thresh_file} --thresh={z_thr}"
+            f" --othresh={thresh_file} --oindex={cluster_index}"
+            f" --olmax={lmax_file} --pthresh={p_thr}"
+            f" --dlh={DLH}"
         )
         if RESELS is not None:
-            cluster_cmd += f" -r {RESELS}"
+            cluster_cmd += f" --resels={RESELS}"
         cluster_cmd += f" --volume={VOLUME} --minextent={k} --mm"
 
         rc, stdout, stderr = _run_cmd(cluster_cmd, timeout=180)
@@ -436,8 +436,8 @@ def run_lmm_cluster(
         z_thr = 0.01
 
     cmd = (
-        f"fsl-cluster -i {zthresh_path} -t {z_thr:.4f}"
-        f" -o {cluster_index} --olmax={lmax_file}"
+        f"fsl-cluster --in={zthresh_path} --thresh={z_thr:.4f}"
+        f" --oindex={cluster_index} --olmax={lmax_file}"
         f" --minextent={min_voxels} --mm"
     )
     rc, stdout, stderr = _run_cmd(cmd, timeout=60)
@@ -554,7 +554,7 @@ def run_tfce_cluster(
     # Run fsl-cluster (matching tfce-cluster.sh)
     # Note: no -p flag — requires --volume/--dlh for p-values which we don't need here
     cluster_cmd = (
-        f"fsl-cluster -i {tstat_thresh} -t {cluster_z_thr}"
+        f"fsl-cluster --in={tstat_thresh} --thresh={cluster_z_thr}"
         f" --oindex={cluster_index} --olmax={lmax_file}"
         f" --osize={cluster_size} --mm --minextent={k}"
     )

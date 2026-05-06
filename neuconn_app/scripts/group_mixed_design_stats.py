@@ -1041,7 +1041,6 @@ class GroupStatsAlffRehoRunner:
                 # Use standard MNI mask if available
                 standard_masks = [
                     self.bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz",
-                    self.bids_root / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz",
                 ]
                 mask = next((str(m) for m in standard_masks if m.exists()), None)
                 if not mask:

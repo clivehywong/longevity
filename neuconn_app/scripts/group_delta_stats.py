@@ -787,7 +787,6 @@ class DeltaStatsRunner:
         Priority per AGENTS.md §6: dilated MNI mask required for voxelwise analyses.
         """
         candidates = [
-            self.bids_root / "atlases" / "MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz",
             self.bids_root / "atlases" / "MNI152_T1_2mm_brain_mask_dil.nii.gz",
         ]
         for c in candidates:

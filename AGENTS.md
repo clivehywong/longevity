@@ -419,7 +419,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 - **TR**: 0.8s | **Volumes**: 480 | **Duration**: 6.4 min
 - **T1w**: 0.9mm isotropic MPRAGE, 2 runs per session
 - **Subjects**: 44 total (40 longitudinal with 2 sessions)
-- **Output spaces**: MNI152NLin2009cAsym:res-2 (primary), T1w
+- **Output spaces**: MNI152NLin6Asym:res-2 (primary), T1w
 
 ---
 

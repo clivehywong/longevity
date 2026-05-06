@@ -283,18 +283,18 @@ def _grf_cluster_correct(
     lmax_path = output_dir / f"{prefix}_lmax.txt"
     cmd = [
         "fsl-cluster",
-        "-i", str(thresh_path),
-        "-t", str(cluster_z),
-        "--othresh", str(thresh_path),
-        "-o", str(cluster_idx_path),
-        "--olmax", str(lmax_path),
-        "-p", str(cluster_p),
-        "-d", str(params["DLH"]),
-        "--volume", str(int(params["VOLUME"])),
+        f"--in={thresh_path}",
+        f"--thresh={cluster_z}",
+        f"--othresh={thresh_path}",
+        f"--oindex={cluster_idx_path}",
+        f"--olmax={lmax_path}",
+        f"--pthresh={cluster_p}",
+        f"--dlh={params['DLH']}",
+        f"--volume={int(params['VOLUME'])}",
         "--mm",
     ]
     if "RESELS" in params:
-        cmd.extend(["-r", str(params["RESELS"])])
+        cmd.append(f"--resels={params['RESELS']}")
     rc, stdout, stderr = _run_cmd(cmd, timeout=120)
     if rc != 0:
         logger.warning(f"fsl-cluster failed: {stderr[:500]}")
