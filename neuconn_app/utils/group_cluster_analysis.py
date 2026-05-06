@@ -533,8 +533,9 @@ def run_tfce_cluster(
         cluster_z_thr = max(tmin, 0.01)
 
     # Run fsl-cluster (matching tfce-cluster.sh)
+    # Note: no -p flag — requires --volume/--dlh for p-values which we don't need here
     cluster_cmd = (
-        f"fsl-cluster -p 1 --in={tstat_thresh} --thresh={cluster_z_thr}"
+        f"fsl-cluster -i {tstat_thresh} -t {cluster_z_thr}"
         f" --oindex={cluster_index} --olmax={lmax_file}"
         f" --osize={cluster_size} --mm --minextent={k}"
     )
