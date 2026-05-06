@@ -188,15 +188,30 @@ derivatives/connectivity/<pipeline>/<atlas>/<seed>/sub-<ID>/ses-<session>/
 
 ### Group-level seed-to-whole-brain
 
+Group outputs use an extra **model** layer so different statistical approaches live in separate sibling folders:
+
 ```
-derivatives/connectivity/<pipeline>/<atlas>/<seed>/group/
-    design.mat              # FSL design matrix
-    design.con              # Contrasts
-    design.grp              # Exchangeability blocks
-    cope1_tstat.nii.gz      # T-statistic map
-    cope1_tfce_corrp_tstat.nii.gz   # TFCE corrected p-values
-    mask.nii.gz             # Analysis mask (dilated MNI)
+derivatives/connectivity/<pipeline>/group/seed/<seed>/measure-<measure>/
+│
+├── 2x2_mixed/                  # 2×2 mixed ANOVA (group × session)
+│   ├── randomise_outputs/      # FSL randomise results (TFCE / GRF / FDR corrp maps)
+│   ├── randomise_logs/
+│   └── lmm_outputs/            # Parametric LMM fast-path results
+│
+└── delta/                      # Post−Pre delta contrast
+    ├── delta_maps/             # Per-subject delta (ses-02 − ses-01) NIfTIs
+    ├── randomise_outputs/      # FSL randomise on stacked delta maps
+    └── randomise_logs/
 ```
+
+For ALFF / ReHo (no seed sub-level):
+```
+derivatives/connectivity/<pipeline>/group/alff/
+└── 2x2_mixed/
+    └── lmm_outputs/
+```
+
+New model types (e.g. `longitudinal/`, `covariate_age/`) should be added as additional siblings at the same level as `2x2_mixed/` and `delta/`.
 
 ### Network connectivity (atlas-based)
 

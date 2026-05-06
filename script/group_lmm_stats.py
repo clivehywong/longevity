@@ -381,7 +381,7 @@ class ParametricGroupStats:
             self.output_dir = (
                 self.bids_root / "derivatives" / "connectivity"
                 / pipeline / "group" / "seed"
-                / seed_dir_name / f"measure-{measure}" / "lmm_outputs"
+                / seed_dir_name / f"measure-{measure}" / "2x2_mixed" / "lmm_outputs"
             )
 
     def run(self) -> bool:
@@ -652,7 +652,7 @@ class ParametricAlffRehoStats:
         else:
             self.output_dir = (
                 self.bids_root / "derivatives" / "connectivity"
-                / pipeline / "group" / stat / "lmm_outputs"
+                / pipeline / "group" / stat / "2x2_mixed" / "lmm_outputs"
             )
 
     def run(self) -> bool:

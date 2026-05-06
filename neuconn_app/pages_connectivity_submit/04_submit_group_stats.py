@@ -1173,7 +1173,7 @@ def _submit_mixed_design_local(
             cmd.extend(["--mask-path", mask])
         spinner_msg = "Running parametric analysis… (usually <30 seconds)"
         timeout_s = 300
-        out_subdir = out_base / "lmm_outputs"
+        out_subdir = out_base / "2x2_mixed" / "lmm_outputs"
     else:
         script = str(_app_dir / "scripts" / "group_mixed_design_stats.py")
         cmd = [
@@ -1190,7 +1190,7 @@ def _submit_mixed_design_local(
             cmd.extend(["--mask", mask])
         spinner_msg = "Running analysis… (this may take 10+ minutes for full permutations)"
         timeout_s = 3600
-        out_subdir = out_base / "randomise_outputs"
+        out_subdir = out_base / "2x2_mixed" / "randomise_outputs"
 
     st.code(" ".join(cmd), language="bash")
 

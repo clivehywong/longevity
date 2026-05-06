@@ -174,7 +174,7 @@ class GroupStatsRunner:
                 self.bids_root
                 / "derivatives" / "connectivity"
                 / pipeline / "group" / "seed"
-                / seed_dir_name / f"measure-{measure}"
+                / seed_dir_name / f"measure-{measure}" / "2x2_mixed"
             )
 
         # State
@@ -886,7 +886,7 @@ class GroupStatsAlffRehoRunner:
         else:
             self.output_dir = (
                 self.bids_root / "derivatives" / "connectivity"
-                / pipeline / "group" / stat
+                / pipeline / "group" / stat / "2x2_mixed"
             )
 
         self.canonical_order: Optional[pd.DataFrame] = None

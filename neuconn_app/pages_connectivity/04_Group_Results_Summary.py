@@ -178,7 +178,7 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
                     continue
                 measure = mdir.name.removeprefix("measure-")
                 label = f"{_seed_dir_label(seed_dir.name)} / {measure}"
-                for src, odir in [("randomise", mdir / "randomise_outputs"), ("lmm", mdir / "lmm_outputs")]:
+                for src, odir in [("randomise", mdir / "2x2_mixed" / "randomise_outputs"), ("lmm", mdir / "2x2_mixed" / "lmm_outputs")]:
                     if odir.exists():
                         _add_rows("Seed FC", label, seed_dir.name, measure, None, odir, src)
                 # Delta results
@@ -189,7 +189,7 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
     # ALFF / ReHo
     for stat in ("alff", "reho"):
         stat_base = group_base / stat
-        for src, odir in [("randomise", stat_base / "randomise_outputs"), ("lmm", stat_base / "lmm_outputs")]:
+        for src, odir in [("randomise", stat_base / "2x2_mixed" / "randomise_outputs"), ("lmm", stat_base / "2x2_mixed" / "lmm_outputs")]:
             if odir.exists():
                 _add_rows(stat.upper(), stat.upper(), None, None, stat, odir, src)
         # Delta results
@@ -712,7 +712,12 @@ def _load_cluster_from_disk(row: pd.Series) -> Optional[ClusterResult]:
     out_dir = Path(row["out_dir"]) / "cluster_analysis" / f"contrast{contrast_idx}"
 
     def _try_labeled_csv(csv_path: Path, txt_path: Path) -> Optional[pd.DataFrame]:
-        """Return labeled DataFrame from CSV if valid, else parse raw txt."""
+        """Return labeled DataFrame from CSV if valid, else parse raw txt.
+
+        Returns an empty DataFrame (not None) when the txt file exists but has no
+        data rows — this signals "analysis ran, no clusters found" so the auto-run
+        correctly skips the row instead of re-running it.
+        """
         if csv_path.exists():
             try:
                 df = pd.read_csv(csv_path)
@@ -727,7 +732,7 @@ def _load_cluster_from_disk(row: pd.Series) -> Optional[ClusterResult]:
                     "MAX": "Peak Z", "MAX X (mm)": "X(mm)",
                     "MAX Y (mm)": "Y(mm)", "MAX Z (mm)": "Z(mm)",
                 })
-            return df if not df.empty else None
+            return df  # may be empty; empty ≠ never-ran
         return None
 
     if source == "lmm":
@@ -796,7 +801,7 @@ def _render_grf_controls_and_run(
     with st.expander("🔧 Cluster Analysis Settings", expanded=False):
         if is_lmm:
             k_min = st.number_input(
-                "Min cluster size (voxels)", value=int(last_params.get("k", 1)),
+                "Min cluster size (voxels)", value=int(last_params.get("k", 50)),
                 min_value=1, max_value=5000, step=10,
                 key=f"{PAGE_KEY}_k_{row_id}",
             )
@@ -831,7 +836,7 @@ def _render_grf_controls_and_run(
                 key=f"{PAGE_KEY}_p_thr_{row_id}",
             )
             k_min = col3.number_input(
-                "Min voxels", value=int(last_params.get("k", 1)),
+                "Min voxels", value=int(last_params.get("k", 50)),
                 min_value=1, max_value=5000, step=10, key=f"{PAGE_KEY}_k_{row_id}",
             )
             smoothness = col4.radio(
@@ -1081,52 +1086,62 @@ def _render_result_card(row_id: str, row: pd.Series, bids_root: Path) -> None:
 # ============================================================================
 
 def _render_autorun_section(selected_rows: pd.DataFrame, bids_root: Path) -> None:
-    """Auto-run cluster analysis for all selected rows, skipping already-completed ones."""
+    """Two buttons: generate missing results only, or regenerate everything."""
     n_selected = len(selected_rows)
 
-    col_run, col_dl = st.columns([2, 1])
-    with col_run:
+    def _run_rows(rows_to_run: list) -> None:
+        n = len(rows_to_run)
+        if n == 0:
+            st.success("✅ All selected analyses already have results.")
+            st.rerun()
+            return
+        prog = st.progress(0, text=f"Running 0 / {n}…")
+        errors: list[str] = []
+        for i, row in enumerate(rows_to_run):
+            row_id = row["_row_id"]
+            label_short = str(row.get("label", ""))[:40]
+            prog.progress(i / max(n, 1), text=f"[{i+1}/{n}] {label_short}…")
+            result = _run_cluster_for_row(row, bids_root)
+            st.session_state[f"{PAGE_KEY}_cluster_{row_id}"] = result
+            if result.error:
+                errors.append(f"{label_short}: {result.error}")
+        prog.progress(1.0, text=f"Done — {n} analyses completed.")
+        if errors:
+            st.warning(f"{len(errors)} error(s):\n" + "\n".join(errors[:5]))
+        else:
+            st.success(f"✅ {n} cluster analyses complete.")
+        st.rerun()
+
+    col_miss, col_all, col_dl = st.columns([2, 2, 1])
+
+    with col_miss:
         if st.button(
-            f"🚀 Run cluster analysis for {n_selected} selected rows",
-            key=f"{PAGE_KEY}_autorun_all",
-            help="Runs cluster analysis for all selected rows using default parameters. "
-                 "Rows that already have results (in session or on disk) are skipped.",
+            f"🔍 Generate missing ({n_selected} selected)",
+            key=f"{PAGE_KEY}_autorun_missing",
+            help="Run cluster analysis only for rows that don't have results yet. "
+                 "Already-computed results (in session or on disk) are kept.",
         ):
-            # Identify rows that still need to be run
             to_run = []
             for _, row in selected_rows.iterrows():
                 row_id = row["_row_id"]
-                state_key = f"{PAGE_KEY}_cluster_{row_id}"
-                if state_key in st.session_state:
+                if f"{PAGE_KEY}_cluster_{row_id}" in st.session_state:
                     continue
                 if _load_cluster_from_disk(row) is not None:
                     continue
                 to_run.append(row)
+            _run_rows(to_run)
 
-            n_to_run = len(to_run)
-            if n_to_run == 0:
-                st.success("All selected analyses already have results.")
-            else:
-                prog = st.progress(0, text="Running cluster analyses…")
-                errors = []
-                for i, row in enumerate(to_run):
-                    row_id = row["_row_id"]
-                    state_key = f"{PAGE_KEY}_cluster_{row_id}"
-                    label_short = str(row.get("label", ""))[:35]
-                    prog.progress(i / max(n_to_run, 1), text=f"[{i+1}/{n_to_run}] {label_short}…")
-                    result = _run_cluster_for_row(row, bids_root)
-                    st.session_state[state_key] = result
-                    if result.error:
-                        errors.append(f"{label_short}: {result.error}")
-                prog.progress(1.0, text=f"Done — {n_to_run} analyses completed.")
-                if errors:
-                    st.warning(f"{len(errors)} error(s):\n" + "\n".join(errors[:5]))
-                else:
-                    st.success("All cluster analyses complete. Fine-tune per-result below.")
-            st.rerun()
+    with col_all:
+        if st.button(
+            f"🔄 Regenerate all ({n_selected} selected)",
+            key=f"{PAGE_KEY}_autorun_all",
+            help="Re-run cluster analysis for ALL selected rows, overwriting existing results.",
+        ):
+            to_run = [row for _, row in selected_rows.iterrows()]
+            _run_rows(to_run)
 
     with col_dl:
-        st.caption("HTML report available below after running analyses.")
+        st.caption("HTML report available below.")
 
 
 def _img_to_b64(png_bytes: Optional[bytes]) -> str:

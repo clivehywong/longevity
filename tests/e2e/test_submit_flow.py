@@ -1518,20 +1518,110 @@ class TestFullWorkflowSmokeTest:
 
 
 # ---------------------------------------------------------------------------
-# Test 16: HTML Report Download
+# Test 16: HTML Report Download (all seeds, both LMM + delta)
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HTML_REPORT_DIR = REPO_ROOT / "html_report"
 
+# ── Python-level pre-computation of cluster analyses ───────────────────────
+
+def _prerun_all_cluster_analyses(bids_root: Path, pipeline: str = "fc") -> int:
+    """Pre-run cluster analyses for all seeds/ALFF/ReHo via direct Python calls.
+
+    Returns number of analyses that were run (0 if all already cached).
+    Runs outside Playwright so the UI test just generates HTML from existing results.
+    Sphere/ROI seeds are naturally skipped (no measure-pearson/lmm_outputs etc.).
+    """
+    import sys
+    sys.path.insert(0, str(bids_root / "neuconn_app"))
+
+    from utils.group_cluster_analysis import (  # noqa: PLC0415
+        run_lmm_cluster, run_tfce_cluster,
+    )
+
+    group_base = bids_root / "derivatives" / "connectivity" / pipeline / "group"
+    ran = 0
+
+    def _do_tfce(corrp: Path, tstat: Path, out_dir: Path) -> None:
+        """out_dir is the final contrast dir (e.g. randomise_outputs/cluster_analysis/contrast1)."""
+        nonlocal ran
+        if corrp.exists() and tstat.exists():
+            result = run_tfce_cluster(corrp, tstat, out_dir)
+            if not result.error:
+                ran += 1
+
+    def _do_lmm(zthresh: Path, out_dir: Path) -> None:
+        """out_dir is the final contrast dir (e.g. lmm_outputs/cluster_analysis/contrast1)."""
+        nonlocal ran
+        if zthresh.exists():
+            result = run_lmm_cluster(zthresh, out_dir)
+            if not result.error:
+                ran += 1
+
+    # Seed FC
+    seed_base = group_base / "seed"
+    if seed_base.exists():
+        for seed_dir in sorted(seed_base.iterdir()):
+            mdir = seed_dir / "measure-pearson"
+            if not mdir.is_dir():
+                continue
+
+            # delta TFCE
+            delta_dir = mdir / "delta" / "randomise_outputs"
+            for idx in (1, 2):
+                corrp = delta_dir / f"delta_tfce_corrp_tstat{idx}.nii.gz"
+                tstat = delta_dir / f"delta_tstat{idx}.nii.gz"
+                ca = delta_dir / "cluster_analysis" / f"contrast{idx}"
+                if corrp.exists() and not ca.exists():
+                    _do_tfce(corrp, tstat, ca)
+
+            # LMM GRF (parametric)
+            lmm_dir = mdir / "lmm_outputs"
+            for idx in (1, 2, 3):
+                zthresh = lmm_dir / f"c{idx}_zthresh.nii.gz"
+                ca = lmm_dir / "cluster_analysis" / f"contrast{idx}"
+                if zthresh.exists() and not ca.exists():
+                    _do_lmm(zthresh, ca)
+
+    # ALFF / ReHo
+    for stat in ("alff", "reho"):
+        stat_base = group_base / stat
+
+        # delta TFCE
+        delta_dir = stat_base / "delta" / "randomise_outputs"
+        for idx in (1, 2):
+            corrp = delta_dir / f"delta_tfce_corrp_tstat{idx}.nii.gz"
+            tstat = delta_dir / f"delta_tstat{idx}.nii.gz"
+            ca = delta_dir / "cluster_analysis" / f"contrast{idx}"
+            if corrp.exists() and not ca.exists():
+                _do_tfce(corrp, tstat, ca)
+
+        # LMM
+        lmm_dir = stat_base / "lmm_outputs"
+        for idx in (1, 2, 3):
+            zthresh = lmm_dir / f"c{idx}_zthresh.nii.gz"
+            ca = lmm_dir / "cluster_analysis" / f"contrast{idx}"
+            if zthresh.exists() and not ca.exists():
+                _do_lmm(zthresh, ca)
+
+    return ran
+
 
 class TestHTMLReportDownload:
-    """Download an HTML report from the Group Results Summary page."""
+    """Download an HTML report from the Group Results Summary page (all seeds)."""
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prerun_clusters(self) -> int:
+        """Pre-compute cluster analyses for all seeds before the Playwright test."""
+        bids_root = REPO_ROOT
+        return _prerun_all_cluster_analyses(bids_root)
 
     def test_download_html_report(self, app_page: Page) -> None:
-        """Navigate to Group Results Summary, run cluster analyses and download HTML report.
+        """Navigate to Group Results Summary, select ALL seeds, generate and download HTML report.
 
-        Filters to ALFF type only (3 analyses) to keep HTML generation time manageable.
+        Cluster analyses are pre-computed by the prerun_clusters fixture so the
+        Playwright test only exercises the HTML generation path (fast).
         """
         HTML_REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1544,26 +1634,23 @@ class TestHTMLReportDownload:
         rescan_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Rescan results")
         if rescan_btn.count() > 0:
             rescan_btn.first.click()
-            app_page.wait_for_timeout(3_000)
+            app_page.wait_for_timeout(5_000)
         _save_screenshot(app_page, "16b_after_rescan")
 
         page_text = app_page.locator(MAIN).text_content() or ""
         if "No group results found" in page_text:
             pytest.skip("No group results available — skipping HTML report test.")
 
-        # Turn OFF "Show significant only" toggle
+        # Turn OFF "Show significant only" toggle so ALL seeds appear
         sig_toggle = app_page.locator(MAIN).locator('[data-testid="stToggle"]').filter(has_text="significant")
         if sig_toggle.count() > 0:
             checked = sig_toggle.locator("input").is_checked()
             if checked:
                 sig_toggle.locator("label").click()
-                app_page.wait_for_timeout(1_000)
+                app_page.wait_for_timeout(1_500)
+        _save_screenshot(app_page, "16b2_significant_off")
 
-        # Filter to ALFF only to keep rendering time manageable (3 rows instead of 90+)
-        _set_single_multiselect(app_page, "Map type", "ALFF")
-        app_page.wait_for_timeout(1_000)
-
-        # Deselect all, then select all (now selecting only the ALFF subset)
+        # Select ALL rows (both LMM and delta, all seeds)
         desel_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Deselect all")
         if desel_btn.count() > 0:
             desel_btn.first.click()
@@ -1571,47 +1658,48 @@ class TestHTMLReportDownload:
         sel_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Select all")
         if sel_btn.count() > 0:
             sel_btn.first.click()
-            app_page.wait_for_timeout(1_000)
+            app_page.wait_for_timeout(1_500)
         _save_screenshot(app_page, "16c_all_selected")
 
-        # Click the auto-run button for selected rows
-        run_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Run cluster analysis for")
+
+        # ── Generate missing cluster results ────────────────────────────────
+        # Most analyses are pre-computed by the fixture; "Generate missing" detects
+        # them on disk and skips immediately, showing a success alert quickly.
+        run_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Generate missing")
         if run_btn.count() > 0:
             run_btn.first.click()
-            # Wait up to 5 minutes for completion
             try:
                 app_page.wait_for_selector(
                     '[data-testid="stAlertContainer"]',
-                    timeout=300_000,
+                    timeout=900_000,  # 15 min for any stragglers
                 )
             except Exception:
                 pass
-            app_page.wait_for_timeout(3_000)
+            app_page.wait_for_timeout(2_000)
         _save_screenshot(app_page, "16d_after_autorun")
-
-        # Find "Generate HTML Report" button (may appear after analyses complete)
+        # Find "Generate HTML Report" button
         gen_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Generate HTML Report")
         if gen_btn.count() == 0:
             pytest.skip("Generate HTML Report button not found — no results available.")
 
-        # Set max_cluster_detail to 1 to limit brain overlay rendering time
-        _fill_number_input(app_page, "Max clusters with brain overlay", 1)
+        # max_cluster_detail = 10 (user request: at most 10 cluster figures per analysis)
+        _fill_number_input(app_page, "Max clusters with brain overlay", 10)
+        app_page.wait_for_timeout(500)
 
-        # Click "Generate HTML Report" and wait for download button to appear
         gen_btn = app_page.locator(MAIN).get_by_role("button").filter(has_text="Generate HTML Report")
         gen_btn.first.click()
-        # HTML generation renders nilearn overlays — give up to 5 minutes
+        # HTML generation renders nilearn overlays for potentially 120+ rows — allow 20 min
         try:
             app_page.wait_for_selector(
                 '[data-testid="stDownloadButton"]',
-                timeout=300_000,
+                timeout=1_200_000,  # 20 min
             )
         except Exception:
             pass
         app_page.wait_for_timeout(2_000)
         _save_screenshot(app_page, "16e_after_generate")
 
-        # Now capture the download
+        # Capture the download
         dl_btn = app_page.locator(MAIN).locator('[data-testid="stDownloadButton"]')
         if dl_btn.count() == 0:
             pytest.skip("Download Report button not found after generation.")
@@ -1624,15 +1712,35 @@ class TestHTMLReportDownload:
 
         download = download_info.value
         download.save_as(str(report_path))
-
         _save_screenshot(app_page, "16f_after_download")
 
-        # Assertions
+        # ── Assertions ────────────────────────────────────────────────────────
         assert report_path.exists(), f"HTML report not found at {report_path}"
         file_size = report_path.stat().st_size
-        assert file_size > 10_000, f"HTML report too small ({file_size} bytes)"
+        assert file_size > 50_000, f"HTML report too small ({file_size} bytes) — likely incomplete"
 
         html_content = report_path.read_text(encoding="utf-8")
+
+        # No two-way plot failures
         assert "No subject data available" not in html_content, (
-            "HTML report contains 'No subject data available' — two-way plots may be broken."
+            "HTML report contains 'No subject data available' — two-way plots broken."
         )
+        # Both LMM and delta appear (at least one of each)
+        assert "GRF cluster (parametric)" in html_content or "LMM" in html_content, (
+            "LMM/GRF parametric results not found in HTML report."
+        )
+        assert "Delta" in html_content or "TFCE (Delta)" in html_content, (
+            "Delta (TFCE) results not found in HTML report."
+        )
+        # Multiple seeds present
+        seed_count = html_content.count("LH_Cont") + html_content.count("HIP-")
+        assert seed_count >= 5, (
+            f"Expected multiple seeds in HTML but only found {seed_count} seed label mentions."
+        )
+        # No 1-voxel clusters (smallest valid cluster is 50 voxels)
+        import re
+        tiny_clusters = re.findall(r"<td>\s*([1-9]|[1-4][0-9])\s*</td>.*?<td>.*?voxels", html_content)
+        assert len(tiny_clusters) == 0, (
+            f"Found {len(tiny_clusters)} cluster(s) with <50 voxels — min-extent not applied."
+        )
+

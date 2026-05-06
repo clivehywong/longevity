@@ -78,7 +78,7 @@ def _scan_group_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.Dat
             measure = measure_dir.name.removeprefix("measure-")
 
             # randomise outputs
-            rand_dir = measure_dir / "randomise_outputs"
+            rand_dir = measure_dir / "2x2_mixed" / "randomise_outputs"
             tstats = sorted(rand_dir.glob("randomise_tstat*.nii.gz")) if rand_dir.exists() else []
             tfce = (
                 sorted(rand_dir.glob("randomise_tfce_corrp_tstat*.nii.gz"))
@@ -87,7 +87,7 @@ def _scan_group_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.Dat
             ) if rand_dir.exists() else []
 
             # lmm (parametric) outputs
-            lmm_dir = measure_dir / "lmm_outputs"
+            lmm_dir = measure_dir / "2x2_mixed" / "lmm_outputs"
             lmm_tstats = sorted(lmm_dir.glob("lmm_tstat*.nii.gz")) if lmm_dir.exists() else []
 
             summary = measure_dir / "stats_summary.json"
@@ -116,8 +116,8 @@ def _group_base_alff_reho(bids_root: Path, pipeline: str, stat: str) -> Path:
 def _scan_alff_reho_results(bids_root_str: str, pipeline: str, stat: str, _tick: int) -> dict:
     """Returns dict with keys: exists, has_tstat, has_corrp, has_lmm, has_rand, n_rand, n_lmm."""
     base = _group_base_alff_reho(Path(bids_root_str), pipeline, stat)
-    rand_dir = base / "randomise_outputs"
-    lmm_dir = base / "lmm_outputs"
+    rand_dir = base / "2x2_mixed" / "randomise_outputs"
+    lmm_dir = base / "2x2_mixed" / "lmm_outputs"
     tstats_rand = sorted(rand_dir.glob("randomise_tstat*.nii.gz")) if rand_dir.exists() else []
     tstats_lmm = sorted(lmm_dir.glob("lmm_tstat*.nii.gz")) if lmm_dir.exists() else []
     corrp = (
@@ -142,11 +142,11 @@ def _list_contrasts_alff_reho(bids_root: Path, pipeline: str, stat: str, source:
     import re  # noqa: PLC0415
     base = _group_base_alff_reho(bids_root, pipeline, stat)
     if source == "lmm":
-        out_dir = base / "lmm_outputs"
+        out_dir = base / "2x2_mixed" / "lmm_outputs"
         pattern = r"lmm_tstat(\d+)\.nii\.gz$"
         glob_pat = "lmm_tstat*.nii.gz"
     else:
-        out_dir = base / "randomise_outputs"
+        out_dir = base / "2x2_mixed" / "randomise_outputs"
         pattern = r"randomise_tstat(\d+)\.nii\.gz$"
         glob_pat = "randomise_tstat*.nii.gz"
     if not out_dir.exists():
@@ -164,11 +164,11 @@ def _list_contrasts(bids_root: Path, pipeline: str, seed_dir: str, measure: str,
     import re
     measure_dir = _group_base(bids_root, pipeline) / seed_dir / f"measure-{measure}"
     if source == "lmm":
-        out_dir = measure_dir / "lmm_outputs"
+        out_dir = measure_dir / "2x2_mixed" / "lmm_outputs"
         pattern = r"lmm_tstat(\d+)\.nii\.gz$"
         glob_pat = "lmm_tstat*.nii.gz"
     else:
-        out_dir = measure_dir / "randomise_outputs"
+        out_dir = measure_dir / "2x2_mixed" / "randomise_outputs"
         pattern = r"randomise_tstat(\d+)\.nii\.gz$"
         glob_pat = "randomise_tstat*.nii.gz"
 
@@ -366,11 +366,11 @@ def _render_viewer(bids_root: Path, pipeline: str, map_type: str = "Seed FC") ->
 
     # ── Source selector (randomise vs LMM) ────────────────────────────────
     measure_dir = _group_base(bids_root, pipeline) / seed_dir / f"measure-{measure}"
-    has_rand = (measure_dir / "randomise_outputs").exists() and bool(
-        list((measure_dir / "randomise_outputs").glob("randomise_tstat*.nii.gz"))
+    has_rand = (measure_dir / "2x2_mixed" / "randomise_outputs").exists() and bool(
+        list((measure_dir / "2x2_mixed" / "randomise_outputs").glob("randomise_tstat*.nii.gz"))
     )
-    has_lmm = (measure_dir / "lmm_outputs").exists() and bool(
-        list((measure_dir / "lmm_outputs").glob("lmm_tstat*.nii.gz"))
+    has_lmm = (measure_dir / "2x2_mixed" / "lmm_outputs").exists() and bool(
+        list((measure_dir / "2x2_mixed" / "lmm_outputs").glob("lmm_tstat*.nii.gz"))
     )
 
     if has_rand and has_lmm:
@@ -402,14 +402,14 @@ def _render_viewer(bids_root: Path, pipeline: str, map_type: str = "Seed FC") ->
 
     # ── Resolve paths based on source ─────────────────────────────────────
     if source == "lmm":
-        out_dir = measure_dir / "lmm_outputs"
+        out_dir = measure_dir / "2x2_mixed" / "lmm_outputs"
         tstat_path = out_dir / f"lmm_tstat{contrast_idx}.nii.gz"
         corrp_cand = out_dir / f"lmm_cluster_corrp_tstat{contrast_idx}.nii.gz"
         corrp_path = corrp_cand if corrp_cand.exists() else None
         corrp_label = "GRF cluster (parametric)"
         summary_json = out_dir / "lmm_summary.json"
     else:
-        out_dir = measure_dir / "randomise_outputs"
+        out_dir = measure_dir / "2x2_mixed" / "randomise_outputs"
         tstat_path = out_dir / f"randomise_tstat{contrast_idx}.nii.gz"
         tfce_path = out_dir / f"randomise_tfce_corrp_tstat{contrast_idx}.nii.gz"
         grf_path = out_dir / f"randomise_clustere_corrp_tstat{contrast_idx}.nii.gz"
@@ -695,14 +695,14 @@ def _render_viewer_alff_reho(bids_root: Path, pipeline: str, stat: str) -> None:
     )
     # Resolve paths
     if source == "lmm":
-        out_dir = base / "lmm_outputs"
+        out_dir = base / "2x2_mixed" / "lmm_outputs"
         tstat_path = out_dir / f"lmm_tstat{contrast_idx}.nii.gz"
         corrp_cand = out_dir / f"lmm_cluster_corrp_tstat{contrast_idx}.nii.gz"
         corrp_path = corrp_cand if corrp_cand.exists() else None
         corrp_label = "GRF cluster (parametric)" if corrp_path else ""
         summary_json = out_dir / "lmm_summary.json"
     else:
-        out_dir = base / "randomise_outputs"
+        out_dir = base / "2x2_mixed" / "randomise_outputs"
         tstat_path = out_dir / f"randomise_tstat{contrast_idx}.nii.gz"
         tfce_path = out_dir / f"randomise_tfce_corrp_tstat{contrast_idx}.nii.gz"
         grf_path = out_dir / f"randomise_clustere_corrp_tstat{contrast_idx}.nii.gz"

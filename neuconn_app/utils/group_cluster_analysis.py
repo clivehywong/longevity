@@ -375,15 +375,13 @@ def run_grf_cluster(
                 error=f"fsl-cluster failed ({t}): {stderr[:400]}"
             )
 
-        # Save masked cluster image
+        # Save masked cluster image (for reference only)
         cluster_index_nii = Path(str(cluster_index) + ".nii.gz")
-        cluster_img_out: Path | None = None
         if cluster_index_nii.exists():
             _run_cmd(f"fslmaths {thresh_file} -mas {cluster_index} {cluster_img}")
-            candidate = Path(str(cluster_img) + ".nii.gz")
-            if candidate.exists():
-                cluster_img_out = candidate
-        cluster_imgs[t] = cluster_img_out
+        # Return integer-labeled cluster index (not the float tstat) so that
+        # ci_data == cluster_label comparisons work downstream.
+        cluster_imgs[t] = cluster_index_nii if cluster_index_nii.exists() else None
         tables[t] = parse_cluster_table(cluster_txt)
 
     return ClusterResult(
@@ -408,7 +406,7 @@ def run_grf_cluster(
 def run_lmm_cluster(
     zthresh_path: Path,
     out_dir: Path,
-    min_voxels: int = 1,
+    min_voxels: int = 50,
 ) -> ClusterResult:
     """Label clusters in an already GRF-corrected z-stat map (LMM cN_zthresh.nii.gz).
 
@@ -514,6 +512,11 @@ def run_tfce_cluster(
             import numpy as np  # noqa: PLC0415
             mask_data = np.asanyarray(nib.load(str(corrp_mask_nii)).dataobj)
             if mask_data.sum() == 0:
+                # Write sentinel so _load_cluster_from_disk recognises "ran, no clusters"
+                cluster_txt.write_text(
+                    "Cluster Index\tVoxels\tMAX\tMAX X (mm)\tMAX Y (mm)\tMAX Z (mm)\t"
+                    "COG X (mm)\tCOG Y (mm)\tCOG Z (mm)\n"
+                )
                 return ClusterResult(
                     tables={"pos": pd.DataFrame()},
                     cluster_img={"pos": None},
