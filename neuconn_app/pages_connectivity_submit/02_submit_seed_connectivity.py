@@ -813,6 +813,107 @@ def _render_monitor_tab(config: dict, bids_root: Any) -> None:
                         st.rerun()
 
 
+def _scan_hpc_connectivity(config: dict, pipeline: str, bids_root: Path) -> dict:
+    """SSH to HPC and find connectivity zmaps.
+
+    Returns dict:
+    {
+      seed_dir: {
+        "remote_subjects": [(sub_id, ses_id, remote_zmap_path), ...],
+        "local_missing": [(sub_id, ses_id), ...]   # on HPC but not local
+      }
+    }
+    """
+    from utils.hpc import HPCConfig, HPCConnection  # noqa: PLC0415
+
+    hpc_cfg = HPCConfig.from_config(config)
+    conn = HPCConnection(hpc_cfg)
+    conn.connect()
+    try:
+        remote_dir = f"{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}"
+        cmd = f"find {remote_dir} -name '*_zmap.nii.gz' -type f 2>/dev/null"
+        stdout, _stderr, _exit_code = conn.execute(cmd, timeout=120)
+    finally:
+        conn.disconnect()
+
+    results: dict = {}
+    for line in stdout.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Remote path: …/connectivity/{pipeline}/{seed_dir}/sub-{ID}/ses-{N}/…
+        try:
+            parts = Path(line).parts
+            conn_idx = parts.index("connectivity")
+        except ValueError:
+            continue
+        if len(parts) < conn_idx + 5:
+            continue
+        path_pipeline = parts[conn_idx + 1]
+        if path_pipeline != pipeline:
+            continue
+        seed_dir = parts[conn_idx + 2]
+        sub_id = parts[conn_idx + 3]
+        ses_id = parts[conn_idx + 4]
+        if not sub_id.startswith("sub-") or not ses_id.startswith("ses-"):
+            continue
+
+        if seed_dir not in results:
+            results[seed_dir] = {"remote_subjects": [], "local_missing": []}
+        results[seed_dir]["remote_subjects"].append((sub_id, ses_id, line))
+
+        local_ses = bids_root / "derivatives" / "connectivity" / pipeline / seed_dir / sub_id / ses_id
+        if not list(local_ses.glob("*_zmap.nii.gz")):
+            results[seed_dir]["local_missing"].append((sub_id, ses_id))
+
+    return results
+
+
+def _download_seed_scan_results(
+    config: dict,
+    pipeline: str,
+    seed_dir: str,
+    bids_root: Path,
+    progress: Any,
+) -> None:
+    """rsync a discovered seed_dir from HPC to local."""
+    from utils.hpc import HPCConfig  # noqa: PLC0415
+
+    hpc_cfg = HPCConfig.from_config(config)
+    local_dest = bids_root / "derivatives" / "connectivity" / pipeline
+    local_dest.mkdir(parents=True, exist_ok=True)
+
+    ssh_opts = f"ssh -p {hpc_cfg.port} -o StrictHostKeyChecking=no -o BatchMode=yes"
+    cmd = [
+        "rsync", "-az", "--progress",
+        "-e", ssh_opts,
+        f"{hpc_cfg.user}@{hpc_cfg.host}:{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}/{seed_dir}/",
+        str(local_dest / seed_dir) + "/",
+    ]
+
+    progress("Downloading…", 0.1)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    if result.returncode != 0:
+        raise RuntimeError(f"rsync failed: {result.stderr[:500]}")
+    progress("Done", 1.0)
+
+
+def _cleanup_hpc_seed(config: dict, pipeline: str, seed_dir: str) -> None:
+    """SSH and remove seed_dir from HPC after confirming results are local."""
+    from utils.hpc import HPCConfig, HPCConnection  # noqa: PLC0415
+
+    hpc_cfg = HPCConfig.from_config(config)
+    conn = HPCConnection(hpc_cfg)
+    conn.connect()
+    try:
+        remote_path = f"{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}/{seed_dir}"
+        _stdout, stderr, exit_code = conn.execute(f"rm -rf {remote_path}", timeout=120)
+        if exit_code != 0:
+            raise RuntimeError(f"rm -rf failed: {stderr[:300]}")
+    finally:
+        conn.disconnect()
+
+
 def _render_download_tab(config: dict, bids_root: Any) -> None:
     """Download completed HPC seed connectivity results."""
     from utils.connectivity_download import (  # noqa: PLC0415
@@ -831,7 +932,6 @@ def _render_download_tab(config: dict, bids_root: Any) -> None:
 
     if not completed:
         st.info("No completed HPC seed jobs to download.")
-        return
 
     for sub in sorted(completed, key=lambda s: s.submitted_at, reverse=True):
         with st.container(border=True):
@@ -891,6 +991,82 @@ def _render_download_tab(config: dict, bids_root: Any) -> None:
                         st.error(f"⚠️ {fail} subject(s) failed. {ok} succeeded.")
                 except Exception as exc:
                     st.error(f"Download failed: {exc}")
+
+    # ------------------------------------------------------------------
+    # Recovery: scan HPC for undownloaded results
+    # ------------------------------------------------------------------
+    st.divider()
+    with st.expander("🔍 Scan HPC for undownloaded results", expanded=not bool(completed)):
+        st.caption(
+            "Use this to recover downloads after a page refresh, or to find results "
+            "submitted outside of this UI."
+        )
+        pipeline_scan = st.selectbox(
+            "Pipeline to scan", ["fc", "fc_gsr", "ec"],
+            key="submit_seed_scan_hpc_pipeline",
+        )
+        if st.button("🔍 Scan HPC", key="submit_seed_scan_hpc_btn"):
+            with st.spinner("Connecting to HPC and scanning…"):
+                try:
+                    scan_results = _scan_hpc_connectivity(
+                        config, pipeline_scan, Path(bids_root)
+                    )
+                    st.session_state["submit_seed_hpc_scan"] = scan_results
+                    st.session_state["submit_seed_hpc_scan_pipeline"] = pipeline_scan
+                except Exception as exc:
+                    st.error(f"Scan failed: {exc}")
+
+        scan = st.session_state.get("submit_seed_hpc_scan", {})
+        scan_pipeline = st.session_state.get("submit_seed_hpc_scan_pipeline", "fc")
+
+        if scan:
+            total_remote = sum(len(v["remote_subjects"]) for v in scan.values())
+            total_missing = sum(len(v["local_missing"]) for v in scan.values())
+            st.success(
+                f"Found **{len(scan)} seed(s)**, "
+                f"**{total_remote} subject-session result(s)** on HPC, "
+                f"**{total_missing}** not yet downloaded locally."
+            )
+
+            for seed_dir, info in sorted(scan.items()):
+                n_remote = len(info["remote_subjects"])
+                n_missing = len(info["local_missing"])
+                status_label = "✅ All downloaded" if n_missing == 0 else f"⬇️ {n_missing}/{n_remote} pending"
+
+                with st.container(border=True):
+                    col_label, col_dl, col_clean = st.columns([3, 1, 1])
+                    with col_label:
+                        st.markdown(f"**{seed_dir}**  {status_label}")
+                        st.caption(f"{n_remote} result(s) on HPC")
+
+                    with col_dl:
+                        if n_missing > 0 and st.button(
+                            "⬇️ Download", key=f"submit_seed_scan_dl_{seed_dir}"
+                        ):
+                            prog = st.progress(0.0, text="Downloading…")
+                            try:
+                                _download_seed_scan_results(
+                                    config, scan_pipeline, seed_dir, Path(bids_root),
+                                    lambda msg, frac: prog.progress(frac, text=msg),
+                                )
+                                st.success(f"✅ Downloaded {seed_dir}")
+                                st.session_state.pop("submit_seed_hpc_scan", None)
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Download failed: {exc}")
+
+                    with col_clean:
+                        if n_missing == 0 and st.button(
+                            "🗑️ Clean HPC", key=f"submit_seed_scan_clean_{seed_dir}",
+                            help="Remove from HPC after confirming all results are local",
+                        ):
+                            try:
+                                _cleanup_hpc_seed(config, scan_pipeline, seed_dir)
+                                st.success(f"✅ Cleaned {seed_dir} from HPC")
+                                st.session_state.pop("submit_seed_hpc_scan", None)
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Cleanup failed: {exc}")
 
 
 def _render_submit_tab(config: dict, bids_root: Any) -> None:

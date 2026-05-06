@@ -401,12 +401,19 @@ def _render_viewer(bids_root: Path, pipeline: str, map_type: str = "Seed FC") ->
         )
 
     # ── Resolve paths based on source ─────────────────────────────────────
+    corrp_is_zthresh = False  # True when corrp_path is a z-stat, not a 0-1 corrp image
     if source == "lmm":
         out_dir = measure_dir / "2x2_mixed" / "lmm_outputs"
         tstat_path = out_dir / f"lmm_tstat{contrast_idx}.nii.gz"
         corrp_cand = out_dir / f"lmm_cluster_corrp_tstat{contrast_idx}.nii.gz"
-        corrp_path = corrp_cand if corrp_cand.exists() else None
-        corrp_label = "GRF cluster (parametric)"
+        zthresh_cand = out_dir / f"c{contrast_idx}_zthresh.nii.gz"
+        if corrp_cand.exists():
+            corrp_path, corrp_label = corrp_cand, "GRF cluster (parametric)"
+        elif zthresh_cand.exists():
+            corrp_path, corrp_label = zthresh_cand, "GRF cluster (z-threshold)"
+            corrp_is_zthresh = True
+        else:
+            corrp_path, corrp_label = None, ""
         summary_json = out_dir / "lmm_summary.json"
     else:
         out_dir = measure_dir / "2x2_mixed" / "randomise_outputs"
@@ -458,11 +465,16 @@ def _render_viewer(bids_root: Path, pipeline: str, map_type: str = "Seed FC") ->
 
     # ── Corrected p-value map (static PNG) ───────────────────────────────
     if corrp_path:
-        st.markdown(f"**📊 {corrp_label} corrected p-values** (p < 0.05 threshold → 1 − p > 0.95)")
+        if corrp_is_zthresh:
+            st.markdown(f"**📊 {corrp_label}** — GRF-corrected significant voxels (z > 2.3)")
+            r_thr, r_vmax, r_cmap = 0.001, 6.0, "hot"
+        else:
+            st.markdown(f"**📊 {corrp_label} corrected p-values** (p < 0.05 threshold → 1 − p > 0.95)")
+            r_thr, r_vmax, r_cmap = 0.95, 1.0, "autumn"
         corrp_mtime = corrp_path.stat().st_mtime
         png_tfce = _render_stat_map_png(
-            str(corrp_path), corrp_mtime, threshold=0.95, vmax=1.0,
-            cmap="autumn", title=f"{corrp_label} corrp  [{seed_dir}  ·  {measure}]",
+            str(corrp_path), corrp_mtime, threshold=r_thr, vmax=r_vmax,
+            cmap=r_cmap, title=f"{corrp_label}  [{seed_dir}  ·  {measure}]",
         )
         if png_tfce:
             st.image(png_tfce, use_container_width=True)
@@ -477,7 +489,9 @@ def _render_viewer(bids_root: Path, pipeline: str, map_type: str = "Seed FC") ->
     if not _HAS_CLUSTER_UTILS:
         st.warning("Cluster utilities not available (import error in group_cluster_analysis).")
     else:
-        use_tfce_controls = corrp_label in ("TFCE", "GRF cluster (parametric)") and corrp_path is not None
+        use_tfce_controls = corrp_label in (
+            "TFCE", "GRF cluster (parametric)", "GRF cluster (z-threshold)"
+        ) and corrp_path is not None
         cluster_key = (
             f"{PAGE_KEY}_cluster_result_{source}_{seed_dir}_{measure}_{contrast_idx}"
         )
@@ -694,12 +708,19 @@ def _render_viewer_alff_reho(bids_root: Path, pipeline: str, stat: str) -> None:
         format_func=lambda i: f"#{i}  {contrast_opts[i]}",
     )
     # Resolve paths
+    corrp_is_zthresh = False
     if source == "lmm":
         out_dir = base / "2x2_mixed" / "lmm_outputs"
         tstat_path = out_dir / f"lmm_tstat{contrast_idx}.nii.gz"
         corrp_cand = out_dir / f"lmm_cluster_corrp_tstat{contrast_idx}.nii.gz"
-        corrp_path = corrp_cand if corrp_cand.exists() else None
-        corrp_label = "GRF cluster (parametric)" if corrp_path else ""
+        zthresh_cand = out_dir / f"c{contrast_idx}_zthresh.nii.gz"
+        if corrp_cand.exists():
+            corrp_path, corrp_label = corrp_cand, "GRF cluster (parametric)"
+        elif zthresh_cand.exists():
+            corrp_path, corrp_label = zthresh_cand, "GRF cluster (z-threshold)"
+            corrp_is_zthresh = True
+        else:
+            corrp_path, corrp_label = None, ""
         summary_json = out_dir / "lmm_summary.json"
     else:
         out_dir = base / "2x2_mixed" / "randomise_outputs"
@@ -739,11 +760,16 @@ def _render_viewer_alff_reho(bids_root: Path, pipeline: str, stat: str) -> None:
         st.warning("Could not render interactive t-stat map.")
     # Corrp map
     if corrp_path:
-        st.markdown(f"**📊 {corrp_label} corrected p-values**")
+        if corrp_is_zthresh:
+            st.markdown(f"**📊 {corrp_label}** — GRF-corrected significant voxels (z > 2.3)")
+            r_thr, r_vmax, r_cmap = 0.001, 6.0, "hot"
+        else:
+            st.markdown(f"**📊 {corrp_label} corrected p-values**")
+            r_thr, r_vmax, r_cmap = 0.95, 1.0, "autumn"
         corrp_mtime = corrp_path.stat().st_mtime
         png = _render_stat_map_png(
-            str(corrp_path), corrp_mtime, threshold=0.95, vmax=1.0,
-            cmap="autumn", title=f"{corrp_label} corrp  [{stat.upper()}]",
+            str(corrp_path), corrp_mtime, threshold=r_thr, vmax=r_vmax,
+            cmap=r_cmap, title=f"{corrp_label} corrp  [{stat.upper()}]",
         )
         if png:
             st.image(png, use_container_width=True)
@@ -754,7 +780,9 @@ def _render_viewer_alff_reho(bids_root: Path, pipeline: str, stat: str) -> None:
     if not _HAS_CLUSTER_UTILS:
         st.warning("Cluster utilities not available.")
     else:
-        use_tfce_controls = corrp_label in ("TFCE", "GRF cluster (parametric)") and corrp_path is not None
+        use_tfce_controls = corrp_label in (
+            "TFCE", "GRF cluster (parametric)", "GRF cluster (z-threshold)"
+        ) and corrp_path is not None
         cluster_key = f"{PAGE_KEY}_cluster_result_alff_reho_{stat}_{source}_{contrast_idx}"
         if use_tfce_controls:
             col_c1, col_c2, col_c3 = st.columns(3)
