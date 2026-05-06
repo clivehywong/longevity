@@ -63,6 +63,9 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
         if source == "lmm":
             tstats = sorted(out_dir.glob("lmm_tstat*.nii.gz"))
             pat = r"lmm_tstat(\d+)\.nii\.gz$"
+        elif source == "delta":
+            tstats = sorted(out_dir.glob("delta_tstat*.nii.gz"))
+            pat = r"delta_tstat(\d+)\.nii\.gz$"
         else:
             tstats = sorted(out_dir.glob("randomise_tstat*.nii.gz"))
             pat = r"randomise_tstat(\d+)\.nii\.gz$"
@@ -76,6 +79,18 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
                 corrp_cand = out_dir / f"lmm_cluster_corrp_tstat{idx}.nii.gz"
                 corrp_path = str(corrp_cand) if corrp_cand.exists() else None
                 corrp_label = "GRF cluster (parametric)" if corrp_path else ""
+            elif source == "delta":
+                tfce = out_dir / f"delta_tfce_corrp_tstat{idx}.nii.gz"
+                grf = out_dir / f"delta_clustere_corrp_tstat{idx}.nii.gz"
+                fdr = out_dir / f"delta_fdr_corrp_tstat{idx}.nii.gz"
+                if tfce.exists():
+                    corrp_path, corrp_label = str(tfce), "TFCE (Delta)"
+                elif grf.exists():
+                    corrp_path, corrp_label = str(grf), "GRF (Delta)"
+                elif fdr.exists():
+                    corrp_path, corrp_label = str(fdr), "FDR (Delta)"
+                else:
+                    corrp_path, corrp_label = None, ""
             else:
                 tfce = out_dir / f"randomise_tfce_corrp_tstat{idx}.nii.gz"
                 grf = out_dir / f"randomise_clustere_corrp_tstat{idx}.nii.gz"
@@ -112,7 +127,26 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
             else:
                 cluster_roi_path = corrp_path  # use corrp thresholded image
                 significant = max_corrp > 0.95 if not np.isnan(max_corrp) else False
-                needs_cluster_run = (corrp_label == "GRF cluster" and not significant)
+                needs_cluster_run = (corrp_label in ("GRF cluster", "GRF (Delta)") and not significant)
+
+            # Determine summary JSON path; delta uses metadata.json one level up
+            if source == "delta":
+                summary_json = str(out_dir.parent / "metadata.json")
+            elif source == "lmm":
+                summary_json = str(out_dir / "lmm_summary.json")
+            else:
+                summary_json = str(out_dir / "stats_summary.json")
+
+            # Delta contrast labels differ (contrast 1 = walking>control, 2 = control>walking)
+            if source == "delta":
+                delta_contrast_labels = {
+                    1: "Walking > Control (Post−Pre)",
+                    2: "Control > Walking (Post−Pre)",
+                }
+                contrast_label = delta_contrast_labels.get(idx, f"Contrast {idx}")
+            else:
+                contrast_label = _CONTRAST_LABELS.get(idx, f"Contrast {idx}")
+
             rows.append({
                 "type": type_,
                 "label": label,
@@ -120,7 +154,7 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
                 "measure": measure,
                 "stat": stat,
                 "contrast_idx": idx,
-                "contrast_label": _CONTRAST_LABELS.get(idx, f"Contrast {idx}"),
+                "contrast_label": contrast_label,
                 "source": source,
                 "tstat_path": str(f),
                 "corrp_path": corrp_path,
@@ -129,7 +163,7 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
                 "significant": significant,
                 "needs_cluster_run": needs_cluster_run,
                 "cluster_roi_path": cluster_roi_path,
-                "summary_json": str(out_dir / ("lmm_summary.json" if source == "lmm" else "stats_summary.json")),
+                "summary_json": summary_json,
                 "out_dir": str(out_dir),
             })
 
@@ -147,6 +181,10 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
                 for src, odir in [("randomise", mdir / "randomise_outputs"), ("lmm", mdir / "lmm_outputs")]:
                     if odir.exists():
                         _add_rows("Seed FC", label, seed_dir.name, measure, None, odir, src)
+                # Delta results
+                delta_rdir = mdir / "delta" / "randomise_outputs"
+                if delta_rdir.exists():
+                    _add_rows("Seed FC", f"{label} [Delta]", seed_dir.name, measure, None, delta_rdir, "delta")
 
     # ALFF / ReHo
     for stat in ("alff", "reho"):
@@ -154,6 +192,10 @@ def _scan_all_results(bids_root_str: str, pipeline: str, _tick: int) -> pd.DataF
         for src, odir in [("randomise", stat_base / "randomise_outputs"), ("lmm", stat_base / "lmm_outputs")]:
             if odir.exists():
                 _add_rows(stat.upper(), stat.upper(), None, None, stat, odir, src)
+        # Delta results
+        delta_rdir = stat_base / "delta" / "randomise_outputs"
+        if delta_rdir.exists():
+            _add_rows(f"{stat.upper()} [Delta]", f"{stat.upper()} [Delta]", None, None, stat, delta_rdir, "delta")
 
     if not rows:
         return pd.DataFrame()
@@ -252,7 +294,7 @@ def _extract_cluster_means(
     cluster_roi_mtime: float,
     bids_root_str: str,
     pipeline: str,
-    map_type: str,          # "Seed FC", "ALFF", "ReHo"
+    map_type: str,          # "Seed FC", "ALFF", "ReHo", "Seed FC [Delta]", etc.
     seed_dir: Optional[str],
     measure: Optional[str],
     source: str,
@@ -260,6 +302,9 @@ def _extract_cluster_means(
     summary_json_path: str,
 ) -> Optional[pd.DataFrame]:
     """Extract mean map value within the significant cluster ROI for each subject × session.
+
+    For delta results, reads subject_order from metadata.json and uses ORIGINAL
+    ses-01/ses-02 z-maps (not the delta maps) to enable 2×2 visualization.
 
     Returns DataFrame with columns: subject, session, group, mean_val
     or None if extraction fails.
@@ -274,13 +319,25 @@ def _extract_cluster_means(
         if roi_mask.sum() == 0:
             return None
 
-        # Get group membership from summary JSON
+        # Normalize map_type for lookup (strip [Delta] suffix)
+        _map_type_clean = map_type.replace(" [Delta]", "").strip()
+
+        # Get group membership — try summary JSON first
         subjects_control, subjects_walking = [], []
         summary_path = Path(summary_json_path)
         if summary_path.exists():
             meta = json.loads(summary_path.read_text())
-            subjects_control = meta.get("subjects_control", [])
-            subjects_walking = meta.get("subjects_walking", [])
+            if source == "delta":
+                # metadata.json stores subject_order with "sub-XXX ses-01→ses-02" entries
+                subject_order = meta.get("subject_order", {})
+                raw_walking = subject_order.get("walking", [])
+                raw_control = subject_order.get("control", [])
+                subjects_walking = [e.split()[0] for e in raw_walking]
+                subjects_control = [e.split()[0] for e in raw_control]
+            else:
+                subjects_control = meta.get("subjects_control", [])
+                subjects_walking = meta.get("subjects_walking", [])
+
         # Fallback: bids/participants.tsv
         if not subjects_control and not subjects_walking:
             tsv = bids_root / "bids" / "participants.tsv"
@@ -295,13 +352,12 @@ def _extract_cluster_means(
         rows = []
         for subject, group in group_map.items():
             for session in ("ses-01", "ses-02"):
-                if map_type == "Seed FC":
-                    # Look for zmap
+                if _map_type_clean == "Seed FC":
                     map_dir = (bids_root / "derivatives" / "connectivity" / pipeline
                                / subject / session / "seed" / seed_dir)
                     candidates = sorted(map_dir.glob(f"*_measure-{measure}_seed-to-voxel_zmap.nii.gz")) if map_dir.exists() else []
-                elif map_type in ("ALFF", "ReHo"):
-                    stat_name = map_type.lower()
+                elif _map_type_clean in ("ALFF", "ReHo"):
+                    stat_name = _map_type_clean.lower()
                     func_dir = (bids_root / "derivatives" / "preprocessing" / "xcpd"
                                 / pipeline / subject / session / "func")
                     pattern = f"*_space-MNI152NLin6Asym_res-2_stat-{stat_name}_boldmap.nii.gz"
@@ -446,8 +502,13 @@ def _extract_single_cluster_means(
     seed_dir: Optional[str],
     measure: Optional[str],
     summary_json_path: str,
+    source: str = "randomise",
 ) -> Optional[pd.DataFrame]:
-    """Extract mean map value within one specific cluster for each subject × session."""
+    """Extract mean map value within one specific cluster for each subject × session.
+
+    For delta results, reads subject_order from metadata.json and uses ORIGINAL
+    ses-01/ses-02 z-maps to enable 2×2 visualization.
+    """
     try:
         bids_root = Path(bids_root_str)
         ci_img = nib.load(cluster_index_path)
@@ -456,12 +517,21 @@ def _extract_single_cluster_means(
         if roi_mask.sum() == 0:
             return None
 
+        _map_type_clean = map_type.replace(" [Delta]", "").strip()
+
         subjects_control, subjects_walking = [], []
         summary_path = Path(summary_json_path)
         if summary_path.exists():
             meta = json.loads(summary_path.read_text())
-            subjects_control = meta.get("subjects_control", [])
-            subjects_walking = meta.get("subjects_walking", [])
+            if source == "delta":
+                subject_order = meta.get("subject_order", {})
+                raw_walking = subject_order.get("walking", [])
+                raw_control = subject_order.get("control", [])
+                subjects_walking = [e.split()[0] for e in raw_walking]
+                subjects_control = [e.split()[0] for e in raw_control]
+            else:
+                subjects_control = meta.get("subjects_control", [])
+                subjects_walking = meta.get("subjects_walking", [])
         if not subjects_control and not subjects_walking:
             tsv = bids_root / "bids" / "participants.tsv"
             if tsv.exists():
@@ -475,12 +545,12 @@ def _extract_single_cluster_means(
         rows = []
         for subject, group in group_map.items():
             for session in ("ses-01", "ses-02"):
-                if map_type == "Seed FC":
+                if _map_type_clean == "Seed FC":
                     map_dir = (bids_root / "derivatives" / "connectivity" / pipeline
                                / subject / session / "seed" / seed_dir)
                     candidates = sorted(map_dir.glob(f"*_measure-{measure}_seed-to-voxel_zmap.nii.gz")) if map_dir.exists() else []
-                elif map_type in ("ALFF", "ReHo"):
-                    stat_name = map_type.lower()
+                elif _map_type_clean in ("ALFF", "ReHo"):
+                    stat_name = _map_type_clean.lower()
                     func_dir = (bids_root / "derivatives" / "preprocessing" / "xcpd"
                                 / pipeline / subject / session / "func")
                     pattern = f"*_space-MNI152NLin6Asym_res-2_stat-{stat_name}_boldmap.nii.gz"

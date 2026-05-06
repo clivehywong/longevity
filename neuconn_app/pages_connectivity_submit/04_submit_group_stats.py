@@ -462,9 +462,9 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         )
     
     # ===== Section 2: FSL TFCE Parameters =====
-    st.markdown("#### ⚙️ Section 2: FSL TFCE Parameters")
-    
-    _CORRECTION_OPTIONS = ["TFCE", "Cluster", "FDR", "Parametric"]
+    st.markdown("#### ⚙️ Section 2: Statistical Method & Parameters")
+
+    _CORRECTION_OPTIONS = ["Delta", "TFCE", "Cluster", "FDR", "Parametric"]
     _CORRECTION_LEGACY = {"GRF": "Cluster"}
     _stored_correction = st.session_state.get(f"{STATE_PREFIX}mixed_correction", "TFCE")
     _stored_correction = _CORRECTION_LEGACY.get(_stored_correction, _stored_correction)
@@ -481,13 +481,24 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
             horizontal=True,
             key=f"{STATE_PREFIX}mixed_correction_widget",
             help=(
-                "**TFCE** — threshold-free cluster enhancement (recommended, no cluster-forming threshold)  \n"
-                "**Cluster** — non-parametric cluster inference via `randomise -c 2.3` (uses permutations)  \n"
-                "**FDR** — permutation voxelwise p-maps + Benjamini-Hochberg FDR correction  \n"
+                "**Delta (Post−Pre)** — computes Post−Pre difference per subject, then Walking vs Control "
+                "two-sample t-test. Tests Group×Time interaction. Much faster than full mixed ANOVA. "
+                "Permutation test (TFCE) applied within randomise.  \n"
+                "**TFCE** — full mixed ANOVA + threshold-free cluster enhancement (slower, 72 images)  \n"
+                "**Cluster** — full mixed ANOVA + non-parametric cluster inference via `randomise -c 2.3`  \n"
+                "**FDR** — full mixed ANOVA + Benjamini-Hochberg FDR correction  \n"
                 "**Parametric** — fast voxelwise t-tests (change-score), GRF cluster correction; local only"
             ),
         )
         st.session_state[f"{STATE_PREFIX}mixed_correction"] = correction
+
+    if correction == "Delta":
+        st.info(
+            "⚡ **Delta (Post−Pre)** approach selected.  \n"
+            "Computes δᵢ = z_ses02 − z_ses01 per subject, then runs a two-sample t-test "
+            "(walking vs control) with FSL randomise + TFCE.  \n"
+            "This **IS** the Group×Time interaction, and is ~20× faster than the full mixed ANOVA."
+        )
 
     with col1:
         if correction == "Parametric":
@@ -503,7 +514,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
                 key=f"{STATE_PREFIX}mixed_n_perm_widget",
             )
             st.session_state[f"{STATE_PREFIX}mixed_n_perm"] = n_perm
-    
+
     mask_input = st.text_input(
         "Brain mask",
         value=st.session_state.get(
@@ -518,8 +529,8 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         st.warning("⚠️ No mask provided — scripts will auto-detect, but dilated mask is required.")
     elif not Path(mask_input).exists():
         st.warning(f"⚠️ Mask file not found on this machine: `{mask_input}`")
-    
-    if correction != "Parametric" and n_perm < 1000:
+
+    if correction not in ("Parametric", "Delta") and n_perm < 1000:
         st.warning("⚠️ <1000 permutations gives unreliable p-values")
 
     # ===== Section 3: Execution Options =====
@@ -843,7 +854,50 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         except Exception:
             pass
     effective_preview_n_perm = 100 if (use_test_perms and execution == "Local") else n_perm
-    if map_type == "Seed FC" and seed_input_ref:
+    if correction == "Delta":
+        if map_type == "Seed FC" and seed_input_ref:
+            preview_cmd = _build_delta_cmd(
+                bids_root=bids_root,
+                seed=seed_input_ref,
+                stat_map=None,
+                pipeline=pipeline,
+                measure=measure,
+                canonical_csv=canonical_csv_preview,
+                n_perm=effective_preview_n_perm,
+                mask=mask_input or None,
+                execution=execution,
+                hpc_remote_base=_hpc_remote_base,
+            )
+            extra_seeds = f" (+{len(seed_inputs)-1} more)" if len(seed_inputs) > 1 else ""
+            with st.expander(f"📋 Script preview — Delta (first seed{extra_seeds})", expanded=False):
+                st.code(preview_cmd, language="bash")
+                delta_out = (
+                    expected_output / "delta" if expected_output else None
+                )
+                st.caption(
+                    f"Output directory: `{delta_out}`  \n"
+                    + (f"HPC remote base: `{_hpc_remote_base}`" if _hpc_remote_base else "Local execution")
+                )
+        elif map_type in ("ALFF", "ReHo"):
+            preview_cmd = _build_delta_cmd(
+                bids_root=bids_root,
+                seed=None,
+                stat_map=map_type.lower(),
+                pipeline=pipeline,
+                measure=measure,
+                canonical_csv=canonical_csv_preview,
+                n_perm=effective_preview_n_perm,
+                mask=mask_input or None,
+                execution=execution,
+                hpc_remote_base=_hpc_remote_base,
+            )
+            with st.expander(f"📋 Script preview — Delta ({map_type})", expanded=False):
+                st.code(preview_cmd, language="bash")
+                st.caption(
+                    f"Output directory: `{expected_output / 'delta' if expected_output else '(unknown)'}`  \n"
+                    + (f"HPC remote base: `{_hpc_remote_base}`" if _hpc_remote_base else "Local execution")
+                )
+    elif map_type == "Seed FC" and seed_input_ref:
         preview_cmd = _build_group_cmd(
             bids_root=bids_root,
             seed=seed_input_ref,
@@ -901,7 +955,7 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
         else:
             map_display_line = f"**Map type:** {map_type}"
         st.info(
-            f"**Execution:** {execution} · **Correction:** {correction}  \n"
+            f"**Execution:** {execution} · **Method:** {correction}  \n"
             f"{map_display_line} · **Subjects:** {n_selected} selected  \n"
             f"**Output:** `{expected_output or '(select a seed)'}`  \n"
             f"**N Permutations:** {perm_display}"
@@ -932,7 +986,70 @@ def _render_mixed_design_section(config: dict, bids_root: str) -> None:
             else:
                 effective_n_perm = 100 if (use_test_perms and execution == "Local") else n_perm
                 val_df_submit: pd.DataFrame = st.session_state[f"{STATE_PREFIX}mixed_validation_df"]
-                if map_type == "Seed FC":
+
+                if correction == "Delta":
+                    # Delta (Post−Pre) submission path
+                    if map_type == "Seed FC":
+                        with st.spinner(f"Submitting {len(seed_inputs)} seed(s) — Delta approach…"):
+                            effective_csv = _write_filtered_canonical_tsv(
+                                val_df_submit, sel_df_submit, "delta_batch", bids_root,
+                            )
+                            results = []
+                            for i, seed_token in enumerate(seed_inputs):
+                                seed_label = _seed_token_display(seed_token)
+                                with st.expander(f"[{i+1}/{len(seed_inputs)}] {seed_label} (Delta)", expanded=True):
+                                    try:
+                                        if execution == "Local":
+                                            _submit_delta_local(
+                                                bids_root, seed=seed_token, stat_map=None,
+                                                pipeline=pipeline, measure=measure,
+                                                canonical_csv=effective_csv,
+                                                n_perm=effective_n_perm, mask=mask_input or None,
+                                            )
+                                        else:
+                                            _submit_delta_hpc(
+                                                config, bids_root, seed=seed_token, stat_map=None,
+                                                pipeline=pipeline, measure=measure,
+                                                canonical_csv=effective_csv, n_perm=n_perm,
+                                                mask=mask_input or None,
+                                                _tsv_already_synced=(i > 0),
+                                            )
+                                        results.append((seed_token, "✅"))
+                                    except Exception as e:
+                                        st.error(f"Failed: {e}")
+                                        results.append((seed_token, f"❌ {e}"))
+                            succeeded = sum(1 for _, s in results if s == "✅")
+                            if succeeded == len(seed_inputs):
+                                st.success(f"✅ All {len(seed_inputs)} delta seeds submitted!")
+                            else:
+                                st.warning(f"⚠️ {succeeded}/{len(seed_inputs)} seeds submitted.")
+                    else:
+                        stat_label = map_type.lower()
+                        with st.spinner(f"Submitting {map_type} — Delta approach…"):
+                            effective_csv = _write_filtered_canonical_tsv(
+                                val_df_submit, sel_df_submit, f"delta_{stat_label}", bids_root,
+                            )
+                            with st.expander(f"[1/1] {map_type} (Delta)", expanded=True):
+                                try:
+                                    if execution == "Local":
+                                        _submit_delta_local(
+                                            bids_root, seed=None, stat_map=stat_label,
+                                            pipeline=pipeline, measure=measure,
+                                            canonical_csv=effective_csv,
+                                            n_perm=effective_n_perm, mask=mask_input or None,
+                                        )
+                                    else:
+                                        _submit_delta_hpc(
+                                            config, bids_root, seed=None, stat_map=stat_label,
+                                            pipeline=pipeline, measure=measure,
+                                            canonical_csv=effective_csv, n_perm=n_perm,
+                                            mask=mask_input or None,
+                                        )
+                                    st.success(f"✅ {map_type} delta analysis submitted!")
+                                except Exception as e:
+                                    st.error(f"Failed: {e}")
+
+                elif map_type == "Seed FC":
                     with st.spinner(f"Submitting {len(seed_inputs)} seed(s)…"):
                         # Write ONE filtered canonical TSV (same subjects for all seeds)
                         effective_csv = _write_filtered_canonical_tsv(
@@ -1339,6 +1456,171 @@ def _submit_alff_reho_hpc(
                 st.error(f"❌ HPC submission failed: {sub_obj.notes or 'unknown error'}")
             else:
                 st.success(f"✅ {stat.upper()} submitted! Job ID: **{job_id}**")
+        except Exception as exc:
+            st.error(f"HPC submission failed: {exc}")
+
+
+def _build_delta_cmd(
+    bids_root: Any,
+    seed: str | None,
+    stat_map: str | None,
+    pipeline: str,
+    measure: str,
+    canonical_csv: str,
+    n_perm: int,
+    mask: str | None,
+    execution: str,
+    hpc_remote_base: str | None = None,
+) -> str:
+    """Build delta analysis command string for script preview."""
+    effective_bids = hpc_remote_base if execution == "HPC" and hpc_remote_base else str(bids_root)
+    effective_csv = (
+        canonical_csv.replace(str(bids_root), hpc_remote_base, 1)
+        if execution == "HPC" and hpc_remote_base and canonical_csv.startswith(str(bids_root))
+        else canonical_csv
+    )
+    effective_mask = (
+        mask.replace(str(bids_root), hpc_remote_base, 1)
+        if execution == "HPC" and hpc_remote_base and mask and mask.startswith(str(bids_root))
+        else mask
+    )
+
+    parts = [
+        "python neuconn_app/scripts/group_delta_stats.py",
+        f"  --bids-root {effective_bids}",
+        f"  --pipeline {pipeline}",
+        f"  --n-perms {n_perm}",
+        f"  --correction TFCE",
+        f"  --canonical-csv {effective_csv}",
+    ]
+    if seed is not None:
+        parts.insert(2, f"  --seed {seed}")
+        parts.insert(3, f"  --measure {measure}")
+    elif stat_map is not None:
+        parts.insert(2, f"  --stat-map {stat_map}")
+    if effective_mask:
+        parts.append(f"  --mask {effective_mask}")
+    return " \\\n".join(parts)
+
+
+def _submit_delta_local(
+    bids_root: str,
+    seed: str | None,
+    stat_map: str | None,
+    pipeline: str,
+    measure: str,
+    canonical_csv: str,
+    n_perm: int,
+    mask: str | None = None,
+) -> None:
+    """Submit delta (Post−Pre) analysis locally."""
+    _this_dir = Path(__file__).resolve().parent
+    _app_dir = _this_dir.parent
+
+    script = str(_app_dir / "scripts" / "group_delta_stats.py")
+    cmd = [
+        "python", script,
+        "--bids-root", str(bids_root),
+        "--pipeline", pipeline,
+        "--n-perms", str(n_perm),
+        "--correction", "TFCE",
+        "--canonical-csv", canonical_csv,
+    ]
+    if seed is not None:
+        cmd.extend(["--seed", seed, "--measure", measure])
+    elif stat_map is not None:
+        cmd.extend(["--stat-map", stat_map])
+    if mask:
+        cmd.extend(["--mask", mask])
+
+    st.code(" ".join(cmd), language="bash")
+    with st.spinner("Running delta analysis… (typically <30 minutes)"):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            if result.returncode == 0:
+                st.success("✅ Delta analysis completed!")
+                label = seed or stat_map or ""
+                st.info(f"Results saved to delta/ subdirectory for: `{label}`")
+            else:
+                st.error(f"Analysis failed (exit {result.returncode}):\n```\n{result.stderr[-2000:]}\n```")
+        except subprocess.TimeoutExpired:
+            st.error("Analysis timed out (>3600s)")
+        except Exception as e:
+            st.error(f"Execution error: {e}")
+
+
+def _submit_delta_hpc(
+    config: dict,
+    bids_root: str,
+    seed: str | None,
+    stat_map: str | None,
+    pipeline: str,
+    measure: str,
+    canonical_csv: str,
+    n_perm: int,
+    mask: str | None = None,
+    _tsv_already_synced: bool = False,
+) -> None:
+    """Submit delta (Post−Pre) analysis to HPC via ConnectivityWorkflowManager."""
+    from utils.hpc import HPCConfig as _HPCCfg
+    hpc_cfg = _HPCCfg.from_config(config)
+    remote_bids_root = hpc_cfg.remote_base or str(bids_root)
+
+    def _remap(p: str | None) -> str | None:
+        if not p:
+            return None
+        return str(p).replace(str(bids_root), remote_bids_root, 1) if str(p).startswith(str(bids_root)) else str(p)
+
+    remote_mask = _remap(mask)
+    remote_csv = _remap(canonical_csv)
+    remote_log_dir = f"{remote_bids_root}/logs"
+
+    # Rsync filtered canonical TSV to HPC
+    if not _tsv_already_synced and canonical_csv and Path(canonical_csv).exists():
+        remote_tsv_dir = f"{remote_bids_root}/tmp/group_stats_subsets"
+        try:
+            result = subprocess.run(
+                ["rsync", "-a", "--mkpath", canonical_csv,
+                 "-e", f"ssh -p {hpc_cfg.port or 22}",
+                 f"{hpc_cfg.user}@{hpc_cfg.host}:{remote_tsv_dir}/"],
+                capture_output=True, timeout=30,
+            )
+            if result.returncode != 0:
+                st.warning(f"⚠️ Could not rsync subset TSV to HPC: {result.stderr[:200]}")
+        except Exception as _e:
+            st.warning(f"⚠️ rsync failed: {_e}")
+
+    manager = ConnectivityWorkflowManager(config)
+    opts: dict = {
+        "bids_root": remote_bids_root,
+        "pipeline": pipeline,
+        "measure": measure,
+        "n_perm": str(n_perm),
+        "correction": "TFCE",
+        "canonical_order_csv": remote_csv or f"{remote_bids_root}/bids/participants.tsv",
+        "kind": "delta",
+        "log_dir": remote_log_dir,
+        "partition": hpc_cfg.partition or "shared_cpu",
+        "conda_env": hpc_cfg.conda_env,
+    }
+    if seed is not None:
+        opts["seed"] = seed
+        opts["seeds"] = [seed]
+    if stat_map is not None:
+        opts["stat_map"] = stat_map
+    if remote_mask:
+        opts["mask_path"] = remote_mask
+
+    label = seed or stat_map or "delta"
+    with st.spinner(f"Submitting delta analysis to HPC: {label}…"):
+        try:
+            sub_obj = manager.submit("group_stats", opts, [], dry_run=False, execution_mode="hpc")
+            job_id = sub_obj.job_id if sub_obj else "unknown"
+            if sub_obj and sub_obj.status == "failed":
+                st.error(f"❌ HPC submission failed: {sub_obj.notes or 'unknown error'}")
+            else:
+                st.success(f"✅ Delta analysis submitted! Job ID: **{job_id}**")
+                st.info("Monitor progress in the 📡 Monitor tab.")
         except Exception as exc:
             st.error(f"HPC submission failed: {exc}")
 
