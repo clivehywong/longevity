@@ -296,8 +296,9 @@ class ConnectivityWorkflowManager:
             ("partition", "--partition"),
             ("cpus", "--cpus"),
             ("log_dir", "--log-dir"),
-            # mixed_design-specific
+            # mixed_design / delta specific
             ("seed", "--seed"),
+            ("stat_map", "--stat-map"),
             ("n_perm", "--n-perms"),
             ("correction", "--correction"),
             ("canonical_order_csv", "--canonical-order-csv"),
