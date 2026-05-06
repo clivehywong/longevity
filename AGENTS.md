@@ -128,6 +128,16 @@ hpc:
 - The `longevity_config.yaml` file itself is the one place where concrete values live.
 - Scripts in `script/` may accept `--bids-root` arguments but must NOT hardcode defaults.
 
+### SSH tunnel
+
+The development machine has a persistent SSH tunnel that makes the HPC reachable at `localhost:2222`:
+
+```bash
+ssh -p 2222 clivewong@localhost   # connects to HPC
+```
+
+This is only used for **manual debugging** and **local CI-like operations**. Application code always reads host/port from `longevity_config.yaml` (`hpc.host` / `hpc.port`).
+
 ---
 
 ## 4. HPC Module Architecture (Dashboard + 5 Subpages)

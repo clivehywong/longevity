@@ -816,6 +816,9 @@ def _render_monitor_tab(config: dict, bids_root: Any) -> None:
 def _scan_hpc_connectivity(config: dict, pipeline: str, bids_root: Path) -> dict:
     """SSH to HPC and find connectivity zmaps.
 
+    Actual remote structure:
+      {remote_base}/derivatives/connectivity/{pipeline}/sub-{ID}/ses-{N}/seed/{seed_dir}/*_zmap.nii.gz
+
     Returns dict:
     {
       seed_dir: {
@@ -841,20 +844,22 @@ def _scan_hpc_connectivity(config: dict, pipeline: str, bids_root: Path) -> dict
         line = line.strip()
         if not line:
             continue
-        # Remote path: …/connectivity/{pipeline}/{seed_dir}/sub-{ID}/ses-{N}/…
+        # Remote path: …/connectivity/{pipeline}/sub-{ID}/ses-{N}/seed/{seed_dir}/…_zmap.nii.gz
         try:
             parts = Path(line).parts
             conn_idx = parts.index("connectivity")
         except ValueError:
             continue
-        if len(parts) < conn_idx + 5:
+        # Need at least: connectivity / pipeline / sub-* / ses-* / seed / seed_dir / file
+        if len(parts) < conn_idx + 7:
             continue
         path_pipeline = parts[conn_idx + 1]
         if path_pipeline != pipeline:
             continue
-        seed_dir = parts[conn_idx + 2]
-        sub_id = parts[conn_idx + 3]
-        ses_id = parts[conn_idx + 4]
+        sub_id  = parts[conn_idx + 2]
+        ses_id  = parts[conn_idx + 3]
+        # parts[conn_idx + 4] == "seed"
+        seed_dir = parts[conn_idx + 5]
         if not sub_id.startswith("sub-") or not ses_id.startswith("ses-"):
             continue
 
@@ -862,7 +867,10 @@ def _scan_hpc_connectivity(config: dict, pipeline: str, bids_root: Path) -> dict
             results[seed_dir] = {"remote_subjects": [], "local_missing": []}
         results[seed_dir]["remote_subjects"].append((sub_id, ses_id, line))
 
-        local_ses = bids_root / "derivatives" / "connectivity" / pipeline / seed_dir / sub_id / ses_id
+        local_ses = (
+            bids_root / "derivatives" / "connectivity" / pipeline
+            / sub_id / ses_id / "seed" / seed_dir
+        )
         if not list(local_ses.glob("*_zmap.nii.gz")):
             results[seed_dir]["local_missing"].append((sub_id, ses_id))
 
@@ -876,19 +884,31 @@ def _download_seed_scan_results(
     bids_root: Path,
     progress: Any,
 ) -> None:
-    """rsync a discovered seed_dir from HPC to local."""
+    """rsync all subjects/sessions for a discovered seed_dir from HPC to local.
+
+    Remote structure: {remote_base}/derivatives/connectivity/{pipeline}/sub-*/ses-*/seed/{seed_dir}/
+    Local  structure: {bids_root}/derivatives/connectivity/{pipeline}/sub-*/ses-*/seed/{seed_dir}/
+    """
     from utils.hpc import HPCConfig  # noqa: PLC0415
 
     hpc_cfg = HPCConfig.from_config(config)
     local_dest = bids_root / "derivatives" / "connectivity" / pipeline
     local_dest.mkdir(parents=True, exist_ok=True)
 
+    remote_src = f"{hpc_cfg.user}@{hpc_cfg.host}:{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}/"
     ssh_opts = f"ssh -p {hpc_cfg.port} -o StrictHostKeyChecking=no -o BatchMode=yes"
+    # rsync include/exclude to transfer only the requested seed across all sub-/ses- dirs
     cmd = [
         "rsync", "-az", "--progress",
         "-e", ssh_opts,
-        f"{hpc_cfg.user}@{hpc_cfg.host}:{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}/{seed_dir}/",
-        str(local_dest / seed_dir) + "/",
+        "--include=sub-*/",
+        "--include=sub-*/ses-*/",
+        "--include=sub-*/ses-*/seed/",
+        f"--include=sub-*/ses-*/seed/{seed_dir}/",
+        f"--include=sub-*/ses-*/seed/{seed_dir}/**",
+        "--exclude=*",
+        remote_src,
+        str(local_dest) + "/",
     ]
 
     progress("Downloading…", 0.1)
@@ -899,17 +919,22 @@ def _download_seed_scan_results(
 
 
 def _cleanup_hpc_seed(config: dict, pipeline: str, seed_dir: str) -> None:
-    """SSH and remove seed_dir from HPC after confirming results are local."""
+    """SSH and remove seed_dir from HPC (all subjects) after confirming results are local."""
     from utils.hpc import HPCConfig, HPCConnection  # noqa: PLC0415
 
     hpc_cfg = HPCConfig.from_config(config)
     conn = HPCConnection(hpc_cfg)
     conn.connect()
     try:
-        remote_path = f"{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}/{seed_dir}"
-        _stdout, stderr, exit_code = conn.execute(f"rm -rf {remote_path}", timeout=120)
+        remote_base = f"{hpc_cfg.remote_base}/derivatives/connectivity/{pipeline}"
+        # Remove seed_dir from every sub-*/ses-* directory
+        cmd = (
+            f"find {remote_base} -mindepth 3 -maxdepth 3 -type d -name '{seed_dir}' "
+            f"| xargs -r rm -rf"
+        )
+        _stdout, stderr, exit_code = conn.execute(cmd, timeout=120)
         if exit_code != 0:
-            raise RuntimeError(f"rm -rf failed: {stderr[:300]}")
+            raise RuntimeError(f"cleanup failed: {stderr[:300]}")
     finally:
         conn.disconnect()
 
