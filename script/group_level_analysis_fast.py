@@ -108,7 +108,10 @@ def load_maps_and_metadata(input_maps, metadata_file, group_file=None):
     maps_df = pd.DataFrame(records)
 
     # Load metadata
-    meta = pd.read_csv(metadata_file)
+    meta_path = Path(metadata_file)
+    meta = pd.read_csv(meta_path, sep='\t' if meta_path.suffix == '.tsv' else ',')
+    if 'participant_id' in meta.columns and 'subject' not in meta.columns:
+        meta = meta.rename(columns={'participant_id': 'subject'})
     if 'subject_id' in meta.columns:
         meta = meta.rename(columns={'subject_id': 'subject'})
 
@@ -117,7 +120,10 @@ def load_maps_and_metadata(input_maps, metadata_file, group_file=None):
 
     # Load group file if provided
     if group_file:
-        group_df = pd.read_csv(group_file)
+        group_path = Path(group_file)
+        group_df = pd.read_csv(group_path, sep='\t' if group_path.suffix == '.tsv' else ',')
+        if 'participant_id' in group_df.columns and 'subject' not in group_df.columns:
+            group_df = group_df.rename(columns={'participant_id': 'subject'})
         if 'subject_id' in group_df.columns:
             group_df = group_df.rename(columns={'subject_id': 'subject'})
         df = df.merge(group_df[['subject', 'group']], on='subject', how='left', suffixes=('', '_from_file'))

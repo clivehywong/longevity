@@ -1,8 +1,8 @@
 """
-Subject Data page — group assignments, demographics, and BIDS conflict detection.
+Subject Data page — participants metadata and BIDS conflict detection.
 
-Allows uploading and editing the project's group.csv (or other metadata files)
-directly in the UI. Flags subjects present in BIDS but missing from the CSV.
+Allows uploading and editing the project's BIDS-standard participants.tsv
+metadata directly in the UI, with fallback loading from legacy group.csv.
 """
 
 from __future__ import annotations
@@ -14,11 +14,21 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-_GROUP_CSV_COLUMNS = ["subject_id", "group"]
+_PRIMARY_COLUMNS = ["participant_id", "Age", "Gender", "group"]
+_REQUIRED_COLUMNS = ["participant_id", "group"]
+_COLUMN_ALIASES = {
+    "participant_id": "participant_id",
+    "participantid": "participant_id",
+    "subject_id": "participant_id",
+    "subject": "participant_id",
+    "group": "group",
+    "age": "Age",
+    "gender": "Gender",
+    "sex": "Gender",
+}
 
 
-def _locate_group_csv(config: dict) -> Optional[Path]:
-    """Return expected path of group.csv, or None if project_root is not configured."""
+def _project_root(config: dict) -> Optional[Path]:
     project_root_str = (
         config.get("project_root") or config.get("paths", {}).get("project_root", "")
     )
@@ -27,18 +37,63 @@ def _locate_group_csv(config: dict) -> Optional[Path]:
     project_root = Path(project_root_str).expanduser()
     if not project_root.is_absolute():
         return None
+    return project_root
+
+
+def _locate_participants_tsv(config: dict) -> Optional[Path]:
+    bids_dir_str = config.get("paths", {}).get("bids_dir", "")
+    if bids_dir_str:
+        bids_dir = Path(bids_dir_str).expanduser()
+        if bids_dir.is_absolute():
+            return bids_dir / "participants.tsv"
+
+    project_root = _project_root(config)
+    if project_root is None:
+        return None
+    return project_root / "bids" / "participants.tsv"
+
+
+def _locate_legacy_group_csv(config: dict) -> Optional[Path]:
+    project_root = _project_root(config)
+    if project_root is None:
+        return None
     return project_root / "group.csv"
 
 
-def _load_group_csv(csv_path: Path) -> pd.DataFrame:
-    if csv_path.exists():
-        df = pd.read_csv(csv_path)
-        # Normalise column names
-        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-        if "subject_id" not in df.columns and df.shape[1] >= 1:
-            df.columns = _GROUP_CSV_COLUMNS[:df.shape[1]]
-        return df
-    return pd.DataFrame(columns=_GROUP_CSV_COLUMNS)
+def _standardize_metadata_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map: dict[str, str] = {}
+    for column in df.columns:
+        normalized = column.strip().lower().replace(" ", "_")
+        rename_map[column] = _COLUMN_ALIASES.get(normalized, column.strip())
+
+    standardized = df.rename(columns=rename_map).copy()
+    for column in _REQUIRED_COLUMNS:
+        if column not in standardized.columns:
+            standardized[column] = ""
+
+    ordered_columns = [
+        *[column for column in _PRIMARY_COLUMNS if column in standardized.columns],
+        *[column for column in standardized.columns if column not in _PRIMARY_COLUMNS],
+    ]
+    return standardized.loc[:, ordered_columns]
+
+
+def _read_table(path: Path) -> pd.DataFrame:
+    sep = "\t" if path.suffix.lower() == ".tsv" else ","
+    return pd.read_csv(path, sep=sep)
+
+
+def _load_subject_data(participants_path: Path, legacy_csv_path: Optional[Path]) -> tuple[pd.DataFrame, Path]:
+    if participants_path.exists():
+        return _standardize_metadata_columns(_read_table(participants_path)), participants_path
+    if legacy_csv_path and legacy_csv_path.exists():
+        return _standardize_metadata_columns(_read_table(legacy_csv_path)), legacy_csv_path
+    return pd.DataFrame(columns=_PRIMARY_COLUMNS), participants_path
+
+
+def _read_uploaded_table(uploaded_name: str, uploaded_bytes: bytes) -> pd.DataFrame:
+    sep = "\t" if uploaded_name.lower().endswith(".tsv") else ","
+    return pd.read_csv(io.BytesIO(uploaded_bytes), sep=sep)
 
 
 def _bids_subjects(config: dict) -> list[str]:
@@ -51,80 +106,88 @@ def _bids_subjects(config: dict) -> list[str]:
 def render() -> None:
     st.header("📋 Subject Data")
     st.caption(
-        "Manage group assignments and demographics for all subjects. "
-        "The table is loaded from `group.csv` in the project root. "
+        "Manage participant metadata for all subjects. "
+        "The table is loaded from `bids/participants.tsv`, with fallback to legacy `group.csv`. "
         "Subjects present in BIDS but absent from the table are flagged."
     )
 
     config = st.session_state.get("config", {})
-    csv_path = _locate_group_csv(config)
+    participants_path = _locate_participants_tsv(config)
+    legacy_csv_path = _locate_legacy_group_csv(config)
 
-    # Guard: project_root must be configured before any file I/O is allowed
-    if csv_path is None:
+    if participants_path is None:
         st.error(
             "**Project root not configured.** "
             "Go to **Settings** and set `project_root` before using this page."
         )
         return
 
-    # ── Load or initialise state ─────────────────────────────────────────────
     if "subject_data_df" not in st.session_state or st.button(
-        "🔄 Reload from disk", help="Re-read group.csv from disk, discarding unsaved changes"
+        "🔄 Reload from disk",
+        help="Re-read participants metadata from disk, discarding unsaved changes",
     ):
-        st.session_state.subject_data_df = _load_group_csv(csv_path)
+        df, loaded_from = _load_subject_data(participants_path, legacy_csv_path)
+        st.session_state.subject_data_df = df
+        st.session_state.subject_data_loaded_from = str(loaded_from)
 
-    df: pd.DataFrame = st.session_state.subject_data_df.copy()
+    df: pd.DataFrame = _standardize_metadata_columns(st.session_state.subject_data_df.copy())
+    st.session_state.subject_data_df = df
 
-    # ── BIDS conflict detection ──────────────────────────────────────────────
+    loaded_from = Path(st.session_state.get("subject_data_loaded_from", str(participants_path)))
+    if loaded_from != participants_path:
+        st.info(
+            f"Loaded legacy metadata from `{loaded_from}`. Saving will migrate it to `{participants_path}`."
+        )
+
     bids_subs = _bids_subjects(config)
-    csv_subs = set(df.get("subject_id", pd.Series(dtype=str)).tolist())
+    table_subs = set(df.get("participant_id", pd.Series(dtype=str)).dropna().tolist())
 
-    missing_from_csv = [s for s in bids_subs if s not in csv_subs]
-    extra_in_csv = [s for s in csv_subs if s and s not in set(bids_subs)]
+    missing_from_table = [subject for subject in bids_subs if subject not in table_subs]
+    extra_in_table = [subject for subject in table_subs if subject and subject not in set(bids_subs)]
 
-    if missing_from_csv:
+    if missing_from_table:
         with st.expander(
-            f"⚠️ {len(missing_from_csv)} BIDS subject(s) not in group.csv",
+            f"⚠️ {len(missing_from_table)} BIDS subject(s) not in participants.tsv",
             expanded=True,
         ):
             st.warning(
-                "These subjects exist in the BIDS directory but have no group assignment. "
+                "These subjects exist in the BIDS directory but have no participant metadata row. "
                 "Add them to the table below and save."
             )
-            st.write(", ".join(missing_from_csv))
-            if st.button("➕ Add unlabelled subjects", help="Appends rows with group='' for all missing subjects"):
+            st.write(", ".join(missing_from_table))
+            if st.button(
+                "➕ Add unlabelled subjects",
+                help="Appends rows with group='' for all missing subjects",
+            ):
                 new_rows = pd.DataFrame(
-                    {"subject_id": missing_from_csv, "group": [""] * len(missing_from_csv)}
+                    {"participant_id": missing_from_table, "group": [""] * len(missing_from_table)}
                 )
                 df = pd.concat([df, new_rows], ignore_index=True)
-                st.session_state.subject_data_df = df
+                st.session_state.subject_data_df = _standardize_metadata_columns(df)
                 st.rerun()
 
-    if extra_in_csv:
+    if extra_in_table:
         st.info(
-            f"ℹ️ {len(extra_in_csv)} subject(s) in group.csv are not present in the BIDS directory: "
-            + ", ".join(extra_in_csv)
+            f"ℹ️ {len(extra_in_table)} subject(s) in participants metadata are not present in the BIDS directory: "
+            + ", ".join(extra_in_table)
         )
 
-    # ── Editable table ───────────────────────────────────────────────────────
-    st.subheader("Group assignments")
+    st.subheader("Participant metadata")
 
-    # Build column config with a constrained group dropdown where possible.
-    # subject_id must remain editable when num_rows="dynamic" so users can
-    # enter IDs for newly-added rows.  Validation is done at save time.
     groups_seen = sorted(set(df.get("group", pd.Series(dtype=str)).dropna().unique()) - {""})
     col_config: dict = {
-        "subject_id": st.column_config.TextColumn(
-            "Subject ID",
-            help="BIDS subject identifier, e.g. sub-033",
+        "participant_id": st.column_config.TextColumn(
+            "Participant ID",
+            help="BIDS participant identifier, e.g. sub-033",
         ),
+        "Age": st.column_config.NumberColumn("Age", min_value=0, max_value=120, step=1),
+        "Gender": st.column_config.TextColumn("Gender"),
         "group": st.column_config.SelectboxColumn(
             "Group",
             options=groups_seen or ["Control", "Walking"],
-            help="Intervention group for this subject",
+            help="Intervention group for this participant",
         ),
     }
-    # Pass-through any extra columns as plain text
     for col in df.columns:
         if col not in col_config:
             col_config[col] = st.column_config.TextColumn(col)
@@ -137,9 +200,9 @@ def render() -> None:
         hide_index=True,
         key="subject_data_editor",
     )
+    edited = _standardize_metadata_columns(edited)
     st.session_state.subject_data_df = edited
 
-    # ── Summary metrics ──────────────────────────────────────────────────────
     if not edited.empty and "group" in edited.columns:
         group_counts = edited["group"].value_counts(dropna=False)
         cols = st.columns(len(group_counts) + 1)
@@ -147,49 +210,49 @@ def render() -> None:
         for i, (grp, cnt) in enumerate(group_counts.items(), 1):
             cols[i].metric(str(grp) if grp else "(unlabelled)", cnt)
 
-    # ── CSV upload ───────────────────────────────────────────────────────────
-    with st.expander("📂 Upload / Replace CSV", expanded=False):
+    with st.expander("📂 Upload / Replace metadata", expanded=False):
         st.caption(
-            "Upload a CSV with at minimum `subject_id` and `group` columns. "
-            "Additional columns (age, sex, etc.) are preserved."
+            "Upload a CSV/TSV with at minimum `participant_id` and `group` columns. "
+            "Legacy `subject_id` uploads are accepted and converted automatically."
         )
         uploaded = st.file_uploader(
-            "Upload group CSV",
-            type=["csv"],
-            key="group_csv_upload",
+            "Upload participants metadata",
+            type=["csv", "tsv"],
+            key="participants_metadata_upload",
             label_visibility="collapsed",
         )
         if uploaded is not None:
             try:
-                new_df = pd.read_csv(io.BytesIO(uploaded.read()))
-                new_df.columns = [c.strip().lower().replace(" ", "_") for c in new_df.columns]
+                new_df = _standardize_metadata_columns(
+                    _read_uploaded_table(uploaded.name, uploaded.read())
+                )
                 st.success(f"Loaded {len(new_df)} rows from `{uploaded.name}`")
                 st.dataframe(new_df.head(10), width="stretch", hide_index=True)
-                if st.button("✅ Apply uploaded CSV", type="primary"):
+                if st.button("✅ Apply uploaded metadata", type="primary"):
                     st.session_state.subject_data_df = new_df
                     st.rerun()
             except Exception as e:
-                st.error(f"Could not parse CSV: {e}")
+                st.error(f"Could not parse uploaded file: {e}")
 
-    # ── Save ─────────────────────────────────────────────────────────────────
     st.markdown("---")
     save_col, _ = st.columns([1, 3])
     with save_col:
-        if st.button("💾 Save to group.csv", type="primary", width="stretch"):
-            final = st.session_state.subject_data_df
-            # Validate subject_id uniqueness before writing
-            dup_ids = final["subject_id"].dropna().duplicated()
+        if st.button("💾 Save to participants.tsv", type="primary", width="stretch"):
+            final = _standardize_metadata_columns(st.session_state.subject_data_df)
+            participant_ids = final["participant_id"].dropna().astype(str)
+            dup_ids = participant_ids.duplicated()
             if dup_ids.any():
                 st.error(
-                    f"Duplicate subject IDs detected: "
-                    f"{', '.join(final['subject_id'][dup_ids].unique())}. "
-                    "Fix before saving."
+                    "Duplicate participant IDs detected: "
+                    f"{', '.join(participant_ids[dup_ids].unique())}. Fix before saving."
                 )
             else:
                 try:
-                    final.to_csv(csv_path, index=False)
-                    st.success(f"Saved {len(final)} rows to `{csv_path}`")
+                    participants_path.parent.mkdir(parents=True, exist_ok=True)
+                    final.to_csv(participants_path, sep="\t", index=False)
+                    st.success(f"Saved {len(final)} rows to `{participants_path}`")
+                    st.session_state.subject_data_loaded_from = str(participants_path)
                 except Exception as e:
                     st.error(f"Could not save: {e}")
 
-    st.caption(f"File: `{csv_path}`")
+    st.caption(f"Target file: `{participants_path}`")

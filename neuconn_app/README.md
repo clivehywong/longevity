@@ -27,7 +27,29 @@ streamlit run app.py
 - project overrides: `~/neuconn_projects/<project>.yaml`
 - config loading and hydration: `utils/config.py`
 
-## Key architectural points
+## Pages
+
+### Data QC (`pages_general_qc/`)
+Dataset overview, subject data, anatomical/functional/diffusion/fieldmap QC.
+
+### fMRI Analysis (`pages_fmri/`)
+fMRI dashboard, fMRIPrep submit, QC reports, XCP-D pipeline, XCP-D QC reports.
+
+### Connectivity Submit (`pages_connectivity_submit/`)
+
+| File | Page |
+|---|---|
+| `00_local_measures_coverage.py` | Subject Level → 📊 Local Measures Coverage (read-only discovery dashboard) |
+| `02_submit_seed_connectivity.py` | Subject Level → 📤 Submit Seed Connectivity |
+| `03_submit_network_connectivity.py` | Subject Level → 📤 Submit Network Connectivity |
+| `04_submit_group_stats.py` | Group Level → 📤 Submit Group Stats |
+
+All submit pages carry a **pipeline selector** (fc / fc_gsr / ec), **atlas selector** (5 XCP-D atlases), and **measures selector** (8 options). See [`pages_connectivity_submit/README.md`](pages_connectivity_submit/README.md) for details.
+
+### Settings (`pages_settings/`)
+Project, paths, HPC, software images, analysis parameters, ROI config, QC profiles, import/export.
+
+
 
 - `app.py` builds a custom hierarchical sidebar
 - page modules are loaded dynamically and expose `render()`

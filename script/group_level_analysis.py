@@ -119,25 +119,27 @@ def load_maps_and_metadata(map_files, metadata_file, group_file=None):
     metadata_file : str
         Path to metadata CSV/TSV
     group_file : str, optional
-        Path to group assignment file (CSV with subject_id, group columns)
+        Path to participants.tsv or legacy group.csv with participant_id/group columns
 
     Returns
     -------
     maps_df : pd.DataFrame
         DataFrame with columns: subject, session, group, age, sex, mean_fd, map_file
     """
-    # Try to load metadata with automatic separator detection
-    try:
-        # First try comma separator
-        metadata = pd.read_csv(metadata_file)
-    except Exception:
-        # Fall back to tab separator
-        metadata = pd.read_csv(metadata_file, sep='\t')
+    metadata_path = Path(metadata_file)
+    metadata = pd.read_csv(metadata_path, sep='\t' if metadata_path.suffix == '.tsv' else ',')
+    if 'participant_id' in metadata.columns and 'subject' not in metadata.columns:
+        metadata = metadata.rename(columns={'participant_id': 'subject'})
+    if 'subject_id' in metadata.columns and 'subject' not in metadata.columns:
+        metadata = metadata.rename(columns={'subject_id': 'subject'})
 
     # Load group assignments if provided separately
     group_assignments = {}
     if group_file and Path(group_file).exists():
-        group_df = pd.read_csv(group_file)
+        group_path = Path(group_file)
+        group_df = pd.read_csv(group_path, sep='\t' if group_path.suffix == '.tsv' else ',')
+        if 'participant_id' in group_df.columns and 'subject_id' not in group_df.columns:
+            group_df = group_df.rename(columns={'participant_id': 'subject_id'})
         for _, row in group_df.iterrows():
             group_assignments[row['subject_id']] = row['group']
 
@@ -835,7 +837,7 @@ def main():
     parser.add_argument('--metadata', required=True,
                         help='Metadata CSV/TSV with subject, session, group, age, sex, mean_fd')
     parser.add_argument('--group-file',
-                        help='Optional group assignments CSV (subject_id, group)')
+                        help='Optional participants.tsv or legacy group.csv for group assignments')
     parser.add_argument('--output', required=True,
                         help='Output directory')
     parser.add_argument('--mask',

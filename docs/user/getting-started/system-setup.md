@@ -50,7 +50,7 @@ python test_cli.py
 - The main connectivity workflow writes to `results/`.
 - The app stores important state outside the code directory, including:
   - `~/neuconn_projects/<project>.yaml`
-  - `<bids parent>/qc_status.json`
+  - `<bids parent>/derivatives/qc/qc_status.json` (legacy fallback: `<bids parent>/qc_status.json`)
   - `<bids>/derivatives/qc_images/`
   - `<bids parent>/.neuconn/hpc_workflow_state.json`
 

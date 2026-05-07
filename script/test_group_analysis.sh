@@ -17,7 +17,7 @@ echo ""
 # Configuration
 SUBJECT_LEVEL="derivatives/connectivity-difumo256-hpc/subject-level"
 METADATA="derivatives/connectivity-difumo256/participants.tsv"
-GROUP_FILE="group.csv"
+GROUP_FILE="bids/participants.tsv"
 OUTPUT_DIR="test_group_analysis"
 N_PERMUTATIONS=1000  # Reduced for speed
 

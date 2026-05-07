@@ -322,12 +322,14 @@ def _remote_xcpd_preflight(
         configured_format = str(config["xcpd"][pipeline_name].get("file_format", "auto"))
         detected_formats: List[str] = []
         fmriprep_dir = ""
+        dirs_exist: List[str] = []
         searched_candidates = _deduplicate_paths([hpc_cfg.remote_fmriprep, hpc_cfg.remote_legacy_fmriprep])
         for candidate in searched_candidates:
             if not candidate or not _remote_dir_exists(conn, candidate):
                 continue
             if not _remote_file_exists(conn, str(Path(candidate) / "dataset_description.json")):
                 continue
+            dirs_exist.append(candidate)
             candidate_formats = _detect_remote_file_formats(
                 conn,
                 candidate,
@@ -343,10 +345,24 @@ def _remote_xcpd_preflight(
                 detected_formats = candidate_formats
 
         if not fmriprep_dir:
+            subject_hint = ""
+            if participant_labels and dirs_exist:
+                # The directory exists but no preproc_bold found for these subjects —
+                # most likely fMRIPrep completed only partial outputs (anatomy/surfaces
+                # but MNI normalisation failed, so no *desc-preproc_bold.nii.gz).
+                labels = list(participant_labels)
+                subject_hint = (
+                    f" The fMRIPrep directory exists at {dirs_exist[0]} but contains no "
+                    f"*desc-preproc_bold.nii.gz for {', '.join(labels[:5])}. "
+                    "This usually means fMRIPrep ran but MNI normalisation failed for "
+                    "those subjects — please re-run fMRIPrep before submitting XCP-D."
+                )
             raise RuntimeError(
-                "HPC XCP-D preflight failed: no remote fMRIPrep directory with dataset_description.json contains XCP-D-readable inputs under "
+                "HPC XCP-D preflight failed: no remote fMRIPrep directory with dataset_description.json "
+                "contains XCP-D-readable inputs under "
                 + ", ".join(searched_candidates)
                 + "."
+                + subject_hint
             )
         if configured_format != "auto" and configured_format not in detected_formats:
             detected_label = ", ".join(detected_formats) if detected_formats else "none"
@@ -958,6 +974,22 @@ def start_remote_xcpd_run(
         conn = HPCConnection(hpc_cfg)
         conn.connect()
         conn.execute(f"mkdir -p {shlex.quote(f'{hpc_cfg.remote_base}/logs')}", timeout=30)
+
+        # Remove any stale dataset_description.json from the output directory.
+        # XCP-D embeds a configuration hash in this file and refuses to run if
+        # the hash from a previous submission no longer matches the current
+        # configuration.  Deleting it before submission lets XCP-D recreate it
+        # fresh, preventing hash-mismatch failures when parameters change.
+        if pipeline_name == "fc":
+            remote_output_dir = hpc_cfg.remote_xcpd_fc
+        elif pipeline_name == "fc_gsr":
+            remote_output_dir = hpc_cfg.remote_xcpd_fc_gsr
+        else:
+            remote_output_dir = hpc_cfg.remote_xcpd_ec
+        if remote_output_dir:
+            stale_desc = shlex.quote(f"{remote_output_dir}/dataset_description.json")
+            conn.execute(f"rm -f {stale_desc}", timeout=30)
+
         conn.write_file(sublist_content, sublist_file)
         conn.write_file(script_content, remote_script)
         sbatch_cmd = (

@@ -23,7 +23,7 @@
 | Command | Purpose |
 |---|---|
 | `bash script/test_local_measures.sh` | Smoke-test the local-measures pipeline |
-| `python script/prepare_metadata.py --fmriprep fmriprep --group group.csv --output results/metadata.csv` | Build metadata for downstream analysis |
+| `python script/prepare_metadata.py --fmriprep fmriprep --group bids/participants.tsv --output results/metadata.csv` | Build metadata for downstream analysis from the tab-separated participants file |
 | `bash script/master_full_connectivity_workflow.sh --test` | Run the end-to-end workflow on a subset |
 | `bash script/master_full_connectivity_workflow.sh` | Run the full end-to-end workflow |
 

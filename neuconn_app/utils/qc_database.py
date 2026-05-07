@@ -3,7 +3,8 @@ QC Database - Persistent QC Status Storage
 
 Stores QC ratings and notes for each scan in JSON format.
 
-Storage location: <bids_dir>/../qc_status.json
+Preferred storage location: <bids_dir>/../derivatives/qc/qc_status.json
+Legacy fallback location: <bids_dir>/../qc_status.json
 
 Format:
 {
@@ -43,16 +44,23 @@ def _normalize_qc_entry(entry: Dict) -> Dict:
 
 
 def get_qc_database_path(bids_dir: Path) -> Path:
-    """Get path to QC database JSON file."""
-    return bids_dir.parent / "qc_status.json"
+    """Get the preferred path to the QC database JSON file."""
+    return bids_dir.parent / 'derivatives' / 'qc' / 'qc_status.json'
+
+
+def get_legacy_qc_database_path(bids_dir: Path) -> Path:
+    """Get the legacy root-level QC database JSON path."""
+    return bids_dir.parent / 'qc_status.json'
 
 
 def load_qc_database(bids_dir: Path) -> Dict:
-    """Load QC database from JSON file."""
-    db_path = get_qc_database_path(bids_dir)
+    """Load QC database, preferring derivatives storage with legacy fallback."""
+    preferred_path = get_qc_database_path(bids_dir)
+    legacy_path = get_legacy_qc_database_path(bids_dir)
+    db_path = preferred_path if preferred_path.exists() else legacy_path
 
     if db_path.exists():
-        with open(db_path, 'r') as f:
+        with open(db_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         if isinstance(data, dict):
             return {
@@ -60,15 +68,15 @@ def load_qc_database(bids_dir: Path) -> Dict:
                 for key, value in data.items()
             }
         return {}
-    else:
-        return {}
+    return {}
 
 
 def save_qc_database(bids_dir: Path, qc_db: Dict) -> None:
-    """Save QC database to JSON file."""
+    """Save QC database to the preferred derivatives location."""
     db_path = get_qc_database_path(bids_dir)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(db_path, 'w') as f:
+    with open(db_path, 'w', encoding='utf-8') as f:
         json.dump(qc_db, f, indent=2, sort_keys=True)
 
 

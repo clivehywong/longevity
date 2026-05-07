@@ -45,14 +45,18 @@ The sidebar has two levels:
 | fMRIPrep QC Reports | Inline HTML viewer for fMRIPrep reports with dropdown + prev/next navigation |
 | XCP-D Pipeline | FD gating, XCP-D runs, post-QC, per-subject status |
 | XCP-D QC Reports | QC metrics table + inline HTML viewer for per-session XCP-D reports (FC / FC+GSR / EC tabs) |
+| Subject Level → 📊 Local Measures Coverage | Read-only dashboard — ALFF / ReHo / fALFF coverage per subject/session (XCP-D outputs) |
+| Subject Level → 📤 Submit Seed Connectivity | Submit seed-based maps; pipeline selector + atlas + seed multi-select; 8 connectivity measures |
+| Subject Level → 📤 Submit Network Connectivity | Submit parcel × parcel relmat; pipeline selector + atlas + 8 measures |
+| Group Level → 📤 Submit Group Stats | Submit group stats — **Voxel** kind (GRF/TFCE/FDR) or **Matrix** kind (paired_t_fdr/NBS/TF-NBS) |
 
 ## Subject Data page
 
-**Data QC → 📋 Subject Data** shows and edits the project's `group.csv`.
+**Data QC → 📋 Subject Data** shows and edits the project's `bids/participants.tsv`.
 
 - The table is editable directly in the UI. Click **Save** to write changes back.
-- Use the file uploader to replace or merge a CSV from disk.
-- Subjects present in the BIDS folder but missing from `group.csv` are flagged as "unlabeled" — they are not auto-assigned a group.
+- Use the file uploader to replace or merge a tab-separated TSV from disk.
+- Subjects present in the BIDS folder but missing from `bids/participants.tsv` are flagged as "unlabeled" — they are not auto-assigned a group.
 
 ## fMRI Preprocessing Dashboard
 
@@ -245,15 +249,16 @@ Open **fMRI Analysis → XCP-D Pipeline → Post-XCP-D QC tab**.
 
 After QC approval, open **fMRI Analysis → Subject Level**.
 
-- **Local Measures**: click **Refresh local-measure manifests** to index ALFF, fALFF, and ReHo outputs.
-- **Seed Connectivity**: click **Export atlas-based seed summaries** to compute seed timeseries and connectivity matrices.
+- **Local Measures Coverage**: read-only dashboard — shows ALFF, fALFF, and ReHo coverage (from XCP-D outputs) per subject/session. No jobs are submitted here.
+- **Seed Connectivity**: select pipeline (fc/fc_gsr/ec), atlas, seed(s), and measures; click **Submit** to run `compute_seed_connectivity_xcpd.py`.
+- **Network Connectivity**: select pipeline, atlas, and measures; submits `compute_network_connectivity_xcpd.py`.
 
 ## Where the app keeps state
 
 | Path | Contents |
 |---|---|
 | `~/neuconn_projects/<project>.yaml` | User/project config and path overrides |
-| `<bids parent>/qc_status.json` | QC decisions (pass/fail per scan) |
+| `<bids parent>/derivatives/qc/qc_status.json` | QC decisions (pass/fail per scan; legacy fallback: `<bids parent>/qc_status.json`) |
 | `<bids parent>/.neuconn/xcpd_pipeline_state.json` | Pipeline step statuses, gate approvals, run metadata |
 | `sibling bids_excluded/` | Excluded scans (original structure preserved) |
 | `<bids>/derivatives/qc_images/` | QC image cache |

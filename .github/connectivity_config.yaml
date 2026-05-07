@@ -1,0 +1,568 @@
+# ============================================================================
+# Connectivity Analysis Configuration
+# ============================================================================
+# This file defines valid atlas-seed combinations, preprocessing parameters,
+# HPC job specifications, and output structure for the longevity study
+# connectivity analysis pipeline.
+#
+# Purpose: Prevent combinatorial explosion (12 seeds × multiple atlases)
+#          and ensure consistent, reproducible analysis across the project
+# ============================================================================
+
+# ============================================================================
+# ATLASES: Definition of available brain atlases for connectivity analysis
+# ============================================================================
+atlases:
+  DiFuMo256:
+    name: "Deterministic Functional Unit Mapping - 256 Components"
+    n_components: 256
+    space: MNI152NLin2009cAsym
+    resolution_mm: 2
+    description: "Resting-state ICA components, excellent for network connectivity"
+    reference: "Dadi et al. (2020) NeuroImage"
+    filepath: "atlases/difumo_atlases/maps_256.nii.gz"
+    probability_maps: "atlases/difumo_atlases/maps_256_prob.nii.gz"
+    
+  Schaefer400:
+    name: "Schaefer 2018 - 400 Parcels"
+    n_rois: 400
+    networks: 7  # Yeo network decomposition
+    space: MNI152NLin2009cAsym
+    resolution_mm: 2
+    description: "Large-scale networks, suitable for between-network analysis"
+    reference: "Schaefer et al. (2018) Cerebral Cortex"
+    filepath: "atlases/schaefer_atlases/Schaefer2018_400Parcels_7Networks_order_FSLMNI152_2mm.nii.gz"
+
+# ============================================================================
+# SEEDS: Definition of 17 priority seed regions for connectivity analysis
+# ============================================================================
+seeds:
+  # Salience Network (3 seeds)
+  Anterior_Insula:
+    region: "Anterior Insula (bilateral)"
+    description: "Core salience network hub, key for interoception and task switching"
+    coordinates_mni: [-36, 21, 2]  # Peak from DiFuMo components
+    radius_mm: 8
+    brain_regions: ["Insula_Anterior"]
+    networks: ["Salience"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "DiFuMo components 12, 134"
+
+  dACC:
+    region: "Dorsal Anterior Cingulate Cortex"
+    description: "Salience network hub, emotion regulation and conflict monitoring"
+    coordinates_mni: [2, 25, 30]
+    radius_mm: 8
+    brain_regions: ["Cingulate_Anterior_Dorsal"]
+    networks: ["Salience"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "DiFuMo component 96"
+
+  Insula_dACC_Combined:
+    region: "Salience Network (Insula + dACC combined)"
+    description: "Full salience network hub for network-to-network analysis"
+    coordinates_mni: [-15, 20, 15]
+    radius_mm: 10
+    brain_regions: ["Insula_Anterior", "Cingulate_Anterior_Dorsal"]
+    networks: ["Salience"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Meta-seed combining insula and dACC for network analysis"
+
+  # Medial Temporal Lobe (3 seeds)
+  Hippocampus:
+    region: "Hippocampus (bilateral unified)"
+    description: "Memory system, longitudinal change marker"
+    coordinates_mni: [-26, -18, -12]
+    radius_mm: 10
+    brain_regions: ["Hippocampus"]
+    networks: ["DefaultMode"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Combined L/R for whole hippocampus analysis"
+
+  Hippocampus_Anterior:
+    region: "Anterior Hippocampus"
+    description: "Anterior portion of hippocampus, memory encoding"
+    coordinates_mni: [-26, -10, -20]
+    radius_mm: 8
+    brain_regions: ["Hippocampus_Anterior"]
+    networks: ["DefaultMode"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Anterior segment for fine-grained temporal analysis"
+
+  Hippocampus_Posterior:
+    region: "Posterior Hippocampus"
+    description: "Posterior portion of hippocampus, spatial navigation"
+    coordinates_mni: [-26, -28, -8]
+    radius_mm: 8
+    brain_regions: ["Hippocampus_Posterior"]
+    networks: ["DefaultMode"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Posterior segment for spatial cognition analysis"
+
+  # Cerebellar Cognitive (3 seeds)
+  Cerebellar_Cognitive_L:
+    region: "Cerebellar Cognitive Network - Left"
+    description: "Left cerebellar hemisphere, cognitive function support"
+    coordinates_mni: [-20, -60, -30]
+    radius_mm: 10
+    brain_regions: ["Cerebellum_Cognitive_Left"]
+    networks: ["Cerebellar"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "DiFuMo components 184, 188"
+
+  Cerebellar_Cognitive_R:
+    region: "Cerebellar Cognitive Network - Right"
+    description: "Right cerebellar hemisphere, cognitive function support"
+    coordinates_mni: [20, -60, -30]
+    radius_mm: 10
+    brain_regions: ["Cerebellum_Cognitive_Right"]
+    networks: ["Cerebellar"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "DiFuMo components 190, 197"
+
+  Cerebellar_Cognitive_Bilateral:
+    region: "Cerebellar Cognitive Network (bilateral)"
+    description: "Both cerebellar hemispheres, whole cerebellum analysis"
+    coordinates_mni: [0, -60, -30]
+    radius_mm: 12
+    brain_regions: ["Cerebellum_Cognitive"]
+    networks: ["Cerebellar"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Combined L/R for bilateral cerebellar analysis"
+
+  # Motor & Sensorimotor (2 seeds)
+  Cerebellar_Motor:
+    region: "Motor Cerebellum"
+    description: "Motor cerebellar regions, movement control"
+    coordinates_mni: [-20, -65, -25]
+    radius_mm: 10
+    brain_regions: ["Cerebellum_Motor"]
+    networks: ["Motor"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "DiFuMo components 198, 222, 227"
+
+  Motor_Cortex:
+    region: "Primary Motor Cortex"
+    description: "Motor network hub, movement planning and execution"
+    coordinates_mni: [-37, -22, 58]
+    radius_mm: 8
+    brain_regions: ["Motor_Primary"]
+    networks: ["Motor"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "DiFuMo components 40, 156"
+
+  # Cerebellar Vestibular (1 seed)
+  Cerebellar_Vestibular:
+    region: "Cerebellar Vestibular Network"
+    description: "Balance and spatial orientation"
+    coordinates_mni: [8, -50, -20]
+    radius_mm: 10
+    brain_regions: ["Cerebellum_Vestibular"]
+    networks: ["Cerebellar"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "DiFuMo components 223, 228"
+
+  # Network Meta-seeds (2 seeds)
+  Default_Mode:
+    region: "Default Mode Network Hub"
+    description: "Core nodes of DMN: mPFC, PCC, bilateral TPJ"
+    coordinates_mni: [-2, -52, 26]  # PCC
+    radius_mm: 12
+    brain_regions: ["Cingulate_Posterior", "Precuneus", "mPFC", "TPJ"]
+    networks: ["DefaultMode"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Meta-seed for DMN, useful for DMN-other network analysis"
+
+  Frontoparietal_Control:
+    region: "Frontoparietal Control Network"
+    description: "Task-positive network: dlPFC, posterior parietal cortex"
+    coordinates_mni: [-46, 16, 32]  # dlPFC
+    radius_mm: 10
+    brain_regions: ["dlPFC", "PPC_Posterior"]
+    networks: ["Frontoparietal"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Meta-seed for FPN, key executive control network"
+
+  # Prefrontal Cortex Variants (3 seeds)
+  DLPFC_Coarse:
+    region: "Dorsolateral Prefrontal Cortex (coarse, unified)"
+    description: "Combined dlPFC for executive function analysis"
+    coordinates_mni: [-44, 26, 30]
+    radius_mm: 10
+    brain_regions: ["dlPFC"]
+    networks: ["Frontoparietal"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "DiFuMo components 7, 87, 161"
+
+  DLPFC_Dorsal:
+    region: "Dorsal dlPFC"
+    description: "Dorsal portion, working memory and cognitive control"
+    coordinates_mni: [-44, 20, 36]
+    radius_mm: 8
+    brain_regions: ["dlPFC_Dorsal"]
+    networks: ["Frontoparietal"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Anatomically refined dorsal dlPFC"
+
+  DLPFC_Ventral:
+    region: "Ventral dlPFC"
+    description: "Ventral portion, semantic and retrieval control"
+    coordinates_mni: [-44, 32, 24]
+    radius_mm: 8
+    brain_regions: ["dlPFC_Ventral", "IFG"]
+    networks: ["Frontoparietal"]
+    valid_atlases: [DiFuMo256, Schaefer400]
+    notes: "Anatomically refined ventral dlPFC"
+
+# ============================================================================
+# VALID COMBINATIONS: Which atlas-seed pairs are allowed
+# ============================================================================
+valid_combinations:
+  # All seeds work with both main atlases (no restrictions)
+  universal_seeds:
+    - Anterior_Insula
+    - dACC
+    - Insula_dACC_Combined
+    - Hippocampus
+    - Hippocampus_Anterior
+    - Hippocampus_Posterior
+    - Cerebellar_Cognitive_L
+    - Cerebellar_Cognitive_R
+    - Cerebellar_Cognitive_Bilateral
+    - Cerebellar_Motor
+    - Motor_Cortex
+    - Cerebellar_Vestibular
+    - Default_Mode
+    - Frontoparietal_Control
+    - DLPFC_Coarse
+    - DLPFC_Dorsal
+    - DLPFC_Ventral
+
+  # Seeds specific to DiFuMo (if any future restrictions apply)
+  difumo_only: []
+
+  # Seeds specific to Schaefer (if any future restrictions apply)
+  schaefer_only: []
+
+# ============================================================================
+# PREPROCESSING: Standard parameters for connectivity analysis
+# ============================================================================
+# NOTE: When using XCP-D-denoised timeseries, confound regression is ALREADY
+# handled by XCP-D.  Do NOT re-regress motion/confound parameters in
+# subsequent seed-based or network connectivity analyses.  The parameters
+# below are retained for reference and for non-XCP-D legacy pipelines only.
+preprocessing:
+  high_pass_hz: 0.01          # 0.01 Hz high-pass filter (100s cutoff)
+  low_pass_hz: 0.1            # 0.1 Hz low-pass filter (10s cutoff)
+  smoothing_fwhm_mm: 6.0      # 6mm FWHM Gaussian kernel
+  tr_s: 0.8                   # Repetition time (from acquisition)
+  volumes_expected: 480       # Expected timepoints per run (480 vol × 0.8s = 384s = 6.4 min)
+  xcpd_confounds_handled: true  # XCP-D already regresses confounds
+
+  # Brain mask for all voxelwise analyses (reduces computation)
+  brain_mask: "atlases/MNI152NLin2009cAsym_res-02_desc-brain_mask_dilated.nii.gz"
+  
+  # Legacy confound regression (for non-XCP-D pipelines ONLY)
+  motion_regression:
+    enabled: false             # Disabled: XCP-D handles this
+    model: "24"               # 24-parameter Friston model (6 + derivatives + squares)
+    
+  confound_regression:
+    enabled: false             # Disabled: XCP-D handles this
+    models:
+      - "trans_x"
+      - "trans_y"
+      - "trans_z"
+      - "rot_x"
+      - "rot_y"
+      - "rot_z"
+      - "trans_x_derivative1"
+      - "trans_y_derivative1"
+      - "trans_z_derivative1"
+      - "rot_x_derivative1"
+      - "rot_y_derivative1"
+      - "rot_z_derivative1"
+      - "trans_x_power2"
+      - "trans_y_power2"
+      - "trans_z_power2"
+      - "rot_x_power2"
+      - "rot_y_power2"
+      - "rot_z_power2"
+
+# ============================================================================
+# HPC: Job submission parameters for SLURM array jobs
+# ============================================================================
+hpc:
+  # Session-level (subject × seed × session)
+  session_level:
+    job_array_limit: 100       # Max parallel array jobs
+    cpus_per_task: 4           # Cores per seed analysis
+    mem_per_seed: "16G"        # RAM per seed
+    time_limit_hours: 6        # 6 hours per seed
+    partition: "cpu-long"      # Default partition
+    job_name_prefix: "seed"
+    qos: null                  # Quality of service (null = default)
+    
+    # Parallelization strategy
+    n_workers_per_seed: 4      # joblib n_jobs for within-seed parallelization
+    backend: "loky"            # joblib backend
+
+  # Group-level (atlas × seed, no subject)
+  group_level:
+    job_array_limit: 50
+    cpus_per_task: 8
+    mem_per_seed: "32G"
+    time_limit_hours: 8
+    partition: "cpu-long"
+    job_name_prefix: "group"
+    n_permutations: 5000       # Number of permutations for group statistics
+    
+    # FSL-based permutation statistics
+    fsl_randomise:
+      enabled: true
+      n_permutations: 5000
+      
+  # Logging and monitoring
+  logging:
+    log_dir: "logs"
+    archive_after_days: 30
+
+# ============================================================================
+# OUTPUT: Directory structure and naming conventions
+# ============================================================================
+# All outputs organized by: pipeline → atlas → seed (or network)
+# pipeline = XCP-D variant: fc, fc_gsr, ec
+output:
+  # Root for all connectivity derivatives
+  derivative_root: "derivatives/connectivity"
+  
+  # Subject-level outputs
+  subject_level:
+    seed_based:
+      # Pattern: derivatives/connectivity/{pipeline}/{atlas}/{seed}/sub-{id}/ses-{ses}/
+      pattern: "{derivative_root}/{pipeline}/{atlas_name}/{seed_name}/sub-{subject_id}/ses-{session}/"
+      files:
+        - "*_zmap.nii.gz"         # Fisher z-transformed correlation map
+        - "*_mask.nii.gz"         # Seed mask used
+        - "metadata.json"         # Processing parameters
+        
+    local_measures:
+      pattern: "{derivative_root}/{pipeline}/local_measures/sub-{subject_id}/ses-{session}/"
+      files:
+        - "*_falff.nii.gz"
+        - "*_reho.nii.gz"
+        - "*_degree.nii.gz"
+        - "*_betweenness.nii.gz"
+        - "*_eigenvector.nii.gz"
+        
+    network_connectivity:
+      # Networks defined by atlas parcellations (not individual seeds)
+      pattern: "{derivative_root}/{pipeline}/{atlas_name}/network/sub-{subject_id}/ses-{session}/"
+      files:
+        - "connectivity_matrix.h5"     # Full ROI×ROI matrix + timeseries
+        - "network_stats.csv"          # Network-level summary statistics
+
+  # Group-level outputs
+  group_level:
+    seed_based:
+      pattern: "{derivative_root}/{pipeline}/{atlas_name}/{seed_name}/group/"
+      files:
+        - "design.mat"                        # FSL design matrix
+        - "design.con"                        # Contrasts
+        - "design.grp"                        # Exchangeability blocks
+        - "mask.nii.gz"                       # Dilated MNI brain mask
+        - "cope1_tstat.nii.gz"                # T-statistic map
+        - "cope1_tfce_corrp_tstat.nii.gz"     # TFCE corrected p-values
+        
+    local_measures:
+      pattern: "{derivative_root}/{pipeline}/local_measures/group/"
+      files:
+        - "*_group_tstat.nii.gz"
+        - "*_group_tfce_corrp.nii.gz"
+        
+    network_connectivity:
+      pattern: "{derivative_root}/{pipeline}/{atlas_name}/network/group/"
+      files:
+        - "group_matrix.h5"                   # Group connectivity matrices
+        - "group_stats.csv"                   # Statistical comparisons
+
+  # Manifest and tracking
+  manifest:
+    filename: ".manifest.json"
+    location: "{derivative_root}/{pipeline}/"
+    track_fields:
+      - subject_id
+      - session
+      - seed
+      - atlas
+      - pipeline
+      - processing_date
+      - status
+      - output_files
+      - file_sizes_mb
+
+# ============================================================================
+# ANALYSIS: Specific analysis type configurations
+# ============================================================================
+analysis:
+  # Seed-based connectivity (primary analysis)
+  seed_based:
+    description: "Voxelwise seed-based connectivity (correlation with seed timeseries)"
+    method: "pearson_correlation"
+    output_statistic: "zmap"          # Fisher z-transformed correlation
+    threshold_fdr: 0.05
+    threshold_uncorrected: 0.001
+    
+  # Network connectivity (secondary analysis)
+  network_connectivity:
+    description: "Between-network functional connectivity"
+    method: "network_correlation"
+    output_statistic: "correlation"
+    
+  # Local measures (tertiary analysis)
+  local_measures:
+    description: "Graph properties at each voxel (degree, betweenness)"
+    methods:
+      - "degree_centrality"
+      - "betweenness_centrality"
+      - "eigenvector_centrality"
+
+# ============================================================================
+# VALIDATION: Data integrity and completeness checks
+# ============================================================================
+validation:
+  # Minimum subject completion threshold
+  min_subjects_complete_percent: 80  # Fail if <80% of subjects complete
+  
+  # Integrity checks to perform
+  integrity_checks:
+    - "no_nan"                        # No NaN values in output
+    - "no_inf"                        # No infinite values
+    - "correct_shape"                 # Output dimensions match expected
+    - "correct_space"                 # Output in MNI space (check affine)
+    - "value_range"                   # Z-scores in reasonable range [-6, 6]
+    
+  # Manifest tracking
+  manifest_file: ".manifest.json"
+  manifest_required_fields:
+    - subject_id
+    - session
+    - seed
+    - atlas
+    - status
+    - output_files
+
+  # Quality metrics to track
+  quality_metrics:
+    - "mean_fd"                       # Mean framewise displacement
+    - "n_volumes_censored"            # Number of frames flagged for motion
+    - "signal_to_noise_ratio"         # SNR of seed timeseries
+    - "output_file_size_mb"           # Output map size (detect incomplete files)
+
+# ============================================================================
+# METADATA: Study-specific parameters
+# ============================================================================
+metadata:
+  study_name: "Longevity Walking Intervention Study"
+  study_id: "longevity"
+  institution: "Hong Kong Baptist University"
+  scanner: "Siemens MAGNETOM Prisma 3T"
+  
+  # Population
+  n_subjects: 44
+  n_longitudinal: 40              # Two sessions each
+  n_sessions_per_subject: 2
+  total_sessions: 88              # Approximately
+  
+  # Acquisition
+  acquisition:
+    task: "resting-state"
+    t1w_resolution_mm: 0.9
+    t1w_runs: 2
+    fmri_space: "MNI152NLin2009cAsym"
+    fmri_resolution_mm: 2
+    expected_volumes_per_run: 480
+    expected_duration_minutes: 6.4
+
+# ============================================================================
+# QUALITY CONTROL: QC thresholds and flags
+# ============================================================================
+quality_control:
+  motion_thresholds:
+    fd_mean_max: 0.5              # Framewise displacement (mm)
+    fd_spike_threshold: 2.0       # Transient motion (mm)
+    
+  signal_quality:
+    tsnr_min: 20                  # Minimum temporal SNR for seed
+    
+  # Automatic exclusion/flagging
+  auto_exclude:
+    fd_mean_exceeds: 0.5
+    missing_anatomical: true
+    processing_failed: true
+    
+  # Warnings (don't exclude but flag for review)
+  auto_warn:
+    fd_mean_exceeds: 0.3
+    incomplete_timeseries: true
+    unusual_artifact_pattern: true
+
+# ============================================================================
+# LOCAL MEASURES: fALFF and ReHo computation parameters
+# ============================================================================
+local_measures:
+  description: "Session-level voxelwise measures (fALFF and ReHo)"
+  
+  fALFF:
+    enabled: true
+    description: "Fractional Amplitude of Low-Frequency Fluctuations"
+    reference: "Zou et al. (2008) NeuroImage"
+    parameters:
+      low_freq_hz: 0.01           # Hz (lower bound of low-frequency band)
+      high_freq_hz: 0.1           # Hz (upper bound of low-frequency band)
+      power_calc_freq_max_hz: 0.5 # Hz (upper bound for total power calculation)
+      
+  ReHo:
+    enabled: true
+    description: "Regional Homogeneity using Kendall's W coefficient of concordance"
+    reference: "Zang et al. (2004) NeuroImage"
+    parameters:
+      neighborhood_type: "faces_edges_corners"  # 26 neighbors (3×3×3 cube)
+      # Alternative: "faces" (6 neighbors), "faces_edges" (18 neighbors)
+  
+  preprocessing:
+    confound_regression_strategy: "basic"  # "basic" = 6 motion + CSF + WM
+    detrending: true
+    standardize: false              # Don't standardize before filtering
+    bandpass_filter_type: "butterworth"
+    filter_order: 4
+    
+  output:
+    output_dir: "results/local_measures"
+    filename_pattern: "sub-{subject}_ses-{session}_{measure}.nii.gz"
+    save_log: true
+    log_pattern: "sub-{subject}_ses-{session}_local_measures.log"
+    save_summary: true
+    summary_pattern: "local_measures_summary.csv"
+
+# ============================================================================
+# REFERENCES: Citation and documentation links
+# ============================================================================
+references:
+  atlases:
+    difumo:
+      paper: "Dadi et al. (2020). A fine-grained parcellation of the brain's functional organization. NeuroImage."
+      url: "https://doi.org/10.1016/j.neuroimage.2020.117126"
+      
+    schaefer:
+      paper: "Schaefer et al. (2018). Local-global parcellation of the human cerebral cortex. Cerebral Cortex."
+      url: "https://doi.org/10.1093/cercor/bhx179"
+      
+  methods:
+    fmriprep:
+      paper: "Esteban et al. (2019). fMRIPrep: a robust preprocessing pipeline for functional MRI. Nature Methods."
+      url: "https://doi.org/10.1038/s41592-018-0235-4"
+      
+    seed_connectivity:
+      paper: "Cole et al. (2016). The Functional Organization of the Inferior Frontal Cortex. Neuron."
+      url: "https://doi.org/10.1016/j.neuron.2015.12.033"

@@ -16,10 +16,9 @@ from utils.roi_config import load_roi_config, seed_rois
 
 ARTIFACT_PATTERNS = {
     "timeseries": "**/*timeseries*.tsv",
-    "connectome": "**/*connectome*.tsv",
-    "alff": "**/*_alff.nii.gz",
-    "falff": "**/*_falff.nii.gz",
-    "reho": "**/*_reho.nii.gz",
+    "connectome": "**/*pearsoncorrelation_relmat*.tsv",  # ✅ Fixed: XCP-D generates pearsoncorrelation_relmat files
+    "alff": "**/*_stat-alff_boldmap.nii.gz",
+    "reho": "**/*_stat-reho_boldmap.nii.gz",
     "exec_report": "**/*exec_report*.html",
 }
 
@@ -69,7 +68,7 @@ def refresh_subject_level_fc(config: Dict[str, Any]) -> Dict[str, Any]:
     timeseries = artifacts[artifacts["artifact_type"] == "timeseries"].copy()
     connectomes = artifacts[artifacts["artifact_type"] == "connectome"].copy()
     local_measures = artifacts[
-        artifacts["artifact_type"].isin(["alff", "falff", "reho"])
+        artifacts["artifact_type"].isin(["alff", "reho"])
     ].copy()
 
     timeseries_path = manifest_dir / "timeseries_manifest.csv"

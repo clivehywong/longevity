@@ -119,7 +119,7 @@ section "Step 2: Preparing Metadata"
 log "Combining group assignments with fMRIPrep confounds..."
 python3 "${SCRIPT_DIR}/prepare_metadata.py" \
     --fmriprep "$FMRIPREP_DIR" \
-    --group "${PROJECT_DIR}/group.csv" \
+    --group "${PROJECT_DIR}/bids/participants.tsv" \
     --output "${RESULTS_DIR}/metadata.csv"
 
 if [ $? -ne 0 ]; then

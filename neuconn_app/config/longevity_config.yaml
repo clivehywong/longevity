@@ -43,11 +43,11 @@ hpc:
   remote_paths:
     base: "/home/clivewong/proj/long"
     bids: "${base}/bids"
-    fmriprep: "${base}/derivatives/func/preprocessing/fmriprep"
+    fmriprep: "${base}/derivatives/preprocessing/fmriprep"
     legacy_fmriprep: "${base}/fmriprep"
-    xcpd_fc: "${base}/derivatives/func/preprocessing/xcpd/fc"
-    xcpd_fc_gsr: "${base}/derivatives/func/preprocessing/xcpd/fc_gsr"
-    xcpd_ec: "${base}/derivatives/func/preprocessing/xcpd/ec"
+    xcpd_fc: "${base}/derivatives/preprocessing/xcpd/fc"
+    xcpd_fc_gsr: "${base}/derivatives/preprocessing/xcpd/fc_gsr"
+    xcpd_ec: "${base}/derivatives/preprocessing/xcpd/ec"
     work: "${base}/work"
   singularity_images:
     fmriprep: "/home/clivewong/software/fmriprep-25.1.4.simg"

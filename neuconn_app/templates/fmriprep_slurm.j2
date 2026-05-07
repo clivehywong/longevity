@@ -73,15 +73,29 @@ singularity run --cleanenv \
 
 EXIT_CODE=$?
 
-# fMRIPrep may exit non-zero due to Sentry cleanup or other non-fatal issues.
-# Only treat as success if the HTML report AND expected confounds outputs exist.
+# fMRIPrep may exit non-zero due to --resource-monitor Nipype cleanup issues
+# even after printing "finished successfully!".  Only override the exit code
+# when the *final* outputs exist — confounds are generated mid-pipeline and
+# their presence alone does NOT confirm the run completed.
+#
+# Required for a complete NIfTI run:
+#   1. HTML report
+#   2. At least one *desc-preproc_bold.nii.gz (MNI-space normalised BOLD)
+#   3. MNI-space brain mask in anat/ (confirms anatomy normalisation finished)
 REPORT_FILE="${OUT_DIR}/sub-${SUBID}.html"
-CONFOUNDS_FOUND=$(find "${OUT_DIR}/sub-${SUBID}" -name "*desc-confounds_timeseries.tsv" -type f 2>/dev/null | head -1)
-if [ ${EXIT_CODE} -ne 0 ] && [ -f "${REPORT_FILE}" ] && [ -n "${CONFOUNDS_FOUND}" ]; then
-    echo "WARNING: fMRIPrep exited with code ${EXIT_CODE} but outputs are complete — treating as success"
-    EXIT_CODE=0
-elif [ ${EXIT_CODE} -ne 0 ] && [ -f "${REPORT_FILE}" ] && [ -z "${CONFOUNDS_FOUND}" ]; then
-    echo "ERROR: fMRIPrep exited with code ${EXIT_CODE} and confounds are missing — incomplete run"
+BOLD_FOUND=$(find "${OUT_DIR}/sub-${SUBID}" -name "*desc-preproc_bold.nii.gz" -type f 2>/dev/null | head -1)
+ANAT_MASK_FOUND=$(find "${OUT_DIR}/sub-${SUBID}/anat" -name "*space-MNI152NLin6Asym*desc-brain_mask.nii.gz" -type f 2>/dev/null | head -1)
+
+if [ ${EXIT_CODE} -ne 0 ]; then
+    if [ -f "${REPORT_FILE}" ] && [ -n "${BOLD_FOUND}" ] && [ -n "${ANAT_MASK_FOUND}" ]; then
+        echo "WARNING: fMRIPrep exited with code ${EXIT_CODE} but all required outputs are present — treating as success"
+        EXIT_CODE=0
+    else
+        echo "ERROR: fMRIPrep exited with code ${EXIT_CODE} and outputs are incomplete."
+        [ ! -f "${REPORT_FILE}" ]     && echo "  Missing: HTML report (${REPORT_FILE})"
+        [ -z "${BOLD_FOUND}" ]        && echo "  Missing: *desc-preproc_bold.nii.gz (MNI-space BOLD not written — MNI normalisation may have failed)"
+        [ -z "${ANAT_MASK_FOUND}" ]   && echo "  Missing: MNI anat brain mask"
+    fi
 fi
 
 echo "======================================"

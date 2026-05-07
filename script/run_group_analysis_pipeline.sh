@@ -14,7 +14,7 @@
 #   bash script/run_group_analysis_pipeline.sh \
 #       --subject-level derivatives/connectivity-difumo256-hpc/subject-level \
 #       --metadata derivatives/connectivity-difumo256/participants.tsv \
-#       --group-file group.csv \
+#       --group-file bids/participants.tsv \
 #       --output derivatives/connectivity-difumo256-hpc/group-level \
 #       --report derivatives/connectivity-difumo256-hpc/group_analysis_report.html
 #
@@ -140,7 +140,7 @@ if [[ -z "$SUBJECT_LEVEL" ]] || [[ -z "$METADATA" ]] || [[ -z "$OUTPUT_DIR" ]]; 
     echo "  --output DIR           Output directory for group-level results"
     echo ""
     echo "Optional:"
-    echo "  --group-file FILE      Group assignments CSV (subject_id, group)"
+    echo "  --group-file FILE      Participants TSV / legacy group CSV"
     echo "  --report FILE          HTML report output path"
     echo "  --skip-voxelwise       Skip voxelwise analyses"
     echo "  --skip-network         Skip network connectivity analyses"

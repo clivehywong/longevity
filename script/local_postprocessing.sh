@@ -15,7 +15,7 @@ PROJECT_DIR="/home/clivewong/proj/longevity"
 SUBJECT_LEVEL="${PROJECT_DIR}/derivatives/connectivity-difumo256-hpc/subject-level"
 GROUP_LEVEL="${PROJECT_DIR}/derivatives/connectivity-difumo256-hpc/group-level"
 METADATA="${PROJECT_DIR}/derivatives/connectivity-difumo256-hpc/participants_updated.tsv"
-GROUP_FILE="${PROJECT_DIR}/group.csv"
+GROUP_FILE="${PROJECT_DIR}/bids/participants.tsv"
 REPORT_FILE="${GROUP_LEVEL}/group_analysis_report.html"
 
 echo "================================================================"

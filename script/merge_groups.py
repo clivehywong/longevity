@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from pathlib import Path
 import pandas as pd
 import sys
 
@@ -10,7 +11,10 @@ def merge_group_and_completion(group_file, prepost_file, output_file='completed_
     
     # Read the files
     print(f"Reading {group_file}...")
-    groups_df = pd.read_csv(group_file)
+    groups_path = Path(group_file)
+    groups_df = pd.read_csv(groups_path, sep='\t' if groups_path.suffix == '.tsv' else ',')
+    if 'participant_id' in groups_df.columns and 'subject_id' not in groups_df.columns:
+        groups_df.rename(columns={'participant_id': 'subject_id'}, inplace=True)
     
     print(f"Reading {prepost_file}...")
     prepost_df = pd.read_csv(prepost_file)

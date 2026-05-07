@@ -1,0 +1,1 @@
+../../../script/compute_seed_connectivity_xcpd.py

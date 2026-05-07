@@ -395,15 +395,15 @@ def render_xcpd_runs(config: Dict, state: Dict) -> None:
     # Auto-select buttons — each sets session_state then reruns so the multiselect updates
     auto_cols = st.columns(4)
     with auto_cols[0]:
-        if st.button("🎯 FC incomplete", help="Select subjects that have not completed the FC (no-GSR) pipeline"):
+        if st.button("🎯 FC incomplete", help="Select subjects that have complete fMRIPrep outputs (preproc BOLD in MNI space) but have not yet completed the FC (no-GSR) XCP-D pipeline"):
             st.session_state["xcpd_selected_subjects"] = _get_incomplete_xcpd_subjects(config, "fc")
             st.rerun()
     with auto_cols[1]:
-        if st.button("🎯 FC+GSR incomplete", help="Select subjects that have not completed the FC+GSR pipeline"):
+        if st.button("🎯 FC+GSR incomplete", help="Select subjects that have complete fMRIPrep outputs but have not yet completed the FC+GSR pipeline"):
             st.session_state["xcpd_selected_subjects"] = _get_incomplete_xcpd_subjects(config, "fc_gsr")
             st.rerun()
     with auto_cols[2]:
-        if st.button("🎯 EC incomplete", help="Select subjects that have not completed the EC pipeline"):
+        if st.button("🎯 EC incomplete", help="Select subjects that have complete fMRIPrep outputs but have not yet completed the EC pipeline"):
             st.session_state["xcpd_selected_subjects"] = _get_incomplete_xcpd_subjects(config, "ec")
             st.rerun()
     with auto_cols[3]:
